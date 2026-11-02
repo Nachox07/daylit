@@ -1,0 +1,20 @@
+name: build
+on: [push, pull_request]
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: mac/build.sh "$RUNNER_TEMP"
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet publish windows/Daylit.csproj -c Release -o out --nologo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Daylit-windows
+          path: out/

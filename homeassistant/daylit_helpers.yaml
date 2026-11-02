@@ -1,0 +1,56 @@
+# Home Assistant helpers Daylit reads. Add this file as a package
+# (configuration.yaml: homeassistant: packages: daylit: !include daylit_helpers.yaml)
+# or create the same helpers from Settings → Devices & services → Helpers.
+# One set of three levels per monitor; the names must match config.json.
+
+input_boolean:
+  daylit_auto:
+    name: Daylit automatic mode
+    icon: mdi:brightness-auto
+
+input_number:
+  daylit_left_day:
+    name: Left monitor, daytime (blind open)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 70
+  daylit_left_blind_down:
+    name: Left monitor, daytime (blind closed)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 40
+  daylit_left_night:
+    name: Left monitor, night
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 20
+  daylit_right_day:
+    name: Right monitor, daytime (blind open)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 90
+  daylit_right_blind_down:
+    name: Right monitor, daytime (blind closed)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 60
+  daylit_right_night:
+    name: Right monitor, night
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    initial: 30
+
+# Daylit publishes sensor.daylit_left_monitor / sensor.daylit_right_monitor itself
+# (state = applied level, attributes: target, manual, daylight, sun_elevation, blind, lights, source).
