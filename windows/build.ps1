@@ -1,4 +1,4 @@
-# Builds Daylit.exe into %LOCALAPPDATA%\Programs\Daylit (needs the .NET 8 SDK).
+# Builds Daylit.exe into %LOCALAPPDATA%\Programs\Daylit (needs the .NET 10 SDK; running it needs the .NET 10 Desktop Runtime).
 # Plain framework-dependent publish: no single-file or runtime pack, so no NuGet download is needed.
 $ErrorActionPreference = 'Stop'
 $out = Join-Path $env:LOCALAPPDATA 'Programs\Daylit'

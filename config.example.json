@@ -1,29 +1,33 @@
 {
-  "homeAssistantUrl": "http://homeassistant.local:8123",
-  "tokenName": "daylit-home-assistant",
-  "autoSwitch": "input_boolean.daylit_auto",
-  "sun": "sun.sun",
-  "cover": "cover.study_blind",
-  "lights": "light.study",
+  "source": "homeAssistant",
+  "location": { "latitude": 51.5, "longitude": -0.12 },
   "manualHold": 5,
+  "homeAssistant": {
+    "url": "http://homeassistant.local:8123",
+    "tokenName": "daylit-home-assistant",
+    "autoSwitch": "input_boolean.daylit_auto",
+    "sun": "sun.sun",
+    "cover": "cover.study_blind",
+    "lights": "light.study"
+  },
   "monitors": [
     {
       "match": "U2723QE",
       "label": "Left monitor",
       "control": "ddc",
-      "sensor": "sensor.daylit_left_monitor",
-      "day": "input_number.daylit_left_day",
-      "blindDown": "input_number.daylit_left_blind_down",
-      "night": "input_number.daylit_left_night"
+      "day": 70, "blindDown": 40, "night": 20,
+      "homeAssistant": {
+        "sensor": "sensor.daylit_left_monitor",
+        "day": "input_number.daylit_left_day",
+        "blindDown": "input_number.daylit_left_blind_down",
+        "night": "input_number.daylit_left_night"
+      }
     },
     {
       "match": "LG HDR 4K",
       "label": "Right monitor",
       "control": "native",
-      "sensor": "sensor.daylit_right_monitor",
-      "day": "input_number.daylit_right_day",
-      "blindDown": "input_number.daylit_right_blind_down",
-      "night": "input_number.daylit_right_night"
+      "day": 90, "blindDown": 60, "night": 30
     }
   ]
 }
