@@ -202,7 +202,7 @@ enum HAClient {
     static func template(_ ha: HAConfig, _ mons: [Mon]) -> String {
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(100)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
-        let auto = ha.autoSwitch.map { "is_state('\($0)','on') | tojson" } ?? "null"
+        let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
         let m = mons.compactMap { mon -> String? in
             guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil else { return nil }
@@ -212,7 +212,7 @@ enum HAClient {
         {"elev": {{ state_attr('\(ha.sun ?? "sun.sun")','elevation') | float(-10) }},
          "pos": {{ \(pos) }},
          "lights": {{ \(lights) }},
-         "auto": {{ \(auto) }},
+         "auto": \(auto),
          "m": {\(m)}}
         """
     }

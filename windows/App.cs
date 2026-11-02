@@ -273,7 +273,7 @@ sealed class Controller {
         bool here = Win.IdleSeconds() < Config.IdleSeconds;
         if (here && !wasHere) { ForgetHandSet(); foreach (var m in mons) m.Published = null; }
         wasHere = here;
-        UpdateLook(s, haDown || Source == Source.Sun);
+        if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
 
         for (int i = 0; i < mons.Length; i++) {
             var m = mons[i];
