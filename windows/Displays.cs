@@ -136,6 +136,7 @@ sealed class Mon {
     public string Key => D.Key;
     public string Label => !string.IsNullOrWhiteSpace(Spec?.Label) ? Spec!.Label! : D.Friendly != "" ? D.Friendly : D.Gdi.Replace(@"\\.\", "");
     public bool On => Cur != null;
+    public double[]? HaLevels;                 // last [day, blindDown, night] from Home Assistant, for the sun fallback
     public double Day => Spec?.Day ?? Config.DefaultDay;
     public double BlindDown => Spec?.BlindDown ?? Config.DefaultBlindDown;
     public double Night => Spec?.Night ?? Config.DefaultNight;

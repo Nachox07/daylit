@@ -330,11 +330,14 @@ sealed class Controller {
         }
     }
 
+    /// With Home Assistant down, the sun drives the target but the levels and the blind stay the last ones
+    /// Home Assistant gave: a network blip must not swap them for the defaults and move the screens.
     Inputs SunInputs(IReadOnlyList<Mon> mons) {
         var l = Cfg.Location!;
-        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), 100, false, 0, 100,
-                          mons.Select(m => new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null, false);
+        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), lastHaPos ?? 100, false, 0, 100,
+                          mons.Select(m => m.HaLevels ?? new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null, lastHaPos != null);
     }
+    double? lastHaPos;
 
     async Task TickOnce() {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
@@ -376,6 +379,10 @@ sealed class Controller {
             }
         } else s = SunInputs(mons);
         if (!haDown) haDownSince = null;
+        if (!haDown && Source == Source.HomeAssistant && s != null) {
+            for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
+            lastHaPos = s.HasBlind ? s.Pos : null;
+        }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
@@ -424,7 +431,7 @@ sealed class Controller {
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
         Subtitle = !AutoOn ? "Off — sliders and hotkeys only"
                  : !here ? "Paused — this PC is idle"
-                 : haDown ? "Home Assistant unreachable — using the sun · " + where
+                 : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
                  : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat);
     }
