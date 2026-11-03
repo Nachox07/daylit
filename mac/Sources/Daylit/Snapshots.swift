@@ -34,7 +34,10 @@ import DaylitCore
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
-            ("settings", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), height: 1420, locator: Locator()))),
+            ("settings-displays", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
+            ("settings-automatic", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
+            ("settings-homeassistant", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
+            ("settings-app", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
         ]
     }
 

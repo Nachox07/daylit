@@ -37,9 +37,11 @@ static class Snapshots {
             }
             File.WriteAllText(tmp, SettingsJson);
             SettingsWindow.FixedNow = DateTimeOffset.FromUnixTimeSeconds(1_781_870_400);   // 2026-06-19 12:00 UTC
-            var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp);
-            Save(Frame(settings.Detach(), 520, Palette.Solid, 8), Path.Combine(dir, $"settings-{mode}.png"));
-            settings.Close();
+            foreach (var pane in new[] { "displays", "automatic", "homeAssistant", "app" }) {
+                var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp, pane);
+                Save(Frame(settings.Detach(), 860, Palette.Solid, 8), Path.Combine(dir, $"settings-{pane.ToLowerInvariant()}-{mode}.png"));
+                settings.Close();
+            }
             var osd = new Osd();
             Save(Frame(osd.Detach("Studio Display", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
             osd.Close();

@@ -7,6 +7,42 @@ import DaylitCore
 
 enum LocateResult { case success(CLLocationCoordinate2D), failure(String) }
 
+/// A label whose icon has a fixed width, so the texts of a list line up whatever the symbol.
+struct Row: View {
+    let title: String, icon: String
+    init(_ title: String, _ icon: String) { self.title = title; self.icon = icon }
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 20)
+            Text(title)
+        }
+    }
+}
+
+/// A System Settings style icon: a white symbol on a small coloured rounded square.
+struct Tile: View {
+    let icon: String, color: Color
+    var body: some View {
+        Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(color.gradient))
+    }
+}
+
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case displays, automatic, homeAssistant, app
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"; case .app: "App" }
+    }
+    var color: Color {
+        switch self { case .displays: .blue; case .automatic: .orange; case .homeAssistant: .teal; case .app: .gray }
+    }
+    var icon: String {
+        switch self { case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "house"; case .app: "gearshape" }
+    }
+}
+
 /// One "where am I" request. Asks for permission only when the button is clicked; nothing is tracked.
 @MainActor final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -83,98 +119,178 @@ struct SettingsView: View {
     @State private var locating = false
     let close: () -> Void
     var path: URL = Config.path              // snapshots pass a made-up file
-    var height: CGFloat = 620                // snapshots show the whole form
+    var height: CGFloat = 540
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     nonisolated(unsafe) static var fixedNow: Date?
     static var now: Date { fixedNow ?? Date() }
     @ObservedObject var locator: Locator   // made by the caller: CI's older Swift rejects a main-actor @State default
 
+    @State private var pane: SettingsPane? = nil
+    var initialPane: SettingsPane = .displays   // snapshots pick one
+
+    var current: SettingsPane { pane ?? initialPane }
+    var panes: [SettingsPane] { SettingsPane.allCases.filter { $0 != .homeAssistant || source == "homeAssistant" } }
+
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section {
-                    Picker("Brightness follows", selection: $source) {
-                        Text("Nothing (sliders only)").tag("off")
-                        Text("The sun").tag("sun")
-                        Text("Home Assistant").tag("homeAssistant")
-                    }
-                } footer: {
-                    Text(sourceHint).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            List(selection: Binding(get: { current }, set: { pane = $0 })) {
+                ForEach(panes) { p in
+                    Label { Text(p.title) } icon: { Tile(icon: p.icon, color: p.color) }.tag(p)
                 }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(.regularMaterial)
+            .padding(.top, 28)      // below the window buttons
+            .frame(width: 215)
+            .background(.regularMaterial)
+            Divider()
+            VStack(spacing: 0) {
+                Text(current.title).font(.headline).frame(maxWidth: .infinity).frame(height: 28)
+                detail.formStyle(.grouped)
+                footer
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .ignoresSafeArea(edges: .top)
+        .frame(width: 760, height: height)
+        .onAppear(perform: load)
+        .onChange(of: source) { _, s in if s != "homeAssistant" && current == .homeAssistant { pane = .automatic } }
+    }
 
+    @ViewBuilder var detail: some View {
+        switch current {
+        case .displays: displaysPane
+        case .automatic: automaticPane
+        case .homeAssistant: homeAssistantPane
+        case .app: appPane
+        }
+    }
+
+    var footer: some View {
+        HStack(alignment: .firstTextBaseline) {
+            if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout).lineLimit(2) }
+            else if let note { Text(note).font(.callout).foregroundStyle(.secondary).lineLimit(2) }
+            Spacer()
+            Button("Cancel", action: close).keyboardShortcut(.cancelAction)
+            Button("Save", action: save).keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    var displaysPane: some View {
+        Form {
+            if monitors.isEmpty {
                 Section {
-                    TextField("Latitude", text: $lat, prompt: Text("36.72"))
-                    TextField("Longitude", text: $lon, prompt: Text("-4.42"))
-                    HStack {
-                        Button(locating ? "Locating…" : "Locate Me", action: locate).disabled(locating)
-                        Spacer()
-                        if let l = coords { Text(String(format: "Sun now %.1f°", solarElevation(latitude: l.0, longitude: l.1, at: Self.now)))
-                            .font(.caption).foregroundStyle(.secondary) }
-                    }
-                } header: { Text("Location") } footer: {
-                    Text("City level is enough; Daylit saves two decimals (about 1 km) and computes the sun on this Mac.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Label("No external monitor connected. Plug one in to set its levels.", systemImage: "display.trianglebadge.exclamationmark")
+                        .foregroundStyle(.secondary)
                 }
-
-                if source == "homeAssistant" {
-                    Section {
-                        TextField("URL", text: $haURL, prompt: Text("http://homeassistant.local:8123"))
-                        HStack {
-                            Button(testing ? "Testing…" : "Test Connection", action: test).disabled(testing || haURL.isEmpty)
-                            Button("Token…") { TokenWindow.show(m) }
-                            Spacer()
+            }
+            ForEach($monitors) { $d in
+                Section {
+                    TextField("Name", text: $d.label)
+                    level("Day", "sun.max", $d.day)
+                    level("Blind closed", "blinds.horizontal.closed", $d.blindDown)
+                    level("Night", "moon", $d.night)
+                    if let now = rightNow(d) {
+                        LabeledContent("Right now") {
+                            Text("\(now)%").font(.title3.weight(.semibold)).monospacedDigit()
                         }
-                        TextField("Blind (optional)", text: $cover, prompt: Text("cover.office_blind"))
-                        TextField("Lights (optional)", text: $lights, prompt: Text("light.office"))
-                        TextField("Automatic switch (optional)", text: $autoSwitch, prompt: Text("input_boolean.daylit_auto"))
-                        TextField("Sun (optional)", text: $sun, prompt: Text("sun.sun"))
-                    } header: { Text("Home Assistant") } footer: {
-                        Text("Entity ids, as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")
+                    }
+                } header: {
+                    Label(d.name, systemImage: "display")
+                } footer: {
+                    Text(caption(d)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    var automaticPane: some View {
+        Form {
+            Section {
+                Picker("Brightness follows", selection: $source) {
+                    Row("Nothing, sliders only", "slider.horizontal.3").tag("off")
+                    Row("The sun", "sun.max").tag("sun")
+                    Row("Home Assistant", "house").tag("homeAssistant")
+                }
+                .pickerStyle(.inline)
+            } footer: {
+                Text(sourceHint).font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                TextField("Latitude", text: $lat, prompt: Text("36.72"))
+                TextField("Longitude", text: $lon, prompt: Text("-4.42"))
+                HStack {
+                    Button(action: locate) { Label(locating ? "Locating…" : "Locate Me", systemImage: "location") }.disabled(locating)
+                    Spacer()
+                    if let l = coords {
+                        Label(String(format: "Sun now %.1f°", solarElevation(latitude: l.0, longitude: l.1, at: Self.now)), systemImage: "sun.horizon")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-
-                if monitors.isEmpty {
-                    Section("Monitors") {
-                        Text("No external monitor connected. Plug one in to set its levels.").foregroundStyle(.secondary)
-                    }
-                }
-                ForEach($monitors) { $d in
-                    Section {
-                        TextField("Name", text: $d.label)
-                        level("Day", $d.day)
-                        level("Blind closed", $d.blindDown)
-                        level("Night", $d.night)
-                    } header: { Text(d.name) } footer: {
-                        Text(caption(d)).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Section {
-                    Toggle("Light or dark mode from daylight", isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) }))
-                        .disabled(source == "off")
-                    if m.hasBattery {
-                        Toggle("Pause on battery", isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) }))
-                    }
-                    Toggle("Open at login", isOn: Binding(get: { m.login }, set: { m.setLogin($0) }))
-                } header: { Text("App") } footer: {
-                    Text("These apply right away.").font(.caption).foregroundStyle(.secondary)
-                }
+            } header: { Text("Location") } footer: {
+                Text("City level is enough; Daylit saves two decimals (about 1 km) and computes the sun on this Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
-
-            HStack(alignment: .firstTextBaseline) {
-                if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout) }
-                else if let note { Text(note).font(.callout).foregroundStyle(.secondary) }
-                Spacer()
-                Button("Open Config File") { m.openConfig() }
-                Button("Cancel", action: close).keyboardShortcut(.cancelAction)
-                Button("Save", action: save).keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .frame(width: 480, height: height)
-        .onAppear(perform: load)
+    }
+
+    var homeAssistantPane: some View {
+        Form {
+            Section {
+                TextField("URL", text: $haURL, prompt: Text("http://homeassistant.local:8123"))
+                HStack {
+                    Button(action: test) { Label(testing ? "Testing…" : "Test Connection", systemImage: "antenna.radiowaves.left.and.right") }
+                        .disabled(testing || haURL.isEmpty)
+                    Button { TokenWindow.show(m) } label: { Label("Token…", systemImage: "key") }
+                    Spacer()
+                }
+            } header: { Text("Connection") }
+            Section {
+                entity("Blind", "blinds.vertical.open", $cover, "cover.office_blind")
+                entity("Lights", "lightbulb", $lights, "light.office")
+                entity("Automatic switch", "switch.2", $autoSwitch, "input_boolean.daylit_auto")
+                entity("Sun", "sun.max", $sun, "sun.sun")
+            } header: { Text("Room") } footer: {
+                Text("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    var appPane: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) })) {
+                    Row("Light or dark mode from daylight", "circle.lefthalf.filled")
+                }.disabled(source == "off")
+                if m.hasBattery {
+                    Toggle(isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) })) {
+                        Row("Pause on battery", "battery.50")
+                    }
+                }
+                Toggle(isOn: Binding(get: { m.login }, set: { m.setLogin($0) })) {
+                    Row("Open at login", "power")
+                }
+            } footer: {
+                Text("These apply right away.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                LabeledContent("config.json") {
+                    Button("Open Config File") { m.openConfig() }
+                }
+            } header: { Text("Advanced") } footer: {
+                Text(Config.displayPath + ". Everything in this window is saved there; other keys are kept.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    func entity(_ title: String, _ icon: String, _ v: Binding<String>, _ example: String) -> some View {
+        TextField(text: v, prompt: Text(example)) { Row(title, icon) }
     }
 
     var sourceHint: String {
@@ -185,9 +301,9 @@ struct SettingsView: View {
         }
     }
 
-    func level(_ title: String, _ v: Binding<Double>) -> some View {
+    func level(_ title: String, _ icon: String, _ v: Binding<Double>) -> some View {
         HStack {
-            Text(title).frame(width: 96, alignment: .leading)
+            Row(title, icon).frame(width: 140, alignment: .leading)
             Slider(value: v, in: 0...100).accessibilityLabel(title)
             Text("\(Int(v.wrappedValue.rounded()))%").monospacedDigit().frame(width: 40, alignment: .trailing).foregroundStyle(.secondary)
         }
@@ -200,14 +316,16 @@ struct SettingsView: View {
     }
 
     /// What the levels give right now with the blind open and the lights off: a preview, nothing is set.
+    func rightNow(_ d: MonitorDraft) -> Int? {
+        guard let l = coords else { return nil }
+        return target(day: d.day, blindDown: d.blindDown, night: d.night,
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false)
+    }
+
     func caption(_ d: MonitorDraft) -> String {
-        var s = ""
-        if let l = coords {
-            let t = target(day: d.day, blindDown: d.blindDown, night: d.night, elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false)
-            s = "Right now: \(t)% with the blind open."
-        }
-        if d.haLevels { s += (s.isEmpty ? "" : " ") + "Home Assistant helpers set these levels; these apply only when it cannot be reached." }
-        return s.isEmpty ? "Day with the blind open, day with it closed, and night." : s
+        var s = coords == nil ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save."
+        if d.haLevels { s += " Home Assistant helpers set these levels; these apply only when it cannot be reached." }
+        return s
     }
 
     func load() {
@@ -304,8 +422,9 @@ struct SettingsView: View {
     static func show(_ model: Daylit) {
         StatusController.shared?.close()
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = "Daylit Settings"; w.isReleasedWhenClosed = false
+        w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden   // the pane's own title sits there
         w.contentViewController = NSHostingController(rootView: SettingsView(m: model, close: { window?.close() }, locator: Locator()))
         w.center(); window = w
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in

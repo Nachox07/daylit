@@ -28,13 +28,12 @@ sealed class SettingsWindow : Window {
     readonly TextBox lat = new(), lon = new();
     readonly TextBlock sunNow = Hint("");
     readonly Button locate = new() { Content = "Locate me" };
-    readonly StackPanel haSection = new();
     readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new();
     readonly Button test = new() { Content = "Test connection" };
     CheckBox? lookBox;
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-    readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock caption, bool haLevels)> rows = new();
+    readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock now, TextBlock caption, bool haLevels)> rows = new();
     string? opened;
 
     static readonly (string tag, string text, string hint)[] Sources = [
@@ -48,11 +47,11 @@ sealed class SettingsWindow : Window {
     public static DateTimeOffset? FixedNow;
 
     /// `path` is the config file to edit; snapshots pass a made-up one.
-    public SettingsWindow(Controller app, string? path = null) {
+    public SettingsWindow(Controller app, string? path = null, string? pane = null) {
         this.app = app;
         this.path = path ?? Config.PathName;
         Title = "Daylit settings";
-        Width = 520; Height = 700; MinWidth = 440; MinHeight = 420;
+        Width = 860; Height = 620; MinWidth = 700; MinHeight = 460;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = Palette.Ui; FontSize = 14;
 
@@ -62,19 +61,17 @@ sealed class SettingsWindow : Window {
         locate.Click += async (_, _) => await Locate();
         test.Click += async (_, _) => await Test();
 
-        var body = new StackPanel { Margin = new Thickness(24, 20, 24, 8) };
-        body.Children.Add(Card(null, Field("Brightness follows", source), sourceHint));
-        body.Children.Add(Card("Location", Field("Latitude", lat, "36.72"), Field("Longitude", lon, "-4.42"),
-            Row(locate, sunNow),
-            Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")));
+        // Panes, one per sidebar entry, the same as on the Mac: Displays, Automatic, Home Assistant, App.
+        var displaysPane = Pane(monitors);
+        var automaticPane = Pane(Card(null, Field("Brightness follows", source), sourceHint),
+            Card("Location", Field("Latitude", lat, "36.72"), Field("Longitude", lon, "-4.42"), Row(locate, sunNow),
+                 Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
         token.Click += (_, _) => AskToken();
-        haSection.Children.Add(Card("Home Assistant", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token),
-            Field("Blind (optional)", cover, "cover.office_blind"), Field("Lights (optional)", lights, "light.office"),
-            Field("Automatic switch (optional)", autoSwitch, "input_boolean.daylit_auto"), Field("Sun (optional)", sun, "sun.sun"),
-            Hint("Entity ids, as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")));
-        body.Children.Add(haSection);
-        body.Children.Add(monitors);
+        var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token)),
+            Card("Room", Field("Blind", cover, "cover.office_blind"), Field("Lights", lights, "light.office"),
+                 Field("Automatic switch", autoSwitch, "input_boolean.daylit_auto"), Field("Sun", sun, "sun.sun"),
+                 Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")));
         var look = new CheckBox { Content = "Light or dark mode from daylight", IsChecked = Settings.AutoLook, Margin = new Thickness(0, 2, 0, 2) };
         look.Click += (_, _) => app.SetLook(look.IsChecked == true);
         var pause = new CheckBox { Content = "Pause on battery", IsChecked = app.PauseOnBattery, Margin = new Thickness(0, 2, 0, 2),
@@ -83,27 +80,67 @@ sealed class SettingsWindow : Window {
         var login = new CheckBox { Content = "Open at sign-in", IsChecked = Win.StartsWithWindows, Margin = new Thickness(0, 2, 0, 2) };
         login.Click += (_, _) => Win.StartsWithWindows = login.IsChecked == true;
         lookBox = look;
-        body.Children.Add(Card("App", look, pause, login, Hint("These apply right away.")));
-
         var openFile = new Button { Content = "Open config file" };
         openFile.Click += (_, _) => app.OpenConfig();
+        var appPane = Pane(Card(null, look, pause, login, Hint("These apply right away.")),
+            Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept.")));
+
+        panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));
+        panes.Add(("automatic", "Automatic", "\uE706", Color.FromRgb(0xF7, 0x8C, 0x1E), automaticPane));
+        panes.Add(("homeAssistant", "Home Assistant", "\uE80F", Color.FromRgb(0x18, 0xBC, 0xF2), haPane));
+        panes.Add(("app", "App", "\uE713", Color.FromRgb(0x8A, 0x8A, 0x8A), appPane));
+        foreach (var p in panes) {
+            var item = new ListBoxItem { Tag = p.key, Padding = new Thickness(10, 8, 10, 8), Content = new StackPanel {
+                Orientation = Orientation.Horizontal, Children = {
+                    new TextBlock { Text = p.glyph, FontFamily = Palette.Icons, FontSize = 16, Foreground = new SolidColorBrush(p.color),
+                                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) },
+                    new TextBlock { Text = p.title, VerticalAlignment = VerticalAlignment.Center } } } };
+            System.Windows.Automation.AutomationProperties.SetName(item, p.title);
+            nav.Items.Add(item);
+        }
+        nav.SelectionChanged += (_, _) => ShowPane();
+
         var save = new Button { Content = "Save", IsDefault = true, MinWidth = 90, Margin = new Thickness(8, 0, 0, 0), Style = AccentStyle() };
         save.Click += (_, _) => Save();
         var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 90, Margin = new Thickness(8, 0, 0, 0) };
         cancel.Click += (_, _) => Close();
-        var footer = new Grid { Margin = new Thickness(24, 12, 24, 16) };
+        var footer = new Grid { Margin = new Thickness(32, 12, 32, 16) };
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { openFile, cancel, save } };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { cancel, save } };
         Grid.SetColumn(buttons, 1);
         footer.Children.Add(status); footer.Children.Add(buttons);
 
-        var root = new DockPanel();
-        DockPanel.SetDock(footer, Dock.Bottom);
-        root.Children.Add(footer);
-        root.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var right = new DockPanel();
+        DockPanel.SetDock(footer, Dock.Bottom); DockPanel.SetDock(paneTitle, Dock.Top);
+        right.Children.Add(footer); right.Children.Add(paneTitle); right.Children.Add(paneHost);
+        var sidebar = new Border { Child = nav, Padding = new Thickness(8, 16, 8, 8), Width = 220 };
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        root.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(right, 1);
+        root.Children.Add(sidebar); root.Children.Add(right);
         Content = root;
         Load();
+        nav.SelectedIndex = Math.Max(0, panes.FindIndex(p => p.key == (pane ?? "displays")));
+    }
+
+    readonly ListBox nav = new() { BorderThickness = new Thickness(0), Background = Brushes.Transparent };
+    readonly ContentControl paneHost = new();
+    readonly TextBlock paneTitle = new() { FontSize = 24, FontWeight = FontWeights.SemiBold, Margin = new Thickness(32, 20, 32, 8) };
+    readonly List<(string key, string title, string glyph, Color color, FrameworkElement content)> panes = new();
+
+    static FrameworkElement Pane(params UIElement[] children) {
+        var stack = new StackPanel { Margin = new Thickness(32, 4, 32, 8) };
+        foreach (var c in children) stack.Children.Add(c);
+        return new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    }
+
+    void ShowPane() {
+        if (nav.SelectedItem is not ListBoxItem { Tag: string key }) return;
+        var p = panes.First(x => x.key == key);
+        paneTitle.Text = p.title;
+        paneHost.Content = p.content;
     }
 
     /// Snapshots: the window's content, to render offscreen.
@@ -121,7 +158,14 @@ sealed class SettingsWindow : Window {
         var card = new Border { Child = stack, CornerRadius = new CornerRadius(8), Padding = new Thickness(16, 12, 16, 12),
                                 BorderThickness = new Thickness(1), Background = Palette.Card, BorderBrush = Palette.CardBorder };
         var outer = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
-        if (title != null) outer.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, Margin = new Thickness(2, 0, 0, 8) });
+        if (title != null) {
+            var head = new TextBlock { FontWeight = FontWeights.SemiBold, Margin = new Thickness(2, 0, 0, 8) };
+            if (title.Length > 2 && title[0] >= '\uE000' && title[0] <= '\uF8FF') {   // a Segoe Fluent glyph, then the text
+                head.Inlines.Add(new Run(title[0].ToString()) { FontFamily = Palette.Icons, FontWeight = FontWeights.Normal });
+                head.Inlines.Add(new Run(title[1..]));
+            } else head.Text = title;
+            outer.Children.Add(head);
+        }
         outer.Children.Add(card);
         return outer;
     }
@@ -196,8 +240,15 @@ sealed class SettingsWindow : Window {
             var night = new Slider { Value = spec?.Night ?? Config.DefaultNight };
             var caption = Hint("");
             bool haLevels = spec?.HomeAssistant is { } mh && (mh.Day != null || mh.BlindDown != null || mh.Night != null);
-            rows.Add((m, label, day, blind, night, caption, haLevels));
-            monitors.Children.Add(Card(m.D.Friendly, Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), caption));
+            var now = new TextBlock { FontSize = 20, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+            Typography.SetNumeralAlignment(now, FontNumeralAlignment.Tabular);
+            var nowRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+            nowRow.ColumnDefinitions.Add(new ColumnDefinition());
+            nowRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(now, 1);
+            nowRow.Children.Add(new TextBlock { Text = "Right now", VerticalAlignment = VerticalAlignment.Center }); nowRow.Children.Add(now);
+            rows.Add((m, label, day, blind, night, now, caption, haLevels));
+            monitors.Children.Add(Card("\uE7F4  " + m.D.Friendly, Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), nowRow, caption));
         }
         status.Text = opened != null && ConfigPatch.HasComments(opened) ? "Saving removes the comments in config.json." : "";
         status.Foreground = Palette.Secondary;
@@ -206,7 +257,10 @@ sealed class SettingsWindow : Window {
 
     void SourceChanged() {
         sourceHint.Text = Sources.FirstOrDefault(s => s.tag == SourceTag).hint ?? "";
-        haSection.Visibility = SourceTag == "homeAssistant" ? Visibility.Visible : Visibility.Collapsed;
+        // The Home Assistant pane is listed only for that source.
+        foreach (ListBoxItem item in nav.Items)
+            if (item.Tag as string == "homeAssistant") item.Visibility = SourceTag == "homeAssistant" ? Visibility.Visible : Visibility.Collapsed;
+        if (SourceTag != "homeAssistant" && (nav.SelectedItem as ListBoxItem)?.Tag as string == "homeAssistant") nav.SelectedIndex = 1;
         if (lookBox != null) lookBox.IsEnabled = SourceTag != "off";
         Refresh();
     }
@@ -221,11 +275,10 @@ sealed class SettingsWindow : Window {
         double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
-            var parts = new List<string>();
-            if (elev is double el)
-                parts.Add($"Right now: {Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, Daylit.Sun.Fraction(el))}% with the blind open.");
-            if (r.haLevels) parts.Add("Home Assistant helpers set these levels; these apply only when it cannot be reached.");
-            r.caption.Text = parts.Count > 0 ? string.Join(" ", parts) : "Day with the blind open, day with it closed, and night.";
+            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, Daylit.Sun.Fraction(el))}%" : "–";
+            var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
+            if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
+            r.caption.Text = text;
         }
     }
 
