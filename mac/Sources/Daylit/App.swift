@@ -39,7 +39,7 @@ import AppKit
             self?.item.button?.highlight(false); PanelOpener.visible = false; self?.closedAt = Date()
         }
         panel.setAccessibilityLabel("Daylit")
-        let host = NSHostingController(rootView: Panel(m: model).background(PanelBackground(cornerRadius: 16)))
+        let host = NSHostingController(rootView: Panel(m: model).panelSurface(cornerRadius: 16))
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
         if let b = item.button {
@@ -82,11 +82,26 @@ import AppKit
     func windowDidResize(_ n: Notification) { if panel.isVisible { place() } }   // content grew: keep the top under the item
 }
 
-/// The panel and indicator background. macOS 26 and later: the system's Liquid Glass, like Control
-/// Center, tinted so text behind it never competes with ours. Earlier versions, or Reduce
-/// Transparency: the menu material under an opaque-enough tint.
+/// The panel and indicator surface. macOS 26 and later: the system's Liquid Glass, the same material
+/// Control Center uses (it blurs and lenses what is behind, and follows Reduce Transparency by
+/// itself). Earlier versions: the menu material under an opaque-enough tint.
+extension View {
+    @ViewBuilder func panelSurface(cornerRadius: CGFloat) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26, *), !PanelBackground.plain {
+            self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self.background(PanelBackground(cornerRadius: cornerRadius))
+        }
+        #else
+        self.background(PanelBackground(cornerRadius: cornerRadius))
+        #endif
+    }
+}
+
+/// The surface where Liquid Glass is not available (and in snapshots, which draw a plain window
+/// colour so they are the same on every machine).
 struct PanelBackground: View {
-    /// Snapshots draw a plain window colour: the same on every machine, with or without glass.
     nonisolated(unsafe) static var plain = false
     var cornerRadius: CGFloat
     var body: some View {
@@ -94,8 +109,6 @@ struct PanelBackground: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor))
                 .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
-        } else if Glass.available {
-            Glass(cornerRadius: cornerRadius)
         } else {
             VisualEffect()
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -103,32 +116,6 @@ struct PanelBackground: View {
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
         }
     }
-}
-
-/// NSGlassEffectView (macOS 26). The SDK that has it ships with Swift 6.2, so older toolchains (CI's
-/// macOS 14 runner) compile the fallback only.
-struct Glass: NSViewRepresentable {
-    var cornerRadius: CGFloat
-    static var available: Bool {
-        #if compiler(>=6.2)
-        if #available(macOS 26, *) { return !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency }
-        #endif
-        return false
-    }
-    func makeNSView(context: Context) -> NSView {
-        #if compiler(>=6.2)
-        if #available(macOS 26, *) {
-            let v = NSGlassEffectView()
-            v.style = .regular
-            v.cornerRadius = cornerRadius
-            // A light veil of the window colour: keeps the glass look but text behind stays a blur.
-            v.tintColor = NSColor.windowBackgroundColor.withAlphaComponent(0.55)
-            return v
-        }
-        #endif
-        return NSView()
-    }
-    func updateNSView(_ v: NSView, context: Context) {}
 }
 
 /// Menu material under the window colour: opaque enough that text behind never shows through.

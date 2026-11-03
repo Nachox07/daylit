@@ -240,7 +240,7 @@ struct HUDView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .frame(width: 240, height: 70)
-        .background(PanelBackground(cornerRadius: 18))
+        .panelSurface(cornerRadius: 18)
     }
 }
 
