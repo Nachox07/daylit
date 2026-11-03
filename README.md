@@ -75,21 +75,17 @@ in [`.agents/skills/configure-daylit`](.agents/skills/configure-daylit/SKILL.md)
 
 ```mermaid
 flowchart LR
-    subgraph HA[Home Assistant, optional]
-        S[sun.sun]
-        C[cover: blind]
-        L[light: room]
-        H[input_number levels<br/>input_boolean auto]
-        P[sensor.daylit_* <br/>published by the apps]
+    subgraph IN[What the light is like]
+        SUN[Sun height<br/>from your location]
+        HA[Home Assistant, optional<br/>sun · blind · room lights<br/>your day / blind / night levels]
     end
-    SUN[Sun position from<br/>latitude/longitude] --> M
-    SUN --> W
-    HA -- "POST /api/template<br/>every 30 s (2 min on battery)" --> M[Daylit for macOS]
-    HA -- "POST /api/template<br/>every 30 s (2 min on battery)" --> W[Daylit for Windows]
-    M -- "/api/states" --> P
-    W -- "/api/states" --> P
-    M -- "DisplayServices or DDC/CI (m1ddc)" --> D1[Monitor]
-    W -- "SDR white level (HDR) or DDC/CI" --> D2[Monitor]
+    IN --> R[Same rules on both apps<br/>every 30 s, 2 min on battery]
+    YOU[Slider or keys] --> R
+    R --> T[Target per monitor]
+    T --> D{How to set it}
+    D -- "HDR on" --> N[macOS: system brightness API<br/>Windows: SDR content brightness]
+    D -- "HDR off" --> DDC[DDC/CI over the cable]
+    T -. "optional" .-> P[Sensor back to Home Assistant]
 ```
 
 Every 30 seconds, every 2 minutes on battery (and at once after wake, a display change or opening the panel) each app works out
