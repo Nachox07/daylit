@@ -151,7 +151,7 @@ computer right now, or no token stored yet) and which config entry matched which
 - `mac/`: a Swift package. `Sources/DaylitCore` decisions (pure, tested), `Sources/Daylit` the app.
   Tests: `cd mac && swift test`; build: `mac/build.sh` (0 errors and 0 warnings before pushing). `DAYLIT_CONFIG`
   overrides the config path, `DAYLIT_DEBUG=1` logs to stdout, `DAYLIT_NO_KEYS=1` skips the
-  Accessibility prompt, `DAYLIT_SHOW=panel` and `DAYLIT_APPEARANCE=light|dark` are for screenshots.
+  Accessibility prompt, `DAYLIT_SHOW=panel` and `DAYLIT_APPEARANCE=light|dark` are for screenshots, `DAYLIT_DEMO=1` plays the scripted demo for recordings.
 - UI changes: CI compares offscreen renders of the panel and indicator with the baselines in
   `mac/Tests/Snapshots` and `windows/tests/Snapshots`. An intended change needs re-recorded
   baselines from CI (CONTRIBUTING.md → *UI snapshots*), so the PR shows the image diff.

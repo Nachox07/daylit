@@ -42,6 +42,7 @@ import AppKit
         let host = NSHostingController(rootView: Panel(m: model).panelSurface(cornerRadius: 16))
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
+        roundCorners(host.view, 16)
         if let b = item.button {
             b.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Daylit")
             b.setAccessibilityLabel("Daylit")
@@ -60,6 +61,7 @@ import AppKit
         place()
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { self.panel.invalidateShadow() }   // shadow from the drawn, rounded content
         item.button?.highlight(true)
         PanelOpener.visible = true
     }
@@ -80,6 +82,15 @@ import AppKit
     static let pinned = ProcessInfo.processInfo.environment["DAYLIT_SHOW"] == "panel"
     func windowDidResignKey(_ n: Notification) { if !Self.pinned { close() } }
     func windowDidResize(_ n: Notification) { if panel.isVisible { place() } }   // content grew: keep the top under the item
+}
+
+/// Clips a window's content to its rounded shape, so the window shadow follows the corners instead
+/// of drawing a faint dark square behind them (call invalidateShadow after the first draw).
+@MainActor func roundCorners(_ v: NSView, _ radius: CGFloat) {
+    v.wantsLayer = true
+    v.layer?.cornerRadius = radius
+    v.layer?.cornerCurve = .continuous
+    v.layer?.masksToBounds = true
 }
 
 /// The panel and indicator surface. macOS 26 and later: the system's Liquid Glass, the same material
@@ -147,9 +158,12 @@ struct VisualEffect: View {
     var model: Daylit?
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        Log.write("start: Daylit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+        if !DemoController.enabled { Log.write("start: Daylit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")") }
         if let a = ProcessInfo.processInfo.environment["DAYLIT_APPEARANCE"] {   // screenshots: force light or dark
             NSApp.appearance = NSAppearance(named: a == "dark" ? .darkAqua : .aqua)
+        }
+        if DemoController.enabled {                 // scripted demo for recordings: no real model at all
+            let d = DemoController(); DemoController.shared = d; d.run(); return
         }
         let m = Daylit()
         model = m
@@ -174,7 +188,7 @@ struct VisualEffect: View {
     static func main() {
         if let code = CLI.run(Array(CommandLine.arguments.dropFirst())) { exit(code) }
         let me = ProcessInfo.processInfo.processIdentifier
-        if let id = Bundle.main.bundleIdentifier,
+        if !DemoController.enabled, let id = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != me }) {
             DistributedNotificationCenter.default().postNotificationName(AppDelegate.showNote, object: nil, userInfo: nil, deliverImmediately: true)
             exit(0)

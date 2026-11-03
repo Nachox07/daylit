@@ -114,6 +114,7 @@ macOS environment variables:
 | `DAYLIT_NO_KEYS=1` | skip the Accessibility prompt and the brightness-key tap |
 | `DAYLIT_DEBUG_NO_DISPLAYS=1` | act as if no external monitor were connected (the empty state) |
 | `DAYLIT_SHOW=panel` | open the panel right after start and keep it open (screenshots, recordings) |
+| `DAYLIT_DEMO=1` | scripted demo on made-up monitors for the GIF and videos; touches nothing real (`DAYLIT_DEMO_SCREEN` picks the screen) |
 | `DAYLIT_APPEARANCE=light` / `dark` | force the app's appearance (screenshots) |
 
 Run the binary directly to use them:
@@ -131,22 +132,29 @@ current and never show anyone's setup. Re-recording the snapshots (*Tests → UI
 updates them. To change what they show, edit the scenes in `mac/Sources/Daylit/Snapshots.swift` and
 `windows/Snapshots.cs` (generic monitor names, round levels), then re-record.
 
-### Demo GIF (macOS)
+### Demo GIF and video (macOS)
 
-`docs/demo-{light,dark}.gif` is the panel while a slider is dragged. With `DAYLIT_SHOW=panel` the
-panel stays open while you work in another app, so you can record it:
+`docs/demo-{light,dark}.gif` (and the social videos) come from a scripted demo: `DAYLIT_DEMO=1`
+opens a colourful backdrop with the panel on top and plays a 15 s storyboard on made-up monitors:
+the second monitor slides down alone, the link turns on and both move together keeping their
+offset, the link turns off and the second slides back up alone. It's pure UI: it never touches
+real brightness, Home Assistant or saved settings, and it runs alongside your normal Daylit.
+On macOS 26+ it shows the real Liquid Glass. Use a 2x (Retina) screen so the capture is crisp.
 
 ```sh
-pkill -x Daylit
-DAYLIT_APPEARANCE=light DAYLIT_SHOW=panel ~/Applications/Daylit.app/Contents/MacOS/Daylit &
-sleep 3
-# X,Y,W,H from the window bounds printed by the snippet above
-screencapture -x -v -V 8 -R X,Y,W,H /tmp/demo.mov   # drag a slider during these 8 s
-ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -vf "fps=12,palettegen=max_colors=96:stats_mode=diff" /tmp/pal.png
-ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -i /tmp/pal.png \
-  -lavfi "fps=12[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
-  -loop 0 docs/demo-light.gif
+mac/build.sh /tmp/demo-build
+for m in light dark; do
+  DAYLIT_DEMO=1 DAYLIT_APPEARANCE=$m DAYLIT_DEMO_SCREEN="part of a 2x screen's name" \
+    /tmp/demo-build/Daylit.app/Contents/MacOS/Daylit > /tmp/demo.txt &
+  sleep 1; R=$(grep -o -- '-R[0-9,-]*' /tmp/demo.txt)    # it prints the area to capture
+  screencapture -x -v -V 14 $R /tmp/demo-$m.mov
+  pkill -f demo-build/Daylit.app
+  ffmpeg -i /tmp/demo-$m.mov -vf "crop=800:520:320:145,fps=12,palettegen=max_colors=128:stats_mode=diff" /tmp/pal.png
+  ffmpeg -i /tmp/demo-$m.mov -i /tmp/pal.png \
+    -lavfi "crop=800:520:320:145,fps=12[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
+    -loop 0 docs/demo-$m.gif
+done
 ```
 
-Repeat with `DAYLIT_APPEARANCE=dark`. Keep each GIF under 1 MB (lower `fps` or `max_colors` if not),
-put the slider back where it was, and check a few frames: nothing outside the panel.
+Keep each GIF under 1.5 MB and check a few frames. To change the story, edit `step()` in
+`mac/Sources/Daylit/Demo.swift`.

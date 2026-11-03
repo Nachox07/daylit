@@ -206,9 +206,11 @@ struct Panel: View {
             panel = p; return p
         }()
         p.contentView = NSHostingView(rootView: HUDView(label: label, value: v).frame(width: size.width, height: size.height))
+        if let cv = p.contentView { roundCorners(cv, 18) }
         let f = screen.frame
         p.setFrame(NSRect(x: f.midX - size.width / 2, y: f.minY + f.height * 0.12, width: size.width, height: size.height), display: true)
         p.alphaValue = 1; p.orderFrontRegardless()
+        DispatchQueue.main.async { p.invalidateShadow() }
         hide?.cancel()
         let w = DispatchWorkItem { NSAnimationContext.runAnimationGroup { $0.duration = 0.3; p.animator().alphaValue = 0 } }
         hide = w; DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
