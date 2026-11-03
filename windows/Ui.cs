@@ -89,11 +89,12 @@ sealed class Flyout : Window {
         root.Children.Add(offHint);
 
         auto = new CheckBox { Content = "Automatic brightness" };
-        auto.Click += (_, _) => { if (!syncing) app.SetAuto(auto.IsChecked == true); };
+        // Checked/Unchecked, not Click: UI Automation (Narrator, Voice Access, agents) toggles without a click.
+        OnToggle(auto, on => app.SetAuto(on));
         autoSub = Small("");
         autoSub.Margin = new Thickness(28, 0, 0, 6);
         look = new CheckBox { Content = "Light or dark mode from daylight" };
-        look.Click += (_, _) => { if (!syncing) app.SetLook(look.IsChecked == true); };
+        OnToggle(look, on => app.SetLook(on));
         modeBtn = new Button { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(12, 5, 12, 6) };
         modeBtn.Click += (_, _) => app.ToggleDark();
         autoCard = Card(new StackPanel { Children = { auto, autoSub, look, modeBtn } });
@@ -109,7 +110,7 @@ sealed class Flyout : Window {
         footer.ColumnDefinitions.Add(new ColumnDefinition());
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         login = new CheckBox { Content = "Open at sign-in", VerticalAlignment = VerticalAlignment.Center };
-        login.Click += (_, _) => { if (!syncing) Win.StartsWithWindows = login.IsChecked == true; };
+        OnToggle(login, on => Win.StartsWithWindows = on);
         var quit = new Button { Content = "Quit", Padding = new Thickness(14, 5, 14, 6) };
         quit.Click += (_, _) => app.Quit();
         Grid.SetColumn(quit, 1);
@@ -131,6 +132,11 @@ sealed class Flyout : Window {
                              BorderThickness = new Thickness(1), Background = Palette.Card, BorderBrush = Palette.CardBorder };
         cards.Add(b);
         return b;
+    }
+
+    void OnToggle(CheckBox c, Action<bool> set) {
+        c.Checked += (_, _) => { if (!syncing) set(true); };
+        c.Unchecked += (_, _) => { if (!syncing) set(false); };
     }
 
     void GearMenu(Button anchor) {
