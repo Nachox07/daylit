@@ -96,6 +96,21 @@ reported as a config problem and Home Assistant is not contacted until it is fix
 - Windows: `Ctrl+Alt+PgUp/PgDn`, plus `Shift` for steps of 1.
 - Both: gear menu → *Keyboard shortcuts…* to change them.
 
+## Sync monitors
+
+The *Sync monitors* switch appears in the panel when two or more external monitors are connected.
+When you turn it on, Daylit remembers how far apart they are (say the Dell at 40 % and the other at
+60 %: an offset of −20). From then on:
+
+- Moving one monitor's slider, or using the keys on it, moves the others by the same amount. A
+  monitor that hits 0 or 100 % stops there and lines up again when you come back.
+- In automatic mode the first monitor's own target drives the group, and the others follow with
+  their offsets. Their own day / blind closed / night levels are not used while sync is on.
+- A monitor plugged in later joins at its current offset. A Home Assistant `set` helper still
+  applies to its own monitor only. The built-in Mac screen is never part of the group.
+
+Turn the switch off and on again to capture new offsets.
+
 ## Light and dark mode
 
 Optional, with the sun or Home Assistant source: on by default on Windows, off by default on macOS.

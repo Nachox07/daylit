@@ -346,3 +346,49 @@ final class WriteOnlyTests: XCTestCase {
         XCTAssertTrue(held.manual)
     }
 }
+
+final class SyncTests: XCTestCase {
+    func testCaptureKeepsOffsetsFromTheFirstMonitor() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40), (key: "c", level: 75)])
+        XCTAssertEqual(s.offsets, ["a": 0, "b": -20, "c": 15])
+    }
+
+    func testMovingOneMovesTheOthersBySameAmount() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        XCTAssertEqual(s.follow(key: "a", level: 70, keys: ["a", "b"]), ["b": 50])
+        XCTAssertEqual(s.follow(key: "b", level: 10, keys: ["a", "b"]), ["a": 30])
+    }
+
+    func testClampingDoesNotLoseTheOffset() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        XCTAssertEqual(s.follow(key: "a", level: 10, keys: ["a", "b"]), ["b": 0])     // clamped at 0
+        XCTAssertEqual(s.follow(key: "a", level: 50, keys: ["a", "b"]), ["b": 30])    // back in line
+        XCTAssertEqual(s.follow(key: "b", level: 100, keys: ["a", "b"]), ["a": 100])  // 120 clamped
+    }
+
+    func testAutomaticTargetFromTheLeader() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 45)])
+        XCTAssertEqual(s.targets(leader: "a", leaderTarget: 80, keys: ["a", "b"]), ["a": 80, "b": 65])
+        // The second monitor can lead too (the first one is unplugged): same group, same offsets.
+        XCTAssertEqual(s.targets(leader: "b", leaderTarget: 20, keys: ["b"]), ["b": 20])
+    }
+
+    func testNewMonitorJoinsAtItsCurrentOffset() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        s.adopt([(key: "a", level: 70), (key: "c", level: 50)])
+        XCTAssertEqual(s.offsets["c"], -20)   // base is 70 now
+        XCTAssertEqual(s.offsets["b"], -20)   // unplugged monitor keeps its offset
+    }
+
+    func testGroupStartsAgainWhenNoKnownMonitorIsConnected() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        s.adopt([(key: "x", level: 30), (key: "y", level: 50)])
+        XCTAssertEqual(s.offsets, ["x": 0, "y": 20])
+    }
+
+    func testUnknownMonitorIsIndependent() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60)])
+        XCTAssertEqual(s.follow(key: "z", level: 30, keys: ["a", "z"]), [:])
+        XCTAssertEqual(s.follow(key: "a", level: 30, keys: ["a", "z"]), [:])
+    }
+}

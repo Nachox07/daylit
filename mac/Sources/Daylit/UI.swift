@@ -30,6 +30,12 @@ struct Panel: View {
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(spacing: 8) { ForEach(m.mons.indices, id: \.self) { i in row(i) } }
+                if m.mons.count > 1 {
+                    switchRow("Sync monitors", Binding(get: { m.sync }, set: { m.setSync($0) }), .mini) {
+                        Text("Sync monitors").font(.caption)
+                    }
+                    .help("Moving one monitor moves the others, keeping how much brighter or darker each one is.")
+                }
             }
             if m.builtIn != nil { builtInRow() }
 
@@ -149,7 +155,7 @@ struct Panel: View {
             HStack(spacing: 8) {
                 Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
                 Slider(value: Binding(get: { m.mons.indices.contains(i) ? m.mons[i].level : 0 },
-                                      set: { m.setLevel(i, $0.rounded()) }),
+                                      set: { m.userSet(i, $0.rounded()) }),
                        in: 0...100, onEditingChanged: { m.dragChanged(i, $0) })
                     .controlSize(.small)
                     .accessibilityLabel("\(mon.label) brightness")

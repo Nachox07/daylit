@@ -20,6 +20,12 @@ import DaylitCore
     @Published var onBattery = Power.onBattery
     @Published var lookOn = UserDefaults.standard.bool(forKey: "autoLook")   // off by default on the Mac
     @Published var dark = false
+    /// "Sync monitors": moving one external monitor moves the others, keeping their offsets.
+    @Published var sync = UserDefaults.standard.bool(forKey: "syncMonitors")
+    var syncOffsets: SyncOffsets = {
+        guard let d = UserDefaults.standard.data(forKey: "syncOffsets"), let o = try? JSONDecoder().decode(SyncOffsets.self, from: d) else { return SyncOffsets() }
+        return o
+    }()
     var lookDark: Bool?
     var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
     /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
@@ -144,6 +150,43 @@ import DaylitCore
         if Date().timeIntervalSince(lastTick) >= interval { refresh() }
     }
 
+    /// A level set by hand (slider or keys). With sync on, the other monitors follow with their offsets.
+    func userSet(_ i: Int, _ v: Double) {
+        guard mons.indices.contains(i) else { return }
+        setLevel(i, v)
+        guard sync, mons.count > 1 else { return }
+        adoptSync()
+        let follow = syncOffsets.follow(key: mons[i].uuid, level: Int(v), keys: mons.map(\.uuid))
+        for (j, m) in mons.enumerated() where j != i && m.control != .none && m.readState.usable {
+            if let lv = follow[m.uuid], Int(m.level) != lv { setLevel(j, Double(lv)) }
+        }
+    }
+
+    /// Brings newly connected monitors into the sync group at their current offset.
+    func adoptSync() {
+        let before = syncOffsets
+        syncOffsets.adopt(mons.filter { $0.control != .none }.map { (key: $0.uuid, level: Int($0.level)) })
+        if syncOffsets != before { saveSync() }
+    }
+
+    func saveSync() {
+        if let d = try? JSONEncoder().encode(syncOffsets) { UserDefaults.standard.set(d, forKey: "syncOffsets") }
+    }
+
+    func setSync(_ on: Bool) {
+        sync = on
+        UserDefaults.standard.set(on, forKey: "syncMonitors")
+        if on {
+            // Capture the offsets as they are now: each monitor keeps how much brighter or darker it is.
+            syncOffsets = SyncOffsets(levels: mons.filter { $0.control != .none }.map { (key: $0.uuid, level: Int($0.level)) })
+            saveSync()
+            Log.write("sync: on " + mons.map { "\($0.label) \(syncOffsets.offsets[$0.uuid].map { $0 >= 0 ? "+\($0)" : "\($0)" } ?? "-")" }.joined(separator: ", "))
+        } else {
+            Log.write("sync: off")
+        }
+        refresh()
+    }
+
     func setLevel(_ i: Int, _ v: Double) {
         guard mons.indices.contains(i) else { return }
         mons[i].level = v
@@ -187,7 +230,7 @@ import DaylitCore
     func key(up: Bool, fine: Bool, on id: CGDirectDisplayID) {
         guard let i = mons.firstIndex(where: { $0.id == id }), mons[i].control != .none, mons[i].readState.usable else { return }
         let step = Double(fine ? 1 : 6)
-        setLevel(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
+        userSet(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
         HUD.show(mons[i].label, mons[i].level, on: id)
     }
 
@@ -323,11 +366,20 @@ import DaylitCore
         let sun = daylightFraction(elevation: inp.elev)
         let here = idleSeconds() < Self.idleLimit
         let hold = config.manualHold ?? 5
+        func ownTarget(_ m: Mon) -> Int {
+            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+        }
+        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        var synced: [String: Int] = [:]
+        if sync, mons.count > 1, let li = mons.indices.first(where: { cur[$0] != nil }) {
+            adoptSync()
+            synced = syncOffsets.targets(leader: mons[li].uuid, leaderTarget: ownTarget(mons[li]), keys: mons.map(\.uuid))
+        }
         for i in mons.indices {
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
-            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
-            let want = target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+            let want = synced[m.uuid] ?? ownTarget(m)
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
                               state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen),
                               here: here, auto: auto, dragging: dragging.contains(m.id), hold: hold)

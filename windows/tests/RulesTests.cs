@@ -288,3 +288,58 @@ public class WriteOnlyTests {
         Assert.True(held.Manual);
     }
 }
+
+public class SyncTests {
+    static SyncOffsets Two(int a, int b) => SyncOffsets.Capture(new[] { ("a", a), ("b", b) });
+
+    [Fact]
+    public void CaptureKeepsOffsetsFromTheFirstMonitor() {
+        var s = SyncOffsets.Capture(new[] { ("a", 60), ("b", 40), ("c", 75) });
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 0, ["b"] = -20, ["c"] = 15 }, s.Offsets);
+    }
+
+    [Fact]
+    public void MovingOneMovesTheOthersBySameAmount() {
+        var s = Two(60, 40);
+        Assert.Equal(new Dictionary<string, int> { ["b"] = 50 }, s.Follow("a", 70, new[] { "a", "b" }));
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 30 }, s.Follow("b", 10, new[] { "a", "b" }));
+    }
+
+    [Fact]
+    public void ClampingDoesNotLoseTheOffset() {
+        var s = Two(60, 40);
+        Assert.Equal(0, s.Follow("a", 10, new[] { "a", "b" })["b"]);
+        Assert.Equal(30, s.Follow("a", 50, new[] { "a", "b" })["b"]);
+        Assert.Equal(100, s.Follow("b", 100, new[] { "a", "b" })["a"]);
+    }
+
+    [Fact]
+    public void AutomaticTargetFromTheLeader() {
+        var s = Two(60, 45);
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 80, ["b"] = 65 }, s.Targets("a", 80, new[] { "a", "b" }));
+        Assert.Equal(new Dictionary<string, int> { ["b"] = 20 }, s.Targets("b", 20, new[] { "b" }));
+    }
+
+    [Fact]
+    public void NewMonitorJoinsAtItsCurrentOffset() {
+        var s = Two(60, 40);
+        Assert.True(s.Adopt(new[] { ("a", 70), ("c", 50) }));
+        Assert.Equal(-20, s.Offsets["c"]);
+        Assert.Equal(-20, s.Offsets["b"]);
+        Assert.False(s.Adopt(new[] { ("a", 70), ("c", 50) }));   // nothing new
+    }
+
+    [Fact]
+    public void GroupStartsAgainWhenNoKnownMonitorIsConnected() {
+        var s = Two(60, 40);
+        Assert.True(s.Adopt(new[] { ("x", 30), ("y", 50) }));
+        Assert.Equal(new Dictionary<string, int> { ["x"] = 0, ["y"] = 20 }, s.Offsets);
+    }
+
+    [Fact]
+    public void UnknownMonitorIsIndependent() {
+        var s = SyncOffsets.Capture(new[] { ("a", 60) });
+        Assert.Empty(s.Follow("z", 30, new[] { "a", "z" }));
+        Assert.Empty(s.Follow("a", 30, new[] { "a", "z" }));
+    }
+}

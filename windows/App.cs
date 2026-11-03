@@ -227,7 +227,33 @@ sealed class Controller {
         RegisterShortcuts();
     }
 
-    public void UserSet(Mon m, int v) { m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v); }
+    public void UserSet(Mon m, int v) {
+        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v);
+        if (!Settings.SyncMonitors || Mons.Count < 2) return;
+        // Sync: the other monitors follow with the offsets captured when sync was switched on.
+        AdoptSync();
+        var follow = syncOffsets.Follow(m.Key, v, Mons.Select(x => x.Key));
+        foreach (var o in Mons)
+            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.WriteSoon(lv); }
+        panel.Sync();
+    }
+
+    SyncOffsets syncOffsets = Settings.SyncOffsets;
+    static int LevelOf(Mon m) => m.Cur ?? 50;
+    void AdoptSync() {
+        if (syncOffsets.Adopt(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))).ToList())) Settings.SyncOffsets = syncOffsets;
+    }
+
+    public void SetSync(bool on) {
+        Settings.SyncMonitors = on;
+        if (on) {
+            // Capture the offsets as they are now: each monitor keeps how much brighter or darker it is.
+            syncOffsets = SyncOffsets.Capture(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))));
+            Settings.SyncOffsets = syncOffsets;
+            Log.Write("sync: on " + string.Join(", ", Mons.Select(x => $"{x.Label} {(syncOffsets.Offsets.TryGetValue(x.Key, out var o) ? (o >= 0 ? "+" : "") + o : "-")}")));
+        } else Log.Write("sync: off");
+        _ = Tick("sync");
+    }
 
     public async void SetAuto(bool on) {
         try {
@@ -339,11 +365,17 @@ sealed class Controller {
         wasHere = here;
         if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
 
+        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        var synced = new Dictionary<string, int>();
+        if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null) is int li && li >= 0) {
+            AdoptSync();
+            synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun), mons.Select(x => x.Key));
+        }
         for (int i = 0; i < mons.Length; i++) {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
+            int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
             (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
             bool remote = step.Remote != null;

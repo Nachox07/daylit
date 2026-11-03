@@ -48,7 +48,7 @@ sealed class Flyout : Window {
     readonly Controller app;
     readonly StackPanel rows = new();
     readonly TextBlock offHint, autoSub, hint, error;
-    readonly CheckBox auto, look, pause, login;
+    readonly CheckBox auto, look, pause, login, syncBox;
     readonly Button modeBtn;
     readonly Border autoCard;
     readonly List<Border> cards = new();
@@ -83,6 +83,11 @@ sealed class Flyout : Window {
         root.Children.Add(header);
 
         root.Children.Add(rows);
+
+        syncBox = new CheckBox { Content = "Sync monitors", Margin = new Thickness(2, 0, 2, 10),
+                                 ToolTip = "Moving one monitor moves the others, keeping how much brighter or darker each one is." };
+        OnToggle(syncBox, on => app.SetSync(on));
+        root.Children.Add(syncBox);
 
         offHint = Small("Set a location or Home Assistant in the config file for automatic brightness.");
         offHint.Margin = new Thickness(2, 0, 2, 10);
@@ -224,6 +229,8 @@ sealed class Flyout : Window {
             autoSub.Text = app.Subtitle;
             autoSub.Visibility = app.Subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
             look.IsChecked = Settings.AutoLook;
+            syncBox.IsChecked = Settings.SyncMonitors;
+            syncBox.Visibility = app.Mons.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
             pause.IsChecked = app.PauseOnBattery;
             pause.Visibility = Win.HasBattery ? Visibility.Visible : Visibility.Collapsed;
             modeBtn.Content = Theme.Dark ? "Switch to light mode" : "Switch to dark mode";

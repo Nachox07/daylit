@@ -80,6 +80,18 @@ static class Settings {
         set { if (value is bool v) Set("PauseOnBattery", v); }
     }
 
+    /// "Sync monitors" and the offsets captured when it was switched on (JSON: monitor key → offset).
+    public static bool SyncMonitors { get => Get("SyncMonitors", false); set => Set("SyncMonitors", value); }
+    public static SyncOffsets SyncOffsets {
+        get {
+            try {
+                return Registry.CurrentUser.OpenSubKey(Key)?.GetValue("SyncOffsets") is string j
+                    ? new SyncOffsets { Offsets = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(j) ?? new() } : new SyncOffsets();
+            } catch { return new SyncOffsets(); }
+        }
+        set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SyncOffsets", System.Text.Json.JsonSerializer.Serialize(value.Offsets)); }
+    }
+
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;
     static void SetInt(string name, int v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v, RegistryValueKind.DWord); }
     /// Brightness hotkeys, set from the panel (Keyboard shortcuts…). Shift is added for fine steps.

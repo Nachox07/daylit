@@ -1,6 +1,6 @@
 import Foundation
 
-/// Solar elevation in degrees (same formula as the Windows app; within 0.01° of Home Assistant's sun.sun).
+/// Solar elevation in degrees (same formula as the Windows app; within 0.05° of NOAA's reference values in the tests).
 public func solarElevation(latitude: Double, longitude: Double, at date: Date = Date()) -> Double {
     func rad(_ x: Double) -> Double { x * .pi / 180 }
     func deg(_ x: Double) -> Double { x * 180 / .pi }
