@@ -119,4 +119,6 @@ share their rules and have unit tests that run in CI on every push.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Home Assistant is a trademark of the Open Home Foundation; Daylit is not affiliated
+with it. The Home Assistant icon in the settings window comes from
+[Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache-2.0).

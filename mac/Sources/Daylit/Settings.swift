@@ -13,9 +13,31 @@ struct Row: View {
     init(_ title: String, _ icon: String) { self.title = title; self.icon = icon }
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 20)
+            Glyph(name: icon).foregroundStyle(.secondary).frame(width: icon == "ha" ? 15 : 20, height: icon == "ha" ? 15 : nil).frame(width: 20)
             Text(title)
         }
+    }
+}
+
+/// The Home Assistant logo, from Material Design Icons (`mdi:home-assistant`, Apache-2.0). The name
+/// and logo are trademarks of the Open Home Foundation; Daylit uses them only to name what it connects to.
+enum HALogo {
+    static let path = "M21.8,13H20V21H13V17.67L15.79,14.88L16.5,15C17.66,15 18.6,14.06 18.6,12.9C18.6,11.74 17.66,10.8 16.5,10.8A2.1,2.1 0 0,0 14.4,12.9L14.5,13.61L13,15.13V9.65C13.66,9.29 14.1,8.6 14.1,7.8A2.1,2.1 0 0,0 12,5.7A2.1,2.1 0 0,0 9.9,7.8C9.9,8.6 10.34,9.29 11,9.65V15.13L9.5,13.61L9.6,12.9A2.1,2.1 0 0,0 7.5,10.8A2.1,2.1 0 0,0 5.4,12.9A2.1,2.1 0 0,0 7.5,15L8.21,14.88L11,17.67V21H4V13H2.25C1.83,13 1.42,13 1.42,12.79C1.43,12.57 1.85,12.15 2.28,11.72L11,3C11.33,2.67 11.67,2.33 12,2.33C12.33,2.33 12.67,2.67 13,3L17,7V6H19V9L21.78,11.78C22.18,12.18 22.59,12.59 22.6,12.8C22.6,13 22.2,13 21.8,13M7.5,12A0.9,0.9 0 0,1 8.4,12.9A0.9,0.9 0 0,1 7.5,13.8A0.9,0.9 0 0,1 6.6,12.9A0.9,0.9 0 0,1 7.5,12M16.5,12C17,12 17.4,12.4 17.4,12.9C17.4,13.4 17,13.8 16.5,13.8A0.9,0.9 0 0,1 15.6,12.9A0.9,0.9 0 0,1 16.5,12M12,6.9C12.5,6.9 12.9,7.3 12.9,7.8C12.9,8.3 12.5,8.7 12,8.7C11.5,8.7 11.1,8.3 11.1,7.8C11.1,7.3 11.5,6.9 12,6.9Z"
+    static let image: NSImage = {
+        let svg = #"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="\#(path)"/></svg>"#
+        let i = NSImage(data: Data(svg.utf8)) ?? NSImage(systemSymbolName: "house", accessibilityDescription: nil)!
+        i.isTemplate = true
+        return i
+    }()
+    static let blue = Color(red: 0x18 / 255, green: 0xBC / 255, blue: 0xF2 / 255)
+}
+
+/// A symbol name, or "ha" for the Home Assistant logo.
+struct Glyph: View {
+    let name: String
+    var body: some View {
+        if name == "ha" { Image(nsImage: HALogo.image).resizable().scaledToFit() }
+        else { Image(systemName: name) }
     }
 }
 
@@ -23,7 +45,8 @@ struct Row: View {
 struct Tile: View {
     let icon: String, color: Color
     var body: some View {
-        Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+        Glyph(name: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+            .frame(width: icon == "ha" ? 15 : nil, height: icon == "ha" ? 15 : nil)
             .frame(width: 22, height: 22)
             .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(color.gradient))
     }
@@ -36,10 +59,10 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self { case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"; case .app: "App" }
     }
     var color: Color {
-        switch self { case .displays: .blue; case .automatic: .orange; case .homeAssistant: .teal; case .app: .gray }
+        switch self { case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue; case .app: .gray }
     }
     var icon: String {
-        switch self { case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "house"; case .app: "gearshape" }
+        switch self { case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"; case .app: "gearshape" }
     }
 }
 
@@ -214,7 +237,7 @@ struct SettingsView: View {
                 Picker("Brightness follows", selection: $source) {
                     Row("Nothing, sliders only", "slider.horizontal.3").tag("off")
                     Row("The sun", "sun.max").tag("sun")
-                    Row("Home Assistant", "house").tag("homeAssistant")
+                    Row("Home Assistant", "ha").tag("homeAssistant")
                 }
                 .pickerStyle(.inline)
             } footer: {
