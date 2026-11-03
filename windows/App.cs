@@ -12,13 +12,14 @@ namespace Daylit;
 
 static class Program {
     public static EventWaitHandle? ShowSignal;
+    [System.Runtime.InteropServices.DllImport("user32")] static extern bool AllowSetForegroundWindow(int pid);
     [STAThread]
     static int Main(string[] args) {
         if (Cli.Run(args) is int code) return code;   // --list-monitors, --check-config (see AGENTS.md)
         using var mutex = new Mutex(true, @"Local\Daylit.Tray", out bool first);
         // Starting Daylit again (Start menu, shortcut) opens the running one's panel.
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Daylit.Show");
-        if (!first) { show.Set(); return 0; }
+        if (!first) { AllowSetForegroundWindow(-1 /* ASFW_ANY */); show.Set(); return 0; }   // let the running copy take focus, so its panel closes on an outside click
         ShowSignal = show;
         WF.Application.EnableVisualStyles();   // tray menu
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
