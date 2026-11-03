@@ -84,6 +84,7 @@ sealed class Controller {
         var menu = new WF.ContextMenuStrip();
         var token = new WF.ToolStripMenuItem("Home Assistant token…", null, (_, _) => AskToken());
         menu.Items.Add("Open Daylit", null, (_, _) => ShowPanel());
+        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Open config file", null, (_, _) => OpenConfig());
         menu.Items.Add("Reload config", null, (_, _) => Reload());
@@ -143,6 +144,8 @@ sealed class Controller {
             catch { Process.Start(new ProcessStartInfo("notepad.exe", $"\"{Config.PathName}\"") { UseShellExecute = true }); }
         } catch (Exception e) { Log.Write("open config: " + e.Message); }
     }
+
+    public void ShowSettings() { panel.Hide(); SettingsWindow.Open(this); }
 
     public void AskToken() {
         if (Source != Source.HomeAssistant) return;

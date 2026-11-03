@@ -174,6 +174,8 @@ sealed class Flyout : Window {
             i.Click += (_, _) => set(i.IsChecked);
             return i;
         }
+        m.Items.Add(Item("Settings…", app.ShowSettings));
+        m.Items.Add(new Separator());
         m.Items.Add(Item(Theme.Dark ? "Switch to light mode" : "Switch to dark mode", app.ToggleDark));
         var look = Check("Light or dark mode from daylight", Settings.AutoLook, app.SetLook);
         look.IsEnabled = app.Source != Source.Off;

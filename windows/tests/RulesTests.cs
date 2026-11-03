@@ -388,3 +388,57 @@ public class HaErrorRuleTests {
         Assert.Equal(new double[] { 2, 5 }, HaErrorRule.RetryDelays);
     }
 }
+
+public class ConfigPatchTests {
+    static readonly SettingsEdit.Monitor Dell = new("DELL U2723QE", "U2723QE", "Left", 80, 45, 15);
+    static System.Text.Json.Nodes.JsonObject Json(string s) => (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(s)!;
+
+    [Fact]
+    public void KeepsWhatTheWindowDoesNotOwn() {
+        const string original = """
+            { // a comment
+              "manualHold": 7, "futureKey": [1, 2],
+              "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc", "cover": "cover.blind" },
+              "monitors": [
+                { "match": "U2723QE", "control": "ddc", "day": 70, "homeAssistant": { "day": "input_number.left_day" } },
+                { "match": "Unplugged", "day": 33 }, ],
+            }
+            """;
+        var e = new SettingsEdit("homeAssistant", 51.4769, -0.0005, [Dell], HaUrl: "http://homeassistant.local:8123", Lights: "light.desk");
+        var text = ConfigPatch.Apply(e, original);
+        var o = Json(text);
+        Assert.Equal(7, (int)o["manualHold"]!);
+        Assert.NotNull(o["futureKey"]);
+        var ha = o["homeAssistant"]!.AsObject();
+        Assert.Equal("kc", (string)ha["tokenName"]!);
+        Assert.Null(ha["cover"]);
+        Assert.Equal("light.desk", (string)ha["lights"]!);
+        Assert.Contains("51.48", text); Assert.DoesNotContain("51.479", text);
+        Assert.Equal(0m, (decimal)o["location"]!["longitude"]!);
+        var mons = o["monitors"]!.AsArray();
+        Assert.Equal(2, mons.Count);
+        Assert.Equal("ddc", (string)mons[0]!["control"]!);
+        Assert.Equal("Left", (string)mons[0]!["label"]!);
+        Assert.Equal(80, (int)mons[0]!["day"]!);
+        Assert.NotNull(mons[0]!["homeAssistant"]);
+        Assert.Equal(33, (int)mons[1]!["day"]!);
+    }
+
+    [Fact]
+    public void ANewMonitorIsAddedWithItsSuggestedMatch() {
+        var o = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell]), null));
+        Assert.Equal("U2723QE", (string)o["monitors"]![0]!["match"]!);
+        Assert.Null(o["location"]);
+        Assert.Null(o["homeAssistant"]);
+    }
+
+    [Fact]
+    public void AnInvalidResultIsRefused() {
+        Assert.ThrowsAny<Exception>(() => ConfigPatch.Apply(new SettingsEdit("homeAssistant", null, null, [], HaUrl: "homeassistant.local"), null));
+        Assert.ThrowsAny<Exception>(() => ConfigPatch.Apply(new SettingsEdit("sun", 51.48, 0, [], Lights: "Desk lamp"), null));
+        Assert.ThrowsAny<Exception>(() => ConfigPatch.Apply(new SettingsEdit("sun", 51.48, 0, []), "[1]"));
+    }
+
+    [Fact]
+    public void SuggestsTheModelNumber() => Assert.Equal("AW3821DW", ConfigPatch.SuggestMatch("Dell AW3821DW"));
+}

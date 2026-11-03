@@ -2,6 +2,7 @@
 // (detected monitors, sliders and hotkeys, no automatic mode). See config.example.json.
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Daylit;
@@ -162,4 +163,64 @@ sealed class Config {
           "monitors": []
         }
         """;
+}
+
+/// What the settings window owns. Everything else in config.json is kept as it is.
+sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, IReadOnlyList<SettingsEdit.Monitor> Monitors,
+                           string HaUrl = "", string AutoSwitch = "", string Sun = "", string Cover = "", string Lights = "") {
+    /// `Name` is the connected display's name; `SuggestedMatch` is used only when no entry matches it yet.
+    public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night);
+}
+
+static class ConfigPatch {
+    static readonly JsonDocumentOptions Read = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+
+    /// A short, stable part of a monitor name: the model ("AW3821DW") rather than the brand.
+    public static string SuggestMatch(string name) =>
+        name.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(t => t.Any(char.IsDigit) && t.Any(char.IsLetter)) ?? name;
+
+    /// The file with the edit applied. Unknown keys, unplugged monitors and per-monitor settings the window
+    /// does not show (Home Assistant helpers, control) are kept; comments are not. Throws when the result
+    /// would not load, or when the file is not a JSON object.
+    public static string Apply(SettingsEdit e, string? original) {
+        var root = string.IsNullOrWhiteSpace(original) ? new JsonObject()
+                 : JsonNode.Parse(original, documentOptions: Read) as JsonObject ?? throw new InvalidDataException("config.json is not a JSON object");
+        root["source"] = e.Source;
+        if (e.Latitude is double lat && e.Longitude is double lon)
+            root["location"] = new JsonObject { ["latitude"] = Round2(lat), ["longitude"] = Round2(lon) };
+        else root.Remove("location");
+
+        var ha = root["homeAssistant"] as JsonObject ?? new JsonObject();
+        foreach (var (k, v) in new[] { ("url", e.HaUrl), ("autoSwitch", e.AutoSwitch), ("sun", e.Sun), ("cover", e.Cover), ("lights", e.Lights) }) {
+            var t = v.Trim();
+            if (t == "") ha.Remove(k); else ha[k] = t;
+        }
+        root.Remove("homeAssistant");
+        if (ha.Count > 0) root["homeAssistant"] = ha;
+
+        var list = root["monitors"] as JsonArray ?? new JsonArray();
+        root.Remove("monitors");
+        foreach (var m in e.Monitors) {
+            var entry = list.OfType<JsonObject>().FirstOrDefault(o =>
+                o["match"]?.GetValueKind() == JsonValueKind.String && o["match"]!.GetValue<string>().Trim() is { Length: > 0 } match &&
+                m.Name.Contains(match, StringComparison.OrdinalIgnoreCase));
+            if (entry == null) { entry = new JsonObject { ["match"] = m.SuggestedMatch }; list.Add(entry); }
+            var label = m.Label.Trim();
+            if (label == "" || label == m.Name) entry.Remove("label"); else entry["label"] = label;
+            entry["day"] = Math.Clamp(m.Day, 0, 100); entry["blindDown"] = Math.Clamp(m.BlindDown, 0, 100); entry["night"] = Math.Clamp(m.Night, 0, 100);
+        }
+        if (list.Count > 0) root["monitors"] = list;
+
+        var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
+        try {
+            File.WriteAllText(tmp, text);
+            var (_, err) = Config.Load(tmp);
+            if (err != null) throw new InvalidDataException(err.Replace("config.json: ", ""));
+        } finally { File.Delete(tmp); }
+        return text;
+    }
+
+    /// Two decimals, written exactly as shown in the window.
+    static decimal Round2(double v) { var d = Math.Round((decimal)v, 2, MidpointRounding.AwayFromZero); return d == 0 ? 0m : d; }
 }

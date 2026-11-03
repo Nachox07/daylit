@@ -45,10 +45,7 @@ static class Cli {
         """;
 
     /// A short, stable part of the monitor name: the model ("AW3821DW") rather than the brand.
-    static string SuggestMatch(string friendly) {
-        var model = friendly.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(t => t.Any(char.IsDigit) && t.Any(char.IsLetter));
-        return model ?? friendly;
-    }
+    static string SuggestMatch(string friendly) => ConfigPatch.SuggestMatch(friendly);
 
     static (string, int) ListMonitors() {
         var (cfg, _) = Config.Load();
