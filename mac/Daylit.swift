@@ -608,6 +608,9 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
     }
 
     var lastHAError: String?
+    /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
+    /// network at login or after wake does not jump the monitors to the fallback levels.
+    var haDownSince: Date?
 
     /// "lights 80% white" / "lights 40% warm": the colour matters to how bright the room feels, so show it.
     static func lightsNote(_ s: HAState) -> String {
@@ -730,6 +733,7 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
             switch await HAClient.state(ha, mons) {
             case .success(let s):
                 problem = configProblem
+                haDownSince = nil
                 if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
                 let sun = Int((min(max((s.elev + 3) / 15, 0), 1) * 100).rounded())
@@ -742,7 +746,8 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
                 problem = HAClient.describe(f, ha)
                 if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
-                if config.location != nil {
+                if haDownSince == nil { haDownSince = Date() }
+                if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
                     return fromSun("Home Assistant unreachable — using the sun")
                 }

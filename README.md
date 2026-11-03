@@ -41,7 +41,7 @@ indicator when you use the keys, and an "Automatic" switch.
 | `sun` | your latitude and longitude | the sun's height, computed on your machine |
 | `homeAssistant` | a Home Assistant URL and token | the sun, a blind and the room lights; levels tunable from HA dashboards |
 
-With Home Assistant and a location, Daylit falls back to the sun when Home Assistant is unreachable.
+With Home Assistant and a location, Daylit falls back to the sun when Home Assistant has been unreachable for a minute (until then it holds the current levels, so a slow network after login or wake changes nothing).
 
 ## How it works
 
@@ -199,6 +199,10 @@ On macOS it switches the system appearance through System Events, so the first s
 Automation permission (System Settings → Privacy & Security → Automation). The gear menu also has a
 manual *Switch to Light/Dark Mode*. An idle computer, or one paused on battery, leaves the
 appearance alone.
+
+## Contributing
+
+Build, test and screenshot steps for both apps: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

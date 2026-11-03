@@ -59,6 +59,9 @@ sealed class Controller {
     bool busy, again, wasHere = true, wasIdle;
     bool? lookDark, daylight, whiteLights;
     string? lastHaError;
+    // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
+    // network at sign-in or after wake does not jump the monitors to the fallback levels.
+    DateTime? haDownSince;
 
     public Controller(Application app) {
         this.app = app;
@@ -312,9 +315,11 @@ sealed class Controller {
                 if (lastHaError != HAClient.LastError) Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable"));
                 lastHaError = HAClient.LastError;
                 Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
-                if (Cfg.Location != null) s = SunInputs(mons);
+                haDownSince ??= DateTime.UtcNow;
+                if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= 60) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
+        if (!haDown) haDownSince = null;
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
