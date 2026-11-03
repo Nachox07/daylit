@@ -356,6 +356,7 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
     init() {
         reload()
         if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt
+        HotKeys.shared.start { [weak self] up, fine in self?.hotkey(up: up, fine: fine) }
         // A cheap check every 5 s; the real work runs every 30 s (120 s on battery) or on an event.
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in Task { @MainActor in self.check() } }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
@@ -469,6 +470,13 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
         let step = Double(fine ? 1 : 6)
         setLevel(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
         HUD.show(mons[i].label, mons[i].level, on: id)
+    }
+
+    /// Keyboard shortcut: the managed monitor with the active window, else the first one that works.
+    func hotkey(up: Bool, fine: Bool) {
+        let id = Focus.screenID().flatMap { s in mons.first { $0.id == s && $0.control != .none }?.id }
+            ?? mons.first { $0.control != .none && $0.available }?.id
+        if let id { key(up: up, fine: fine, on: id) }
     }
 
     func setAuto(_ on: Bool) {
@@ -746,31 +754,186 @@ final class Keys {
         p.contentView = NSHostingView(rootView:
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
-                    Image(systemName: "display").foregroundStyle(.secondary)
+                    Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
                     Text(label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     Spacer()
                     Text("\(Int(v))%").font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
                 }
                 HStack(spacing: 8) {
-                    Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
                     GeometryReader { g in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.quaternary)
                             Capsule().fill(.primary).frame(width: max(6, g.size.width * v / 100))
                         }
                     }.frame(height: 6)
-                    Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 14)
             .frame(width: size.width, height: size.height)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous)))
+            .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))))
         let f = screen.frame
         p.setFrame(NSRect(x: f.midX - size.width / 2, y: f.minY + f.height * 0.12, width: size.width, height: size.height), display: true)
         p.alphaValue = 1; p.orderFrontRegardless()
         hide?.cancel()
         let w = DispatchWorkItem { NSAnimationContext.runAnimationGroup { $0.duration = 0.3; p.animator().alphaValue = 0 } }
         hide = w; DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
+    }
+}
+
+
+// MARK: keyboard shortcuts (in addition to the brightness keys)
+
+/// Global shortcuts through Carbon's RegisterEventHotKey: no Accessibility permission needed, and the
+/// key press is consumed. Up, down, and each with Shift for steps of 1.
+@MainActor final class HotKeys {
+    static let shared = HotKeys()
+    struct Combo: Codable, Equatable {
+        var key: UInt32          // virtual key code (kVK_*)
+        var mods: UInt32         // Carbon modifiers: cmdKey, optionKey, controlKey
+        var char: String         // what the key shows, e.g. "↑"
+        var text: String {
+            (mods & UInt32(controlKey) != 0 ? "⌃" : "") + (mods & UInt32(optionKey) != 0 ? "⌥" : "")
+                + (mods & UInt32(cmdKey) != 0 ? "⌘" : "") + char
+        }
+    }
+    static let mods = UInt32(controlKey | optionKey | cmdKey)
+    static let defaultUp = Combo(key: UInt32(kVK_UpArrow), mods: mods, char: "↑")
+    static let defaultDown = Combo(key: UInt32(kVK_DownArrow), mods: mods, char: "↓")
+
+    var up: Combo = load("hotkeyUp") ?? defaultUp
+    var down: Combo = load("hotkeyDown") ?? defaultDown
+    var ok = false
+    var refs: [EventHotKeyRef] = []
+    var handler: EventHandlerRef?
+    var action: ((Bool, Bool) -> Void)?   // (up, fine)
+
+    static func load(_ k: String) -> Combo? {
+        UserDefaults.standard.data(forKey: k).flatMap { try? JSONDecoder().decode(Combo.self, from: $0) }
+    }
+    func save() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(up), forKey: "hotkeyUp")
+        UserDefaults.standard.set(try? JSONEncoder().encode(down), forKey: "hotkeyDown")
+    }
+    /// "⌃⌥⌘↑ / ↓" when both share modifiers.
+    var pairText: String { up.mods == down.mods ? "\(up.text) / \(down.char)" : "\(up.text) / \(down.text)" }
+
+    func start(_ act: @escaping (Bool, Bool) -> Void) {
+        action = act
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                              MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            let id = hk.id
+            DispatchQueue.main.async { MainActor.assumeIsolated { HotKeys.shared.action?(id == 1 || id == 3, id >= 3) } }
+            return noErr
+        }, 1, &spec, nil, &handler)
+        ok = register(up, down)
+        Log.write("hotkeys: \(pairText)" + (ok ? "" : " are taken by another app"))
+    }
+
+    /// Registers all four; false (and nothing registered) if any is taken or not allowed.
+    @discardableResult func register(_ u: Combo, _ d: Combo) -> Bool {
+        unregister()
+        let shift = UInt32(shiftKey)
+        for (i, (c, extra)) in [(u, 0), (d, 0), (u, shift), (d, shift)].enumerated() {
+            var ref: EventHotKeyRef?
+            let st = RegisterEventHotKey(c.key, c.mods | UInt32(extra), EventHotKeyID(signature: 0x444C_5954 /* DLYT */, id: UInt32(i + 1)),
+                                         GetApplicationEventTarget(), 0, &ref)
+            guard st == noErr, let ref else { unregister(); return false }
+            refs.append(ref)
+        }
+        return true
+    }
+    func unregister() { refs.forEach { UnregisterEventHotKey($0) }; refs = [] }
+
+    /// Tries a new pair live; on failure the saved pair comes back.
+    func apply(_ u: Combo, _ d: Combo) -> Bool {
+        if register(u, d) { up = u; down = d; ok = true; save(); Log.write("hotkeys: \(pairText)"); return true }
+        ok = register(up, down)
+        return false
+    }
+}
+
+/// Keyboard shortcuts window: click a box, press the combination.
+struct ShortcutsView: View {
+    @State var up = HotKeys.shared.up
+    @State var down = HotKeys.shared.down
+    @State var recording: Int? = nil     // 0 up, 1 down
+    @State var error: String? = nil
+    @State var monitor: Any? = nil
+    let done: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Click a box and press the new combination.")
+            Text("They change the screen with the active window. Hold ⇧ as well for steps of 1. The brightness keys keep working.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow { Text("Brighter"); box(0, up) }
+                GridRow { Text("Dimmer"); box(1, down) }
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Button("Reset to Defaults") { up = HotKeys.defaultUp; down = HotKeys.defaultDown; error = nil }
+                Spacer()
+                Button("Cancel") { stop(); done() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    stop()
+                    if HotKeys.shared.apply(up, down) { done() }
+                    else { error = "\(up.text) or \(down.text) is taken by another app (or not allowed by macOS). Try another." }
+                }.keyboardShortcut(.defaultAction)
+            }.padding(.top, 6)
+        }
+        .padding(20).frame(width: 380)
+        .onAppear { HotKeys.shared.unregister() }   // so pressing the current keys records them instead of firing
+        .onDisappear { stop(); HotKeys.shared.ok = HotKeys.shared.register(HotKeys.shared.up, HotKeys.shared.down) }
+    }
+
+    func box(_ i: Int, _ c: HotKeys.Combo) -> some View {
+        Button { start(i) } label: {
+            Text(recording == i ? "Press keys…" : c.text).frame(minWidth: 160).monospaced()
+        }
+        .accessibilityLabel(i == 0 ? "Brighter shortcut" : "Dimmer shortcut")
+    }
+
+    func start(_ i: Int) {
+        stop(); recording = i; error = nil
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            let f = e.modifierFlags
+            if f.contains(.shift) { error = "Leave ⇧ out: it is added automatically for steps of 1."; return nil }
+            if !f.contains(.control) && !f.contains(.command) { error = "Use ⌃ or ⌘ with the key, so it does not clash with typing."; return nil }
+            var mods: UInt32 = 0
+            if f.contains(.control) { mods |= UInt32(controlKey) }
+            if f.contains(.option) { mods |= UInt32(optionKey) }
+            if f.contains(.command) { mods |= UInt32(cmdKey) }
+            let names: [Int: String] = [kVK_UpArrow: "↑", kVK_DownArrow: "↓", kVK_LeftArrow: "←", kVK_RightArrow: "→",
+                                        kVK_PageUp: "⇞", kVK_PageDown: "⇟", kVK_Home: "↖", kVK_End: "↘"]
+            let ch = names[Int(e.keyCode)] ?? (e.charactersIgnoringModifiers ?? "?").uppercased()
+            let c = HotKeys.Combo(key: UInt32(e.keyCode), mods: mods, char: ch)
+            if recording == 0 { up = c } else { down = c }
+            error = nil; stop()
+            return nil
+        }
+    }
+    func stop() { if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil; recording = nil }
+}
+
+@MainActor enum ShortcutsWindow {
+    static var window: NSWindow?
+    static func show() {
+        StatusController.shared?.close()
+        if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "Daylit — Keyboard Shortcuts"; w.isReleasedWhenClosed = false
+        w.contentViewController = NSHostingController(rootView: ShortcutsView { window?.close() })
+        w.center(); window = w
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            Task { @MainActor in window = nil; StatusController.shared?.model.objectWillChange.send() }
+        }
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
     }
 }
 
@@ -785,11 +948,13 @@ struct Panel: View {
                 Text("Daylit").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Menu {
+                    Button("Keyboard Shortcuts…") { ShortcutsWindow.show() }
+                    Divider()
                     Button("Open Config File…") { m.openConfig() }
                     Button("Reload Config") { m.reload() }
                 } label: { Image(systemName: "gearshape") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("Settings")
+                .help("Settings").accessibilityLabel("Settings")
             }
 
             if m.mons.isEmpty {
@@ -809,6 +974,8 @@ struct Panel: View {
                     }
                 }
                 .toggleStyle(.switch).controlSize(.small)
+                .accessibilityLabel("Automatic brightness")
+                .accessibilityHint(m.detail)
             } else {
                 Text("Set a location or Home Assistant in the config file for automatic brightness.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -820,7 +987,9 @@ struct Panel: View {
             }
 
             if !m.mons.isEmpty {
-                Text("Brightness keys change the screen with the active window. ⌥⇧ for fine steps.")
+                let k = HotKeys.shared
+                Text(k.ok ? "Brightness keys or \(k.pairText) change the screen with the active window. Add ⇧ (⌥⇧ with brightness keys) for fine steps."
+                          : "\(k.pairText) are taken by another app; change them in the gear menu. Brightness keys still work (⌥⇧ for fine steps).")
                     .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
             }
 
@@ -829,14 +998,15 @@ struct Panel: View {
             HStack {
                 Toggle("Open at login", isOn: Binding(get: { m.login }, set: { m.setLogin($0) }))
                     .toggleStyle(.switch).controlSize(.mini).font(.caption)
+                    .accessibilityLabel("Open at login")
                 Spacer()
                 Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }
-                    .buttonStyle(.borderless).help("Quit Daylit")
+                    .buttonStyle(.borderless).help("Quit Daylit").accessibilityLabel("Quit Daylit")
             }
         }
         .padding(14)
         .frame(width: 320)
-        .onAppear { m.refresh() }
+
     }
 
     func row(_ i: Int) -> some View {
@@ -844,7 +1014,7 @@ struct Panel: View {
         let usable = mon.control != .none && mon.available
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "display").foregroundStyle(.secondary)
+                Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
                 Text(mon.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 if mon.manual {
                     Text("Manual").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
@@ -854,12 +1024,13 @@ struct Panel: View {
                 Text(usable ? "\(Int(mon.level))%" : "–").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary)
+                Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
                 Slider(value: Binding(get: { m.mons.indices.contains(i) ? m.mons[i].level : 0 },
                                       set: { m.setLevel(i, $0.rounded()) }),
                        in: 0...100, onEditingChanged: { m.dragChanged(i, $0) })
                     .controlSize(.small)
-                Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary)
+                    .accessibilityLabel("\(mon.label) brightness")
+                Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
             .disabled(!usable)
             if !usable {
@@ -869,13 +1040,246 @@ struct Panel: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.6)))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 }
 
-@main struct DaylitApp: App {
-    @StateObject var m = Daylit()
-    var body: some Scene {
-        MenuBarExtra("Daylit", systemImage: "sun.max") { Panel(m: m) }.menuBarExtraStyle(.window)
+// MARK: app, menu-bar item, second launch
+
+/// The menu-bar item and its panel. Owned here rather than through SwiftUI's MenuBarExtra, which has
+/// no way to open its panel from code (needed when the app is opened a second time).
+@MainActor final class StatusController: NSObject, NSWindowDelegate {
+    static var shared: StatusController?
+    let model: Daylit
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let panel: KeyPanel
+    var closedAt = Date.distantPast
+
+    final class KeyPanel: NSPanel {
+        var onHide: (() -> Void)?
+        override var canBecomeKey: Bool { true }
+        override func cancelOperation(_ sender: Any?) { orderOut(nil) }   // Esc closes it
+        override func orderOut(_ sender: Any?) { super.orderOut(sender); onHide?() }
+    }
+
+    init(model: Daylit) {
+        self.model = model
+        panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        super.init()
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.level = .statusBar; panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.delegate = self
+        panel.onHide = { [weak self] in
+            self?.item.button?.highlight(false); PanelOpener.visible = false; self?.closedAt = Date()
+        }
+        panel.setAccessibilityLabel("Daylit")
+        let host = NSHostingController(rootView: Panel(m: model)
+            .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)))
+        host.sizingOptions = [.preferredContentSize]
+        panel.contentViewController = host
+        if let b = item.button {
+            b.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Daylit")
+            b.setAccessibilityLabel("Daylit")
+            b.target = self; b.action = #selector(toggle)
+        }
+    }
+
+    @objc func toggle() {
+        if panel.isVisible { close(); return }
+        if Date().timeIntervalSince(closedAt) < 0.3 { return }   // this click just closed it
+        show()
+    }
+
+    func show() {
+        model.refresh()
+        place()
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        item.button?.highlight(true)
+        PanelOpener.visible = true
+    }
+
+    func close() { panel.orderOut(nil) }
+
+    /// Under the menu-bar item, kept inside the screen.
+    func place() {
+        guard let b = item.button, let bw = b.window else { return }
+        let r = bw.convertToScreen(b.convert(b.bounds, to: nil))
+        let size = panel.frame.size
+        let vf = (bw.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        let x = min(max(r.midX - size.width / 2, vf.minX + 8), vf.maxX - size.width - 8)
+        panel.setFrameOrigin(NSPoint(x: x, y: r.minY - size.height - 6))
+    }
+
+    func windowDidResignKey(_ n: Notification) { close() }
+    func windowDidResize(_ n: Notification) { if panel.isVisible { place() } }   // content grew: keep the top under the item
+}
+
+/// Control Center-style background: the menu material, tinted with the window colour so text behind
+/// the panel does not show through.
+struct VisualEffect: View {
+    var body: some View {
+        ZStack {
+            Blur()
+            Color(nsColor: .windowBackgroundColor).opacity(0.72)
+        }
+    }
+    struct Blur: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSVisualEffectView {
+            let v = NSVisualEffectView(); v.material = .menu; v.blendingMode = .behindWindow; v.state = .active; return v
+        }
+        func updateNSView(_ v: NSVisualEffectView, context: Context) {}
+    }
+}
+
+@MainActor enum PanelOpener {
+    static var visible = false
+    static func open() { StatusController.shared?.show() }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let showNote = Notification.Name("app.daylit.mac.show")
+    var model: Daylit?
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        if let a = ProcessInfo.processInfo.environment["DAYLIT_APPEARANCE"] {   // screenshots: force light or dark
+            NSApp.appearance = NSAppearance(named: a == "dark" ? .darkAqua : .aqua)
+        }
+        let m = Daylit()
+        model = m
+        StatusController.shared = StatusController(model: m)
+        // A second copy started from the binary (not through Launch Services) asks this one to show itself.
+        DistributedNotificationCenter.default().addObserver(forName: Self.showNote, object: nil, queue: .main) { _ in
+            Task { @MainActor in PanelOpener.open() }
+        }
+        if ProcessInfo.processInfo.environment["DAYLIT_SHOW"] == "panel" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { PanelOpener.open() }
+        }
+    }
+    /// Opening the app again (Finder, Spotlight, `open -a Daylit`) shows the panel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        PanelOpener.open()
+        return false
+    }
+}
+
+struct DaylitApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    var body: some Scene { Settings { EmptyView() } }
+}
+
+@main enum Main {
+    static func main() {
+        if let code = CLI.run(Array(CommandLine.arguments.dropFirst())) { exit(code) }
+        let me = ProcessInfo.processInfo.processIdentifier
+        if let id = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != me }) {
+            DistributedNotificationCenter.default().postNotificationName(AppDelegate.showNote, object: nil, userInfo: nil, deliverImmediately: true)
+            exit(0)
+        }
+        DaylitApp.main()
+    }
+}
+
+// MARK: command line (see AGENTS.md)
+
+/// `Daylit --list-monitors` / `--check-config`: JSON on stdout, exit 0 when fine, 1 when something needs fixing.
+@MainActor enum CLI {
+    static let help = """
+        Daylit — monitor brightness from the sun or Home Assistant.
+          Daylit                  start the menu-bar app
+          Daylit --list-monitors  connected monitors as JSON (use "match" in config.json)
+          Daylit --check-config   validate \(Config.path.path)
+        Run it from the app bundle: ~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors
+        """
+
+    static func run(_ args: [String]) -> Int32? {
+        // Launch Services may pass -psn_… or -NSDocumentRevisionsDebugMode; only our flags count.
+        guard let cmd = args.first?.lowercased(), ["--list-monitors", "--check-config", "--help", "-h"].contains(cmd) else { return nil }
+        _ = NSApplication.shared   // NSScreen needs the app object
+        switch cmd {
+        case "--list-monitors": return emit(listMonitors(), 0)
+        case "--check-config": let (j, ok) = checkConfig(); return emit(j, ok ? 0 : 1)
+        default: print(help); return 0
+        }
+    }
+
+    static func emit(_ obj: Any, _ code: Int32) -> Int32 {
+        if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+           let s = String(data: d, encoding: .utf8) { print(s) }
+        return code
+    }
+
+    /// A short, stable part of the name: the model ("AW3821DW") rather than the brand.
+    static func suggestMatch(_ name: String) -> String {
+        name.split(separator: " ").last { t in t.contains(where: \.isNumber) && t.contains(where: \.isLetter) }.map(String.init) ?? name
+    }
+
+    static func listMonitors() -> [String: Any] {
+        let (cfg, _) = Config.load()
+        DDC.tool = cfg.ddcTool ?? DDC.defaultTool
+        var out: [[String: Any]] = []
+        for s in NSScreen.screens {
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { continue }
+            let builtIn = CGDisplayIsBuiltin(id) != 0
+            let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
+            let entry = cfg.monitors?.first { s.localizedName.localizedCaseInsensitiveContains($0.match) }
+            var control = "none", level: Int? = nil
+            if builtIn { control = "none (built-in screens are left to macOS)" }
+            else {
+                let forced = entry?.control
+                if forced != "ddc", let v = Native.get(id) { control = "native"; level = v }
+                else if forced != "native", DDC.available { control = "ddc"; level = DDC.get(uuid) }
+                else if forced == "native" { control = "native" }
+                else { control = "none (install m1ddc for DDC monitors)" }
+            }
+            var o: [String: Any] = ["name": s.localizedName, "match": suggestMatch(s.localizedName), "uuid": uuid,
+                                    "builtIn": builtIn, "control": control, "controllable": !builtIn && level != nil]
+            o["brightness"] = level ?? NSNull()
+            o["configuredAs"] = entry.map { ($0.label ?? $0.match) as Any } ?? NSNull()
+            out.append(o)
+        }
+        return ["monitors": out]
+    }
+
+    static func checkConfig() -> ([String: Any], Bool) {
+        let exists = FileManager.default.fileExists(atPath: Config.path.path)
+        let (cfg, err) = Config.load()
+        let (src, srcErr) = cfg.resolvedSource()
+        var problems: [String] = [], notes: [String] = []
+        if let err { problems.append(err) }
+        if let srcErr { problems.append(srcErr) }
+        let names = externalScreens().map(\.name)
+        var monitors: [[String: Any]] = []
+        for m in cfg.monitors ?? [] {
+            let hit = names.first { $0.localizedCaseInsensitiveContains(m.match) }
+            if m.homeAssistant != nil && src != .homeAssistant {
+                problems.append("monitor \"\(m.match)\" has homeAssistant entities but the source is \(src)")
+            }
+            if let c = m.control, !["native", "ddc", "auto"].contains(c) {
+                problems.append("monitor \"\(m.match)\": control must be native, ddc or auto")
+            }
+            if hit == nil { notes.append("monitor \"\(m.match)\" is not connected right now (fine if it is used elsewhere)") }
+            monitors.append(["match": m.match, "label": (m.label ?? NSNull()) as Any, "connected": (hit ?? NSNull()) as Any])
+        }
+        if !exists { notes.append("no config.json: Daylit runs with sliders and brightness keys only") }
+        if (cfg.monitors ?? []).contains(where: { $0.control != "native" }) || cfg.monitors == nil, !DDC.available {
+            notes.append("m1ddc not found: DDC monitors need it (brew install m1ddc)")
+        }
+        var result: [String: Any] = ["ok": problems.isEmpty, "path": Config.path.path, "exists": exists,
+                                     "source": "\(src)", "problems": problems, "notes": notes, "monitors": monitors]
+        if src == .homeAssistant, let ha = cfg.homeAssistant {
+            let name = ha.tokenName ?? "daylit-home-assistant"
+            let stored = HAClient.tokenStored(name)   // presence only, never read or printed
+            if !stored { notes.append("no Home Assistant token in the keychain as \"\(name)\" (see README; the user adds it)") }
+            result["notes"] = notes
+            result["homeAssistant"] = ["url": (ha.url ?? NSNull()) as Any, "tokenName": name, "tokenStored": stored]
+        } else {
+            result["homeAssistant"] = NSNull()
+        }
+        return (result, problems.isEmpty)
     }
 }
