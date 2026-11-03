@@ -28,6 +28,8 @@ static class Win {
     /// GDI name (\\.\DISPLAYn) of the screen holding the focused window.
     public static string? ForegroundScreen() => Ddc.DeviceOf(MonitorFromWindow(GetForegroundWindow(), 2 /* NEAREST */));
 
+    /// Desktops report no system battery: the pause-on-battery switch is hidden there.
+    public static bool HasBattery => !System.Windows.Forms.SystemInformation.PowerStatus.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.NoSystemBattery);
     public static bool OnBattery => System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Offline;
 
     public static bool StartsWithWindows {
@@ -72,6 +74,11 @@ static class Settings {
     public static bool Auto { get => Get("Auto", true); set => Set("Auto", value); }
     /// Light/dark mode from daylight and room lights.
     public static bool AutoLook { get => Get("AutoLook", true); set => Set("AutoLook", value); }
+    /// Pause on battery, once changed in the panel; null = use the config's pauseOnBattery (default on).
+    public static bool? PauseOnBattery {
+        get => Registry.CurrentUser.OpenSubKey(Key)?.GetValue("PauseOnBattery") is int i ? i == 1 : null;
+        set { if (value is bool v) Set("PauseOnBattery", v); }
+    }
 
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;
     static void SetInt(string name, int v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v, RegistryValueKind.DWord); }

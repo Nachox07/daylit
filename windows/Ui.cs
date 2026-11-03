@@ -48,7 +48,7 @@ sealed class Flyout : Window {
     readonly Controller app;
     readonly StackPanel rows = new();
     readonly TextBlock offHint, autoSub, hint, error;
-    readonly CheckBox auto, look, login;
+    readonly CheckBox auto, look, pause, login;
     readonly Button modeBtn;
     readonly Border autoCard;
     readonly List<Border> cards = new();
@@ -95,9 +95,11 @@ sealed class Flyout : Window {
         autoSub.Margin = new Thickness(28, 0, 0, 6);
         look = new CheckBox { Content = "Light or dark mode from daylight" };
         OnToggle(look, on => app.SetLook(on));
+        pause = new CheckBox { Content = "Pause on battery", ToolTip = "On battery: no automatic changes and no Home Assistant traffic. Sliders and hotkeys still work." };
+        OnToggle(pause, on => app.SetPause(on));
         modeBtn = new Button { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(12, 5, 12, 6) };
         modeBtn.Click += (_, _) => app.ToggleDark();
-        autoCard = Card(new StackPanel { Children = { auto, autoSub, look, modeBtn } });
+        autoCard = Card(new StackPanel { Children = { auto, autoSub, look, pause, modeBtn } });
         autoCard.Margin = new Thickness(0, 0, 0, 10);
         root.Children.Add(autoCard);
 
@@ -154,7 +156,7 @@ sealed class Flyout : Window {
         foreach (var r in rowViews) cards.Remove(r.card);
         rows.Children.Clear(); rowViews.Clear();
         if (app.Mons.Count == 0) {
-            var none = Small("No external monitor found.");
+            var none = Small("No external monitors. Plug one in and Daylit takes over; the built-in screen stays with Windows.");
             none.Margin = new Thickness(2, 0, 2, 10);
             rows.Children.Add(none);
         }
@@ -220,12 +222,15 @@ sealed class Flyout : Window {
             autoSub.Text = app.Subtitle;
             autoSub.Visibility = app.Subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
             look.IsChecked = Settings.AutoLook;
+            pause.IsChecked = app.PauseOnBattery;
+            pause.Visibility = Win.HasBattery ? Visibility.Visible : Visibility.Collapsed;
             modeBtn.Content = Theme.Dark ? "Switch to light mode" : "Switch to dark mode";
             bool any = app.Mons.Any(m => m.On);
             string keysText = Shortcut.Pair(Settings.Up, Settings.Down);
             hint.Text = !any ? $"{keysText} change brightness once a monitor with brightness control is connected."
                       : app.HotkeysOk ? $"{keysText}: the screen with the active window. Add Shift for fine steps."
                       : $"{keysText} are taken by another app. Change them in the gear menu.";
+            hint.Visibility = app.Mons.Count == 0 ? Visibility.Collapsed : Visibility.Visible;   // the empty state says it
             error.Text = app.Error ?? "";
             error.Visibility = app.Error == null ? Visibility.Collapsed : Visibility.Visible;
             login.IsChecked = Win.StartsWithWindows;

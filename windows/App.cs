@@ -46,6 +46,9 @@ sealed class Controller {
     public string? Error;
     public bool HotkeysOk;
     public Source Source => Cfg.Effective;
+    public bool PauseOnBattery => Settings.PauseOnBattery ?? Cfg.PauseOnBattery ?? true;
+    /// On battery with the pause switch on: no automatic work at all (sliders and hotkeys still work).
+    public bool Paused => PauseOnBattery && Win.HasBattery && Win.OnBattery;
 
     readonly WF.NotifyIcon tray;
     readonly Flyout panel;
@@ -151,7 +154,7 @@ sealed class Controller {
 
     /// 30 s on mains power, 2 min on battery. Nothing periodic when there is no automatic source.
     void StartTimers() {
-        if (Source == Source.Off) { timer.Stop(); idleWatch.Stop(); return; }
+        if (Source == Source.Off || Paused) { timer.Stop(); idleWatch.Stop(); return; }
         timer.Interval = TimeSpan.FromSeconds(Win.OnBattery ? 120 : 30);
         timer.Start(); idleWatch.Start();
     }
@@ -159,7 +162,13 @@ sealed class Controller {
     // SystemEvents may raise on another thread: always hop to the UI thread.
     void OnPower(object? s, PowerModeChangedEventArgs e) => ui.BeginInvoke(() => {
         if (e.Mode == PowerModes.Resume) { ForgetHandSet(); _ = Later(5000, "wake"); }   // DDC needs a moment after wake
-        else if (e.Mode == PowerModes.StatusChange) StartTimers();   // plugged in / unplugged
+        else if (e.Mode == PowerModes.StatusChange) {   // plugged in / unplugged
+            bool was = timer.IsEnabled;
+            StartTimers();
+            if (Paused && was) Log.Write("battery: paused");
+            if (!Paused && !was && Source != Source.Off) { Log.Write("power: resumed"); _ = Tick("on power"); }
+            else if (panel.IsVisible) panel.Sync();
+        }
     });
     void OnDisplays(object? s, EventArgs e) => ui.BeginInvoke(() => _ = Later(1500, "displays changed"));
     void OnPrefs(object? s, UserPreferenceChangedEventArgs e) => ui.BeginInvoke(() => {
@@ -219,6 +228,13 @@ sealed class Controller {
             if (on) ForgetHandSet();
             await Tick("automatic " + (on ? "on" : "off"));
         } catch (Exception e) { Log.Write("set auto: " + e); }
+    }
+
+    public void SetPause(bool on) {
+        Settings.PauseOnBattery = on;
+        Log.Write("pause on battery: " + (on ? "on" : "off"));
+        StartTimers();
+        _ = Tick("pause on battery");
     }
 
     public void SetLook(bool on) { Settings.AutoLook = on; lookDark = daylight = whiteLights = null; _ = Tick("look"); }
@@ -284,6 +300,9 @@ sealed class Controller {
         Error = ConfigError;
 
         if (Source == Source.Off) { Subtitle = ""; foreach (var m in mons) m.Manual = false; return; }
+        // Nothing to drive: no polling until a monitor appears (DisplaySettingsChanged ticks again).
+        if (mons.Length == 0) { Subtitle = ""; return; }
+        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; return; }
 
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {

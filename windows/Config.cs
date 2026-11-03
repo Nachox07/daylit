@@ -44,6 +44,7 @@ sealed class Config {
     public string? Source { get; set; }
     public Location? Location { get; set; }
     public int? ManualHold { get; set; }
+    public bool? PauseOnBattery { get; set; }   // default for the panel switch (true when missing)
     public HaConfig? HomeAssistant { get; set; }
     public MonitorConfig[]? Monitors { get; set; }
 
@@ -73,7 +74,7 @@ sealed class Config {
         }
         err = Validate(c);
         if (err != null) {   // keep what is safe: monitors and hold; drop the source settings
-            var safe = new Config { ManualHold = c.ManualHold, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
+            var safe = new Config { ManualHold = c.ManualHold, PauseOnBattery = c.PauseOnBattery, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
             return (Resolve(safe, out _), err);
         }
         return (Resolve(c, out err), err);
