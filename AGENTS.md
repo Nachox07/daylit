@@ -130,7 +130,9 @@ computer right now, or no token stored yet) and which config entry matched which
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
   Accessibility permission.
-- "Open at sign-in" / "Open at login" is a switch in the panel.
+- "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
+  in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
+  and *Automatic*. Hand-set levels survive a restart (kept for 12 hours).
 - "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on
   battery. "Light or dark mode from daylight" (on by default on Windows, off on macOS; on macOS the
   first switch asks for the Automation permission for System Events).

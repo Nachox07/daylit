@@ -124,7 +124,7 @@ within a second (it fades out), or use `screencapture -o -w` and click it.
 **Windows:** open the panel from the tray and use Snipping Tool (`Win+Shift+S`) in *Window* mode.
 For the indicator, press `Ctrl+Alt+PgUp` first, then snip within a second; it is translucent, so put
 a plain, empty window behind it first. Switch light/dark in Settings → Personalization → Colors (or
-the panel's *Switch to dark mode* button) and capture again.
+the gear menu's *Switch to dark mode*) and capture again.
 
 Check each image before committing: nothing personal, nothing cut off, same size as the one it
 replaces where possible. The README shows the two `panel` pairs; the indicator stills are optional.
