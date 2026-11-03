@@ -211,6 +211,27 @@ import DaylitCore
         refresh()
     }
 
+    /// Linked, and every connected monitor is in the group (false while some were taken out).
+    var syncAll: Bool { sync && syncOffsets.members(of: mons.map(\.uuid)) == mons.filter { $0.control != .none }.count }
+
+    func isLinked(_ m: Mon) -> Bool { sync && mons.count > 1 && syncOffsets.isMember(m.uuid) }
+
+    /// With three or more monitors: takes one out of the group or puts it back. A group of one is off.
+    func toggleMember(_ i: Int) {
+        guard sync, mons.indices.contains(i) else { return }
+        let m = mons[i]
+        if syncOffsets.isMember(m.uuid) {
+            syncOffsets.leave(m.uuid)
+            Log.write("sync: \(m.label) left the group")
+            if syncOffsets.members(of: mons.map(\.uuid)) < 2 { setSync(false); return }
+        } else {
+            syncOffsets.join(m.uuid, levels: mons.filter { $0.control != .none }.map { (key: $0.uuid, level: Int($0.level)) })
+            Log.write("sync: \(m.label) joined at \(syncOffsets.offsets[m.uuid] ?? 0)")
+        }
+        saveSync()
+        objectWillChange.send()
+    }
+
     func setLevel(_ i: Int, _ v: Double) {
         guard mons.indices.contains(i) else { return }
         mons[i].level = v
@@ -399,10 +420,10 @@ import DaylitCore
             let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
             return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
         }
-        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        // Sync: the first group member that is reporting drives the group; the others keep their offsets.
         var synced: [String: Int] = [:]
-        if sync, mons.count > 1, let li = mons.indices.first(where: { cur[$0] != nil }) {
-            adoptSync()
+        if sync, mons.count > 1 { adoptSync() }
+        if sync, mons.count > 1, let li = mons.indices.first(where: { cur[$0] != nil && syncOffsets.isMember(mons[$0].uuid) }) {
             synced = syncOffsets.targets(leader: mons[li].uuid, leaderTarget: ownTarget(mons[li]), keys: mons.map(\.uuid))
         }
         for i in mons.indices {

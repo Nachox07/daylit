@@ -355,6 +355,28 @@ final class WriteOnlyTests: XCTestCase {
 }
 
 final class SyncTests: XCTestCase {
+    func testALeavingMonitorStaysOutAndTheOthersKeepTheirOffsets() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40), (key: "tv", level: 75)])
+        s.leave("a")
+        XCTAssertEqual(s.offsets, ["b": -20, "tv": 15])
+        XCTAssertEqual(s.follow(key: "b", level: 30, keys: ["a", "b", "tv"]), ["tv": 65])
+        XCTAssertEqual(s.follow(key: "a", level: 10, keys: ["a", "b", "tv"]), [:], "a monitor outside the group moves alone")
+        s.adopt([(key: "a", level: 10), (key: "b", level: 30), (key: "tv", level: 65)])
+        XCTAssertFalse(s.isMember("a"), "not adopted back by itself")
+        XCTAssertEqual(s.members(of: ["a", "b", "tv"]), 2)
+    }
+    func testRejoiningUsesTheCurrentOffset() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        s.leave("b")
+        s.join("b", levels: [(key: "a", level: 50), (key: "b", level: 20)])
+        XCTAssertEqual(s.offsets["b"], -30)
+        XCTAssertTrue(s.excluded.isEmpty)
+    }
+    func testOffsetsSavedBeforeGroupsStillLoad() throws {
+        let s = try JSONDecoder().decode(SyncOffsets.self, from: Data(#"{"offsets":{"a":0,"b":-5}}"#.utf8))
+        XCTAssertEqual(s.offsets["b"], -5); XCTAssertTrue(s.excluded.isEmpty)
+    }
+
     func testCaptureKeepsOffsetsFromTheFirstMonitor() {
         let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40), (key: "c", level: 75)])
         XCTAssertEqual(s.offsets, ["a": 0, "b": -20, "c": 15])

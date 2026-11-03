@@ -72,7 +72,11 @@ sealed class Controller {
         app = Application.Current; ui = app.Dispatcher;
         Cfg = cfg; Mons = mons; AutoOn = true; Subtitle = subtitle; HotkeysOk = true;
         tray = null!; panel = null!; keys = null!;
+        if (Settings.SyncMonitors) syncOffsets = SyncOffsets.Capture(mons.Select(x => (x.Key, LevelOf(x))));
     }
+
+    /// Snapshots: a partial group, with this monitor taken out.
+    public void SnapshotLeave(Mon m) => syncOffsets.Leave(m.Key);
 
     public Controller(Application app) {
         this.app = app;
@@ -257,6 +261,25 @@ sealed class Controller {
         if (syncOffsets.Adopt(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))).ToList())) Settings.SyncOffsets = syncOffsets;
     }
 
+    public bool IsLinked(Mon m) => Settings.SyncMonitors && Mons.Count > 1 && syncOffsets.IsMember(m.Key);
+    /// Linked, and every usable monitor is in the group (false while some were taken out).
+    public bool SyncAll => Settings.SyncMonitors && syncOffsets.Members(Mons.Select(x => x.Key)) >= Mons.Count(x => x.Usable);
+
+    /// With three or more monitors: takes one out of the group or puts it back. A group of one is off.
+    public void ToggleMember(Mon m) {
+        if (!Settings.SyncMonitors) return;
+        if (syncOffsets.IsMember(m.Key)) {
+            syncOffsets.Leave(m.Key);
+            Log.Write($"sync: {m.Label} left the group");
+            if (syncOffsets.Members(Mons.Select(x => x.Key)) < 2) { SetSync(false); return; }
+        } else {
+            syncOffsets.Join(m.Key, Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))).ToList());
+            Log.Write($"sync: {m.Label} joined at {syncOffsets.Offsets.GetValueOrDefault(m.Key)}");
+        }
+        Settings.SyncOffsets = syncOffsets;
+        panel.Sync();
+    }
+
     public void SetSync(bool on) {
         Settings.SyncMonitors = on;
         if (on) {
@@ -399,10 +422,10 @@ sealed class Controller {
         wasHere = here;
         if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
 
-        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        // Sync: the first group member that is reporting drives the group; the others keep their offsets.
         var synced = new Dictionary<string, int>();
-        if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null) is int li && li >= 0) {
-            AdoptSync();
+        if (Settings.SyncMonitors && mons.Length > 1) AdoptSync();
+        if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) is int li && li >= 0) {
             synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun), mons.Select(x => x.Key));
         }
         bool holdsChanged = false;

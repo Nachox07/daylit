@@ -51,7 +51,7 @@ sealed class Flyout : Window {
     readonly CheckBox auto;
     readonly Grid autoRow;
     readonly List<Border> cards = new();
-    readonly List<(Mon m, Slider s, TextBlock pct, TextBlock note, Border card)> rowViews = new();
+    readonly List<(Mon m, Slider s, TextBlock pct, TextBlock note, Border card, Button member)> rowViews = new();
     Button? link;
     IntPtr hwnd;
     bool syncing;
@@ -209,22 +209,32 @@ sealed class Flyout : Window {
             </ControlTemplate>
             """);
         b.Cursor = WI.Cursors.Hand;
-        b.Click += (_, _) => app.SetSync(!Settings.SyncMonitors);
+        b.Click += (_, _) => app.SetSync(!Settings.SyncMonitors || !app.SyncAll);   // a partial group: link them all
         System.Windows.Automation.AutomationProperties.SetName(b, "Sync monitors");
         return b;
     }
 
     void StyleLink() {
         if (link == null) return;
-        bool on = Settings.SyncMonitors;
+        bool on = Settings.SyncMonitors, all = app.SyncAll, many = app.Mons.Count > 2;
         link.Visibility = app.Mons.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        link.Background = on ? Palette.Accent : Brushes.Transparent;
+        // Filled: all linked. Accent outline: some taken out of the group. Plain: off.
+        link.Background = on && all ? Palette.Accent : Brushes.Transparent;
         link.BorderBrush = on ? Palette.Accent : Brushes.Transparent;
-        link.Foreground = on ? Brushes.White : Palette.Secondary;
-        link.ToolTip = on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."
-                          : "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is.";
-        System.Windows.Automation.AutomationProperties.SetHelpText(link, on ? "On" : "Off");
-        foreach (var r in rowViews) r.card.BorderBrush = on ? Palette.Accent : Palette.CardBorder;
+        link.Foreground = on && all ? Brushes.White : on ? Palette.Accent : Palette.Secondary;
+        link.ToolTip = !on ? "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is."
+                     : all ? "Monitors linked. Click to unlink." + (many ? " The link on each monitor takes it out of the group." : "")
+                     : "Some monitors linked. Click to link them all.";
+        System.Windows.Automation.AutomationProperties.SetHelpText(link, !on ? "Off" : all ? "On" : "Some");
+        foreach (var r in rowViews) {
+            bool member = app.IsLinked(r.m);
+            r.card.BorderBrush = member ? Palette.Accent : Palette.CardBorder;
+            r.member.Visibility = on && many ? Visibility.Visible : Visibility.Collapsed;
+            r.member.Foreground = member ? Palette.Accent : Palette.Secondary;
+            r.member.Opacity = member ? 1 : 0.5;
+            r.member.ToolTip = member ? "Linked. Click to move this monitor on its own." : "Not linked. Click to link it with the others.";
+            System.Windows.Automation.AutomationProperties.SetHelpText(r.member, member ? "On" : "Off");
+        }
     }
 
     string KeysHint {
@@ -251,13 +261,21 @@ sealed class Flyout : Window {
             top.ColumnDefinitions.Add(new ColumnDefinition());
             top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var icon = new TextBlock { Text = Palette.Monitor, FontFamily = Palette.Icons, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
             var name = new TextBlock { Text = m.Label, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             var note = Small(""); note.VerticalAlignment = VerticalAlignment.Center; note.Margin = new Thickness(8, 0, 8, 0); note.TextWrapping = TextWrapping.NoWrap;
             var pct = new TextBlock { Text = "–", VerticalAlignment = VerticalAlignment.Center, MinWidth = 40, TextAlignment = TextAlignment.Right };
             Typography.SetNumeralAlignment(pct, FontNumeralAlignment.Tabular);
-            Grid.SetColumn(name, 1); Grid.SetColumn(note, 2); Grid.SetColumn(pct, 3);
-            top.Children.Add(icon); top.Children.Add(name); top.Children.Add(note); top.Children.Add(pct);
+            // With three or more monitors linked: leave or rejoin the group, one monitor at a time.
+            var member = new Button { Content = new TextBlock { Text = "\uE71B", FontFamily = Palette.Icons, FontSize = 12 },
+                                      Padding = new Thickness(4), Margin = new Thickness(0, 0, 6, 0), Background = Brushes.Transparent,
+                                      BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center, Cursor = WI.Cursors.Hand,
+                                      Visibility = Visibility.Collapsed };
+            System.Windows.Automation.AutomationProperties.SetName(member, $"Link {m.Label}");
+            member.Click += (_, _) => app.ToggleMember(m);
+            Grid.SetColumn(name, 1); Grid.SetColumn(note, 2); Grid.SetColumn(member, 3); Grid.SetColumn(pct, 4);
+            top.Children.Add(icon); top.Children.Add(name); top.Children.Add(note); top.Children.Add(member); top.Children.Add(pct);
 
             var bottom = new Grid();
             bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -281,7 +299,7 @@ sealed class Flyout : Window {
 
             var card = Card(new StackPanel { Children = { top, bottom } });
             rows.Children.Add(card);
-            rowViews.Add((m, s, pct, note, card));
+            rowViews.Add((m, s, pct, note, card, member));
             if (i < app.Mons.Count - 1) {
                 rows.Children.Add(new Border { Height = 10 });   // the gap between cards
             }
@@ -294,7 +312,7 @@ sealed class Flyout : Window {
         if (rowViews.Count != app.Mons.Count || rowViews.Where((r, i) => !ReferenceEquals(r.m, app.Mons[i])).Any()) { Rebuild(); return; }
         syncing = true;
         try {
-            foreach (var (m, s, pct, note, card) in rowViews) {
+            foreach (var (m, s, pct, note, card, _) in rowViews) {
                 s.IsEnabled = m.Usable;
                 card.Opacity = m.Usable ? 1 : 0.55;
                 note.Text = m.Untried ? "level not reported" : m.Reads == ReadState.Silent ? "refused (DDC/CI off?)"
