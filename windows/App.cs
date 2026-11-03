@@ -49,6 +49,7 @@ sealed class Controller {
     DateTime panelHidden;
     bool busy, again, wasHere = true, wasIdle;
     bool? lookDark, daylight, whiteLights;
+    string? lastHaError;
 
     public Controller(Application app) {
         this.app = app;
@@ -260,10 +261,13 @@ sealed class Controller {
             s = await HAClient.State(Cfg, mons);
             if (s == null) {
                 haDown = true;
+                if (lastHaError != HAClient.LastError) Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable"));
+                lastHaError = HAClient.LastError;
                 Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
                 if (Cfg.Location != null) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
+        if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         AutoOn = s.Auto ?? Settings.Auto;
@@ -271,6 +275,7 @@ sealed class Controller {
         // The Mac and this PC may share these monitors through input switching. Only the machine in
         // use drives them; coming back applies the current target and publishes again.
         bool here = Win.IdleSeconds() < Config.IdleSeconds;
+        if (here != wasHere) Log.Write(here ? "back: applying targets" : "idle: paused");
         if (here && !wasHere) { ForgetHandSet(); foreach (var m in mons) m.Published = null; }
         wasHere = here;
         if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
@@ -285,13 +290,16 @@ sealed class Controller {
                 bool handSet = m.LastSet != null && c != m.LastSet;
                 if (handSet && Math.Abs(target - (m.LastTarget ?? target)) < Cfg.Hold) m.Manual = true;
                 else if (here) {
-                    if (c != target) await Task.Run(() => m.Write(target));
+                    if (c != target) { Log.Write($"auto: {m.Label} {c}% → {target}%"); await Task.Run(() => m.Write(target)); }
                     applied = target; m.Cur = target; m.LastSet = target; m.LastTarget = target;
                 }
             }
             if (here && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
-                if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) m.Published = applied;   // retried next tick if it failed
+                if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
+                    m.Published = applied;
+                    Log.Write($"publish: {m.Spec!.HomeAssistant!.Sensor} = {applied}" + (m.Manual ? " (manual)" : ""));
+                }
             }
         }
 
@@ -315,6 +323,7 @@ sealed class Controller {
         whiteLights = lit && s.Bri >= 200 && s.Sat <= 35 ? true : !lit || s.Bri < 170 || s.Sat > 45 ? false : whiteLights ?? false;
         bool dark = !(daylight.Value || whiteLights.Value);
         if (dark != lookDark) {
+            Log.Write("theme: " + (dark ? "dark" : "light"));
             Look.SetDark(dark);
             lookDark = dark;
             tray.Icon = Theme.SunIcon();
