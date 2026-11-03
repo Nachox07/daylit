@@ -49,7 +49,8 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
 - **macOS** (`Daylit-mac-<version>.zip`, Apple silicon and Intel): unzip and move `Daylit.app` to
   Applications. The app is not notarized by Apple, so the first open is blocked: open System
   Settings → Privacy & Security, scroll to the message about Daylit and click **Open Anyway**. For
-  DDC monitors also run `brew install m1ddc`.
+  DDC monitors on Apple silicon also run `brew install m1ddc`; m1ddc does not support Intel Macs,
+  where only monitors that accept macOS's own brightness control work.
 - **Windows** (`Daylit-windows-<version>.zip`): unzip anywhere, for example
   `%LOCALAPPDATA%\Programs\Daylit`, and run `Daylit.exe`. SmartScreen may warn about an unknown
   publisher: **More info → Run anyway**. It needs the
@@ -83,15 +84,15 @@ flowchart LR
     end
     SUN[Sun position from<br/>latitude/longitude] --> M
     SUN --> W
-    HA -- "POST /api/template<br/>every 30 s" --> M[Daylit for macOS]
-    HA -- "POST /api/template<br/>every 30 s" --> W[Daylit for Windows]
+    HA -- "POST /api/template<br/>every 30 s (2 min on battery)" --> M[Daylit for macOS]
+    HA -- "POST /api/template<br/>every 30 s (2 min on battery)" --> W[Daylit for Windows]
     M -- "/api/states" --> P
     W -- "/api/states" --> P
     M -- "DisplayServices or DDC/CI (m1ddc)" --> D1[Monitor]
     W -- "SDR white level (HDR) or DDC/CI" --> D2[Monitor]
 ```
 
-Every 30 seconds (and at once after wake, a display change or opening the panel) each app works out
+Every 30 seconds, every 2 minutes on battery (and at once after wake, a display change or opening the panel) each app works out
 a target per monitor from three levels you choose: *day*, *blind closed* and *night*.
 
 1. The daytime level slides between *blind closed* and *day* with the blind position.
@@ -99,7 +100,7 @@ a target per monitor from three levels you choose: *day*, *blind closed* and *ni
 3. Room lights on around dusk keep it a little above *night*, so a lit room is not too dark.
 
 A level you set by hand stays until the target moves 5 points, so Daylit does not fight you. The
-sun's position is computed locally and matches Home Assistant's `sun.sun` to about 0.01°.
+sun's position is computed locally; the tests check it against NOAA reference values to within 0.05°.
 
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.

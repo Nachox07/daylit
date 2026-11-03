@@ -20,7 +20,7 @@ in the same menu.
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights`, each optional. |
 | `manualHold` | A level you set by hand stays until the automatic target moves this many points (default 5). |
 | `pauseOnBattery` | Starting value of the panel's *Pause on battery* switch (default `true`); the switch remembers your choice. |
-| `ddcTool` | macOS only: path to `m1ddc` if it is not in Homebrew's usual place. |
+| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
 Find the `match` text for your monitors with the built-in commands:
@@ -75,6 +75,17 @@ network, where the token would cross the internet unencrypted.
 Entity ids must be plain `domain.object_id` (lowercase letters, digits, `_`). Anything else is
 reported as a config problem and Home Assistant is not contacted until it is fixed.
 
+### Security notes
+
+- **macOS keychain.** Daylit reads the token through `/usr/bin/security`, so the keychain prompt
+  names `security`. Answering *Always Allow* lets any process running as you read that one item
+  with the same tool. Daylit doesn't read the keychain in-process because the downloadable build is
+  not signed with a stable Developer ID: the keychain would ask again after every update. If that
+  trade-off doesn't suit you, answer *Allow* instead (it asks again on each start).
+- **The config file is trusted.** Whoever can edit `config.json` already runs code as you, so
+  Daylit doesn't try to defend against a hostile config beyond rejecting malformed values (entity
+  ids and the URL above).
+
 ## Keys and shortcuts
 
 - macOS: the keyboard's brightness keys change the monitor holding the focused window (they need
@@ -113,8 +124,9 @@ set.
 ## Troubleshooting
 
 - **A monitor shows "no brightness control".** Turn on DDC/CI in the monitor's own menu, and try
-  another cable or port: some docks and adapters block DDC. On macOS, `brew install m1ddc` if it is
-  missing.
+  another cable or port: some docks and adapters block DDC. On Apple-silicon Macs, `brew install m1ddc` if it is
+  missing. m1ddc does not support Intel Macs; there only monitors that accept macOS's own
+  brightness control work.
 - **A monitor says "doesn't report its brightness".** Some monitors accept DDC changes but never
   answer reads. Move its slider once: if the monitor reacts, Daylit keeps it as write-only (the
   slider shows the last level sent, and automatic mode drives it). If it refuses, check DDC/CI in

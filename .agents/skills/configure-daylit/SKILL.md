@@ -15,7 +15,7 @@ The full guide is [AGENTS.md](../../../AGENTS.md) → *Set up Daylit for a user*
    **Open Anyway**; Windows SmartScreen **More info → Run anyway**, plus the .NET 10 Desktop Runtime
    (`winget install Microsoft.DotNet.DesktopRuntime.10`) if missing. If the user prefers not to run
    unsigned downloads, build from source instead: Windows .NET 10 SDK + `windows\build.ps1`; macOS
-   `mac/build.sh`. For DDC monitors on macOS also `brew install m1ddc`.
+   `mac/build.sh`. For DDC monitors on Apple-silicon Macs also `brew install m1ddc` (Intel Macs: not supported by m1ddc).
 2. **Detect** the monitors:
    - Windows: `& "$env:LOCALAPPDATA\Programs\Daylit\Daylit.exe" --list-monitors | Out-String`
    - macOS: `~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors`
@@ -30,8 +30,9 @@ The full guide is [AGENTS.md](../../../AGENTS.md) → *Set up Daylit for a user*
 4. **Write** the config: Windows `%APPDATA%\Daylit\config.json`, macOS
    `~/.config/daylit/config.json`. Keep existing keys; edit, don't overwrite blindly.
    `config.example.json` shows every key.
-5. **Validate** with `--check-config` (same commands as step 2) until `ok` is true. Explain any
-   `notes`.
+5. **Validate** until `ok` is true, and explain any `notes`:
+   - Windows: `& "$env:LOCALAPPDATA\Programs\Daylit\Daylit.exe" --check-config | Out-String`
+   - macOS: `~/Applications/Daylit.app/Contents/MacOS/Daylit --check-config`
 6. **Reload**: tell the user to use the gear menu → *Reload config*, or start the app.
 
 Never ask for, type, read or store the Home Assistant token. On Windows the app prompts the user

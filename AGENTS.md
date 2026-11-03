@@ -7,7 +7,8 @@ a blind and room lights). This file tells an agent how to **set it up for a user
 ## Rules
 
 - **Never handle the Home Assistant token.** Don't ask for it, type it, paste it, read it from the
-  credential store or put it in any file. The app asks on first start and the user pastes it.
+  credential store or put it in any file. On Windows the app asks on first start and the user
+  pastes it; on macOS the user stores it with `security add-generic-password` (see step 5).
   Agents may only check that one *is stored* (`--check-config` reports `tokenStored`).
 - **Don't change Home Assistant** unless the user asks. Creating the helpers is the user's call;
   offer [`homeassistant/daylit_helpers.yaml`](homeassistant/daylit_helpers.yaml).
@@ -39,7 +40,8 @@ open ~/Applications/Daylit.app
 
 The first open is blocked because the app is not notarized. Tell the user: System Settings →
 Privacy & Security → scroll to the message about Daylit → **Open Anyway**, then confirm. For DDC
-monitors also `brew install m1ddc`. Then walk them through the permissions macOS asks for
+monitors on Apple silicon also `brew install m1ddc` (not available for Intel Macs: there only
+monitors that accept macOS's own brightness control work). Then walk them through the permissions macOS asks for
 (Accessibility for the brightness keys, Local Network for Home Assistant).
 
 Windows 10/11:
@@ -58,7 +60,7 @@ If SmartScreen shows "Windows protected your PC", tell the user to click **More 
 | | |
 |---|---|
 | Windows | .NET 10 SDK (`winget install Microsoft.DotNet.SDK.10`), then `windows\build.ps1` → `%LOCALAPPDATA%\Programs\Daylit\Daylit.exe` |
-| macOS | Xcode command-line tools, then `mac/build.sh` → `~/Applications/Daylit.app`; for DDC monitors also `brew install m1ddc` |
+| macOS | Xcode command-line tools, then `mac/build.sh` → `~/Applications/Daylit.app`; for DDC monitors on Apple silicon also `brew install m1ddc` |
 
 ### 2. Find the monitors
 

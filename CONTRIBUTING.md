@@ -98,8 +98,10 @@ publishes, idle/back, battery pause, theme switches, Home Assistant errors).
 
 ## Screenshots
 
-Files: `docs/screenshots/{mac,windows}-{panel,hud|osd}-{light,dark}.png`. The Mac on-screen
-indicator is `hud`, the Windows one `osd`. Capture the window only, with no shadow, desktop, other
+Files: `docs/screenshots/{mac,windows}-panel-{light,dark}.png`, plus the optional on-screen
+indicator stills `mac-hud-{light,dark}.png` (committed) and `windows-osd-{light,dark}.png` (not
+committed: Windows' translucent indicator shows the desktop behind it, so only add them over a
+plain background). Capture the window only, with no shadow, desktop, other
 apps or personal names on screen. Use generic monitor labels (the system names are fine) and a
 config without your own Home Assistant address showing in the panel.
 
