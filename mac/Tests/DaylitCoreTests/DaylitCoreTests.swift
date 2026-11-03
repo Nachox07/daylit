@@ -70,6 +70,13 @@ final class TargetTests: XCTestCase {
         XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: [90, -1, 10, -1, 0]), [90, 40, 10])
         XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: nil), [70, 40, 20])
     }
+    func testSunFallbackKeepsHomeAssistantLevelsButNotTheSetHelper() {
+        let row: [Double] = [94, 60, 30, 55, 1_700_000_000]
+        let kept = fallbackLevels(row)
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: kept), [94, 60, 30])
+        XCTAssertNotNil(RemoteSet(row: row))
+        XCTAssertNil(RemoteSet(row: kept))
+    }
 }
 
 final class DecideTests: XCTestCase {

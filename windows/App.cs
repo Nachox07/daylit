@@ -334,8 +334,10 @@ sealed class Controller {
     /// Home Assistant gave: a network blip must not swap them for the defaults and move the screens.
     Inputs SunInputs(IReadOnlyList<Mon> mons) {
         var l = Cfg.Location!;
-        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), lastHaPos ?? 100, false, 0, 100,
-                          mons.Select(m => m.HaLevels ?? new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null, lastHaPos != null);
+        bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
+        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
+                          mons.Select(m => (keep ? m.HaLevels : null) ?? new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null,
+                          keep && lastHaPos != null);
     }
     double? lastHaPos;
 

@@ -19,6 +19,10 @@ public func effectiveLevels(local: [Double], fromHA: [Double]?) -> [Double] {
     return lv
 }
 
+/// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night]. The "set" helper
+/// is dropped, so an old remote value is never replayed while Home Assistant is down.
+public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(3)) }
+
 /// A value of a monitor's Home Assistant "set" helper and when it last changed (Unix seconds).
 public struct RemoteSet: Equatable {
     public var value: Double
