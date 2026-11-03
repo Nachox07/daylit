@@ -105,10 +105,12 @@ computer right now, or no token stored yet) and which config entry matched which
 
 ## Work on the code
 
-- `windows/`: WPF on .NET 10 with the Fluent theme. `App.cs` decisions, `Ui.cs` windows,
-  `Displays.cs` monitor IO, `Sources.cs` Home Assistant and sun, `Config.cs`, `Cli.cs`.
-  Build: `dotnet build windows/Daylit.csproj -c Release` (0 errors before pushing).
-- `mac/`: one Swift file, `mac/build.sh` (0 errors and 0 warnings before pushing). `DAYLIT_CONFIG`
+- `windows/`: WPF on .NET 10 with the Fluent theme. `Rules.cs` decisions and the sun (pure, tested),
+  `App.cs` the tick, `Ui.cs` windows, `Displays.cs` monitor IO, `Sources.cs` Home Assistant,
+  `Config.cs`, `Cli.cs`. Build: `dotnet build windows/Daylit.csproj -c Release`; tests:
+  `dotnet test windows/tests/Daylit.Tests.csproj` (runs on any OS). Both green before pushing.
+- `mac/`: a Swift package. `Sources/DaylitCore` decisions (pure, tested), `Sources/Daylit` the app.
+  Tests: `cd mac && swift test`; build: `mac/build.sh` (0 errors and 0 warnings before pushing). `DAYLIT_CONFIG`
   overrides the config path, `DAYLIT_DEBUG=1` logs to stdout, `DAYLIT_NO_KEYS=1` skips the
   Accessibility prompt, `DAYLIT_SHOW=panel` and `DAYLIT_APPEARANCE=light|dark` are for screenshots.
 - Keep the two apps behaving the same (README → *How it works*). The HDR rule matters: with HDR on,

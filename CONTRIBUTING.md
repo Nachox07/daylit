@@ -12,7 +12,15 @@ mac/build.sh                         # → ~/Applications/Daylit.app (or: mac/bu
 open ~/Applications/Daylit.app
 ```
 
-One Swift file, `mac/Daylit.swift`, compiled with `swiftc` (no Xcode project).
+A Swift package (`mac/Package.swift`, no Xcode project). `build.sh` runs `swift build` and wraps the
+binary into the app bundle with its Info.plist and signature.
+
+- `Sources/DaylitCore/`: the decisions, with no AppKit: `Config`, `Sun`, `Rules` (brightness
+  target, hand-set hold, idle, the Home Assistant "set" helper, light/dark), `HATemplate`.
+- `Sources/Daylit/`: the app. `Model.swift` runs the tick, `Displays.swift` monitor I/O,
+  `Sources.swift` Home Assistant calls and the keychain, `Keys.swift` brightness keys and
+  shortcuts, `UI.swift` the panel, on-screen indicator and shortcuts window, `Look.swift`,
+  `Cli.swift`, `Log.swift`, `App.swift`.
 
 **Windows** (Windows 10/11, .NET 10 SDK):
 
@@ -21,13 +29,29 @@ windows\build.ps1                    # → %LOCALAPPDATA%\Programs\Daylit\Daylit
 dotnet build windows\Daylit.csproj -c Release
 ```
 
-WPF with the Fluent theme. `App.cs` holds the decisions, `Ui.cs` the windows, `Displays.cs` monitor
-I/O, `Sources.cs` Home Assistant and the sun, `Config.cs`, `Cli.cs`. It also builds on macOS or
-Linux (`EnableWindowsTargeting`), which is enough to check that it compiles.
+WPF with the Fluent theme. `Rules.cs` holds the decisions and the sun (no WPF or Win32), `App.cs`
+runs the tick, `Ui.cs` the windows, `Displays.cs` monitor I/O, `Sources.cs` Home Assistant calls,
+`Config.cs`, `Cli.cs`. It also builds on macOS or Linux (`EnableWindowsTargeting`), which is
+enough to check that it compiles.
+
+## Tests
+
+The decisions are tested on both sides with the same cases: sun elevation against known values,
+the brightness target, a hand-set level being kept, the idle machine staying quiet, the Home
+Assistant "set" helper, the light/dark gap, config parsing (missing, broken, the example file) and
+the template.
+
+```sh
+cd mac && swift test                                 # DaylitCore, XCTest
+dotnet test windows/tests/Daylit.Tests.csproj        # Rules.cs + Config.cs, xUnit; runs on any OS
+```
+
+CI runs both before building. Put new logic where it can be tested (`DaylitCore` / `Rules.cs`) and
+keep the app files for the parts that touch the OS: displays, keys, windows, network.
 
 ## Rules for every change
 
-- **0 errors before you push**, and on macOS 0 warnings too. CI builds both apps on every push
+- **Tests pass and 0 errors before you push**, and on macOS 0 warnings too. CI tests and builds both apps on every push
   (`.github/workflows/build.yml`). The macOS job runs on `macos-14` with an older Swift than a
   current Mac, and it is stricter about the main actor: don't give a SwiftUI `@State` a default
   value that reads `@MainActor` state; pass it in from the caller instead.
