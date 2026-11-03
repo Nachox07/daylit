@@ -69,7 +69,11 @@ into another computer right now) and which config entry matched which monitor.
 
 With an `http://` URL the token travels unencrypted on your local network; use your `https://`
 address if you have one. On macOS, plain `http://` works for local addresses only (an IP, `*.local`
-or a single-word host name).
+or a single-word host name). `--check-config` warns when an `http://` URL points outside your local
+network, where the token would cross the internet unencrypted.
+
+Entity ids must be plain `domain.object_id` (lowercase letters, digits, `_`). Anything else is
+reported as a config problem and Home Assistant is not contacted until it is fixed.
 
 ## Keys and shortcuts
 
