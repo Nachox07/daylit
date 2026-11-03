@@ -28,6 +28,8 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>LSUIElement</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>NSAppleEventsUsageDescription</key><string>Daylit switches light and dark mode through System Events, only if you turn that on.</string>
+  <key>NSLocationUsageDescription</key><string>Only when you click Locate Me: Daylit saves your city-level location to follow the sun.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Only when you click Locate Me: Daylit saves your city-level location to follow the sun.</string>
   <key>NSLocalNetworkUsageDescription</key><string>Daylit reads the sun, blind and lights from Home Assistant.</string>
 </dict></plist>
 PL

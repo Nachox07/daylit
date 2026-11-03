@@ -477,6 +477,8 @@ final class ConfigEditTests: XCTestCase {
         XCTAssertEqual(ha["lights"] as? String, "light.desk")
         let loc = o["location"] as! [String: Double]
         XCTAssertEqual(loc["latitude"], 51.48); XCTAssertEqual(loc["longitude"], 0)
+        let text = String(data: try ConfigPatch.apply(e, to: Data(original.utf8)), encoding: .utf8)!
+        XCTAssertTrue(text.contains("51.48"), text); XCTAssertFalse(text.contains("51.479"), text)
         let mons = o["monitors"] as! [[String: Any]]
         XCTAssertEqual(mons.count, 2)
         XCTAssertEqual(mons[0]["control"] as? String, "ddc")

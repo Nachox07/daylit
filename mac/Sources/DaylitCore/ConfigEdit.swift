@@ -110,6 +110,9 @@ public enum ConfigPatch {
         return out
     }
 
-    static func round2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
+    /// Two decimals, written as typed: a Double would serialize 51.48 as 51.479999999999997.
+    static func round2(_ v: Double) -> NSDecimalNumber {
+        NSDecimalNumber(string: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), v == 0 ? 0 : v))
+    }
     static func clamp(_ v: Int) -> Int { min(100, max(0, v)) }
 }
