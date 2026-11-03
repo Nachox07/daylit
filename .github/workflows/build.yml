@@ -5,7 +5,11 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - run: mac/build.sh "$RUNNER_TEMP"
+      - name: Test (DaylitCore)
+        run: swift test
+        working-directory: mac
+      - name: Build Daylit.app
+        run: mac/build.sh "$RUNNER_TEMP"
   windows:
     runs-on: windows-latest
     steps:
@@ -13,7 +17,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: dotnet publish windows/Daylit.csproj -c Release -o out --nologo
+      - name: Test (Rules, Config)
+        run: dotnet test windows/tests/Daylit.Tests.csproj --nologo
+      - name: Build Daylit.exe
+        run: dotnet publish windows/Daylit.csproj -c Release -o out --nologo
       - uses: actions/upload-artifact@v4
         with:
           name: Daylit-windows
