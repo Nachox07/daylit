@@ -110,7 +110,8 @@ open ~/Applications/Daylit.app
 ```
 
 The first start asks for Accessibility permission (needed for the brightness keys; the `⌃⌥⌘↑/↓`
-shortcuts work without it). The build is signed with your Apple Development identity when you have
+shortcuts work without it) and, with Home Assistant on your network, for Local Network access.
+Until you allow it, Daylit cannot reach Home Assistant and uses the sun and your local levels. The build is signed with your Apple Development identity when you have
 one, so the permission survives rebuilds. Opening the app again shows its panel. Log:
 `~/Library/Logs/Daylit/daylit.log`.
 
