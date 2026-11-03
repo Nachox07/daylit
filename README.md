@@ -15,6 +15,15 @@ There are two small native apps with the same behaviour:
 Both find your external monitors by themselves and show a slider per monitor, a fading on-screen
 indicator when you use the keys, and an "Automatic" switch.
 
+<p>
+  <img src="docs/screenshots/windows-panel-light.png" width="300" alt="Daylit panel on Windows, light mode">
+  <img src="docs/screenshots/windows-panel-dark.png" width="300" alt="Daylit panel on Windows, dark mode">
+</p>
+<p>
+  <img src="docs/screenshots/windows-osd-light.png" width="260" alt="On-screen indicator, light">
+  <img src="docs/screenshots/windows-osd-dark.png" width="260" alt="On-screen indicator, dark">
+</p>
+
 ## Three ways to run it
 
 | Source | What you set up | What drives brightness |
