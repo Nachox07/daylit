@@ -440,5 +440,23 @@ public class ConfigPatchTests {
     }
 
     [Fact]
+    public void TwoMonitorsMatchingOneEntryDoNotOverwriteEachOther() {
+        var a = new SettingsEdit.Monitor("DELL U2723QE (1)", "U2723QE", "", 80, 40, 20);
+        var b = new SettingsEdit.Monitor("DELL U2723QE (2)", "U2723QE", "", 10, 10, 10);
+        var o = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [a, b]), """{"monitors":[{"match":"U2723QE"}]}"""));
+        Assert.Single(o["monitors"]!.AsArray());
+        Assert.Equal(80, (int)o["monitors"]![0]!["day"]!);
+    }
+
+    [Fact]
+    public void LocationKeepsOtherKeysAndCommentsAreDetected() {
+        var o = Json(ConfigPatch.Apply(new SettingsEdit("sun", 1, 2, []), """{"location":{"latitude":0,"longitude":0,"note":"x"}}"""));
+        Assert.Equal("x", (string)o["location"]!["note"]!);
+        Assert.True(ConfigPatch.HasComments("{ // hi\n}"));
+        Assert.False(ConfigPatch.HasComments("""{ "a": "//not" }"""));
+        Assert.ThrowsAny<Exception>(() => ConfigPatch.Apply(new SettingsEdit("off", null, null, []), """{"monitors":[null,{"match":"A"}]}"""));
+    }
+
+    [Fact]
     public void SuggestsTheModelNumber() => Assert.Equal("AW3821DW", ConfigPatch.SuggestMatch("Dell AW3821DW"));
 }

@@ -496,9 +496,24 @@ final class ConfigEditTests: XCTestCase {
         XCTAssertNil(o["homeAssistant"])
     }
 
+    func testTwoMonitorsMatchingOneEntryDoNotOverwriteEachOther() throws {
+        let a = SettingsEdit.Monitor(name: "DELL U2723QE (1)", suggestedMatch: "U2723QE", label: "", day: 80, blindDown: 40, night: 20)
+        let b = SettingsEdit.Monitor(name: "DELL U2723QE (2)", suggestedMatch: "U2723QE", label: "", day: 10, blindDown: 10, night: 10)
+        let o = json(try ConfigPatch.apply(SettingsEdit(source: "off", monitors: [a, b]), to: Data(#"{"monitors":[{"match":"U2723QE"}]}"#.utf8)))
+        let mons = o["monitors"] as! [[String: Any]]
+        XCTAssertEqual(mons.count, 1); XCTAssertEqual(mons[0]["day"] as? Int, 80)
+    }
+    func testLocationKeepsOtherKeysAndCommentsAreDetected() throws {
+        let o = json(try ConfigPatch.apply(SettingsEdit(source: "sun", latitude: 1, longitude: 2),
+                                           to: Data(#"{"location":{"latitude":0,"longitude":0,"note":"x"}}"#.utf8)))
+        XCTAssertEqual((o["location"] as! [String: Any])["note"] as? String, "x")
+        XCTAssertTrue(ConfigText.hasComments(Data("{ // hi\n}".utf8)))
+        XCTAssertFalse(ConfigText.hasComments(Data(#"{ "a": "//not", }"#.utf8)))
+    }
     func testAnInvalidResultIsRefused() {
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "homeAssistant", haURL: "homeassistant.local"), to: nil))
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun", lights: "Desk lamp"), to: nil))
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun"), to: Data("[1]".utf8)))
+        XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "off"), to: Data(#"{"monitors":[null,{"match":"A"}]}"#.utf8)))
     }
 }

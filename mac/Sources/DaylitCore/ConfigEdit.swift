@@ -3,10 +3,16 @@
 import Foundation
 
 public enum ConfigText {
+    /// True when the file has comments, which saving from the settings window does not keep.
+    public static func hasComments(_ d: Data) -> Bool { scan(d).comments }
+
     /// The JSON with `//` and `/* */` comments and trailing commas removed, so a hand-edited file loads
     /// the same on macOS as on Windows. Text inside strings is left alone.
-    public static func relaxed(_ d: Data) -> Data {
+    public static func relaxed(_ d: Data) -> Data { scan(d).json }
+
+    static func scan(_ d: Data) -> (json: Data, comments: Bool) {
         let s = Array(d)
+        var comments = false
         var out: [UInt8] = []; out.reserveCapacity(s.count)
         var i = 0, inString = false
         while i < s.count {
@@ -19,10 +25,12 @@ public enum ConfigText {
             }
             if c == UInt8(ascii: "\"") { inString = true; out.append(c); i += 1; continue }
             if c == UInt8(ascii: "/"), i + 1 < s.count, s[i + 1] == UInt8(ascii: "/") {
+                comments = true
                 while i < s.count, s[i] != UInt8(ascii: "\n") { i += 1 }
                 continue
             }
             if c == UInt8(ascii: "/"), i + 1 < s.count, s[i + 1] == UInt8(ascii: "*") {
+                comments = true
                 i += 2
                 while i + 1 < s.count, !(s[i] == UInt8(ascii: "*") && s[i + 1] == UInt8(ascii: "/")) { i += 1 }
                 i += 2; continue
@@ -35,7 +43,7 @@ public enum ConfigText {
             }
             out.append(c); i += 1
         }
-        return Data(out)
+        return (Data(out), comments)
     }
 }
 
@@ -78,7 +86,9 @@ public enum ConfigPatch {
         }
         root["source"] = e.source
         if let lat = e.latitude, let lon = e.longitude {
-            root["location"] = ["latitude": round2(lat), "longitude": round2(lon)]
+            var loc = root["location"] as? [String: Any] ?? [:]   // keeps any other key in it
+            loc["latitude"] = round2(lat); loc["longitude"] = round2(lon)
+            root["location"] = loc
         } else {
             root["location"] = nil
         }
@@ -90,12 +100,18 @@ public enum ConfigPatch {
         }
         root["homeAssistant"] = ha.isEmpty ? nil : ha
 
+        if let raw = root["monitors"], !(raw is [[String: Any]]) {
+            throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
+        }
         var list = root["monitors"] as? [[String: Any]] ?? []
+        var claimed = Set<Int>()   // an entry matching two connected monitors takes the first one's levels only
         for m in e.monitors {
-            let i = list.firstIndex { entry in
+            let i = list.indices.first { j in
+                let entry = list[j]
                 guard let match = entry["match"] as? String, !match.isEmpty else { return false }
-                return m.name.localizedCaseInsensitiveContains(match)
+                return m.name.localizedCaseInsensitiveContains(match.trimmingCharacters(in: .whitespaces))
             }
+            if let i { if claimed.contains(i) { continue }; claimed.insert(i) }
             var entry = i.map { list[$0] } ?? ["match": m.suggestedMatch]
             let label = m.label.trimmingCharacters(in: .whitespacesAndNewlines)
             entry["label"] = label.isEmpty || label == m.name ? nil : label

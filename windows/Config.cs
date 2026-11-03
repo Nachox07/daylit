@@ -175,6 +175,18 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
 static class ConfigPatch {
     static readonly JsonDocumentOptions Read = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
+    /// True when the file has // or /* */ comments outside strings, which saving does not keep.
+    public static bool HasComments(string text) {
+        bool inString = false;
+        for (int i = 0; i < text.Length; i++) {
+            char c = text[i];
+            if (inString) { if (c == '\\') i++; else if (c == '"') inString = false; continue; }
+            if (c == '"') inString = true;
+            else if (c == '/' && i + 1 < text.Length && text[i + 1] is '/' or '*') return true;
+        }
+        return false;
+    }
+
     /// A short, stable part of a monitor name: the model ("AW3821DW") rather than the brand.
     public static string SuggestMatch(string name) =>
         name.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(t => t.Any(char.IsDigit) && t.Any(char.IsLetter)) ?? name;
@@ -186,9 +198,12 @@ static class ConfigPatch {
         var root = string.IsNullOrWhiteSpace(original) ? new JsonObject()
                  : JsonNode.Parse(original, documentOptions: Read) as JsonObject ?? throw new InvalidDataException("config.json is not a JSON object");
         root["source"] = e.Source;
-        if (e.Latitude is double lat && e.Longitude is double lon)
-            root["location"] = new JsonObject { ["latitude"] = Round2(lat), ["longitude"] = Round2(lon) };
-        else root.Remove("location");
+        if (e.Latitude is double lat && e.Longitude is double lon) {
+            var loc = root["location"] as JsonObject ?? new JsonObject();   // keeps any other key in it
+            root.Remove("location");
+            loc["latitude"] = Round2(lat); loc["longitude"] = Round2(lon);
+            root["location"] = loc;
+        } else root.Remove("location");
 
         var ha = root["homeAssistant"] as JsonObject ?? new JsonObject();
         foreach (var (k, v) in new[] { ("url", e.HaUrl), ("autoSwitch", e.AutoSwitch), ("sun", e.Sun), ("cover", e.Cover), ("lights", e.Lights) }) {
@@ -198,13 +213,17 @@ static class ConfigPatch {
         root.Remove("homeAssistant");
         if (ha.Count > 0) root["homeAssistant"] = ha;
 
+        if (root["monitors"] is { } raw && (raw is not JsonArray arr || arr.Any(x => x is not JsonObject)))
+            throw new InvalidDataException("monitors must be a list of objects; fix it with Open config file");
         var list = root["monitors"] as JsonArray ?? new JsonArray();
         root.Remove("monitors");
+        var claimed = new HashSet<JsonObject>();   // an entry matching two connected monitors takes the first one's levels only
         foreach (var m in e.Monitors) {
             var entry = list.OfType<JsonObject>().FirstOrDefault(o =>
                 o["match"]?.GetValueKind() == JsonValueKind.String && o["match"]!.GetValue<string>().Trim() is { Length: > 0 } match &&
                 m.Name.Contains(match, StringComparison.OrdinalIgnoreCase));
-            if (entry == null) { entry = new JsonObject { ["match"] = m.SuggestedMatch }; list.Add(entry); }
+            if (entry != null && !claimed.Add(entry)) continue;
+            if (entry == null) { entry = new JsonObject { ["match"] = m.SuggestedMatch }; list.Add(entry); claimed.Add(entry); }
             var label = m.Label.Trim();
             if (label == "" || label == m.Name) entry.Remove("label"); else entry["label"] = label;
             entry["day"] = Math.Clamp(m.Day, 0, 100); entry["blindDown"] = Math.Clamp(m.BlindDown, 0, 100); entry["night"] = Math.Clamp(m.Night, 0, 100);

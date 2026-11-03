@@ -189,7 +189,8 @@ sealed class SettingsWindow : Window {
             rows.Add((m, label, day, blind, night, caption, haLevels));
             monitors.Children.Add(Card(m.D.Friendly, Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), caption));
         }
-        status.Text = "";
+        status.Text = opened != null && ConfigPatch.HasComments(opened) ? "Saving removes the comments in config.json." : "";
+        status.Foreground = Palette.Secondary;
         SourceChanged();
     }
 
@@ -269,15 +270,20 @@ sealed class SettingsWindow : Window {
             $c = $w.Position.Location
             if ($c.IsUnknown) { 'unknown' } else { [string]::Format([cultureinfo]::InvariantCulture, '{0:F2},{1:F2}', $c.Latitude, $c.Longitude) }
             """;
-        string answer = await Task.Run(() => {
+        string answer;
+        try {
+            using var p = Process.Start(new ProcessStartInfo("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]) {
+                RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));   // one limit for the whole request
             try {
-                var p = Process.Start(new ProcessStartInfo("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]) {
-                    RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
-                string o = p.StandardOutput.ReadToEnd();
-                if (!p.WaitForExit(30_000)) { try { p.Kill(); } catch { } return "unknown"; }
-                return o.Trim();
-            } catch (Exception e) { Log.Write("locate: " + e.Message); return "unknown"; }
-        });
+                var output = p.StandardOutput.ReadToEndAsync(limit.Token);
+                await p.WaitForExitAsync(limit.Token);
+                answer = (await output).Trim();
+            } catch (OperationCanceledException) {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                answer = "unknown";
+            }
+        } catch (Exception e) { Log.Write("locate: " + e.Message); answer = "unknown"; }
         locate.IsEnabled = true;
         var parts = answer.Split(',');
         if (parts.Length == 2 && Num(parts[0]) is double a && Num(parts[1]) is double b) {

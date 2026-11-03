@@ -11,9 +11,17 @@ enum LocateResult { case success(CLLocationCoordinate2D), failure(String) }
 @MainActor final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var done: ((LocateResult) -> Void)?
+    private var request = 0
 
     func locate(_ done: @escaping (LocateResult) -> Void) {
         self.done = done
+        request += 1
+        let mine = request
+        // Never leave the button waiting: no answer in 20 s (a prompt left open, no Wi-Fi) is a failure.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self, self.request == mine else { return }
+            self.finish(.failure("No location after 20 seconds. Check the permission prompt, or type the coordinates."))
+        }
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
         switch manager.authorizationStatus {
@@ -208,6 +216,7 @@ struct SettingsView: View {
                                 haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil)
         }
         error = nil
+        note = opened.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
     }
 
     func edit() -> SettingsEdit? {
