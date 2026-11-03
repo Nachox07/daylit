@@ -74,12 +74,16 @@ sealed class Flyout : Window {
         var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        link = LinkButton();
+        Grid.SetColumn(link, 1);
+        header.Children.Add(link);
         header.Children.Add(new TextBlock { Text = "Daylit", FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         var gear = new Button { Content = new TextBlock { Text = Palette.Gear, FontFamily = Palette.Icons, FontSize = 14 },
                                 Padding = new Thickness(8, 6, 8, 6), ToolTip = "Settings" };
         System.Windows.Automation.AutomationProperties.SetName(gear, "Settings");
         gear.Click += (_, _) => GearMenu(gear);
-        Grid.SetColumn(gear, 1);
+        Grid.SetColumn(gear, 2);
         header.Children.Add(gear);
         root.Children.Add(header);
 
@@ -190,11 +194,11 @@ sealed class Flyout : Window {
         m.IsOpen = true;
     }
 
-    /// The round link button that sits between the first two monitor cards.
+    /// The round link button in the header next to the gear: one switch for every monitor, however many there are.
     Button LinkButton() {
         var b = new Button {
             Width = 26, Height = 26, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, -9, 0, -9),
+            Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
             Content = new TextBlock { Text = "", FontFamily = Palette.Icons, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
         };
         b.Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse("""
@@ -213,8 +217,9 @@ sealed class Flyout : Window {
     void StyleLink() {
         if (link == null) return;
         bool on = Settings.SyncMonitors;
-        link.Background = on ? Palette.Accent : Palette.Solid;
-        link.BorderBrush = on ? Palette.Accent : Palette.CardBorder;
+        link.Visibility = app.Mons.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        link.Background = on ? Palette.Accent : Brushes.Transparent;
+        link.BorderBrush = on ? Palette.Accent : Brushes.Transparent;
         link.Foreground = on ? Brushes.White : Palette.Secondary;
         link.ToolTip = on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."
                           : "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is.";
@@ -233,7 +238,7 @@ sealed class Flyout : Window {
     /// One card per detected monitor; called when the monitor list or the config changes.
     public void Rebuild() {
         foreach (var r in rowViews) cards.Remove(r.card);
-        rows.Children.Clear(); rowViews.Clear(); link = null;
+        rows.Children.Clear(); rowViews.Clear();
         if (app.Mons.Count == 0) {
             var none = Small("No external monitors. Plug one in and Daylit takes over; the built-in screen stays with Windows.");
             none.Margin = new Thickness(2, 0, 2, 4);
@@ -278,10 +283,7 @@ sealed class Flyout : Window {
             rows.Children.Add(card);
             rowViews.Add((m, s, pct, note, card));
             if (i < app.Mons.Count - 1) {
-                // The gap between cards; between the first two it holds the link button, drawn over both cards.
-                var gap = new Grid { Height = 10 };
-                if (i == 0) { link = LinkButton(); gap.Children.Add(link); Panel.SetZIndex(gap, 1); }
-                rows.Children.Add(gap);
+                rows.Children.Add(new Border { Height = 10 });   // the gap between cards
             }
         }
         Sync();

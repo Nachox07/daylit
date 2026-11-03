@@ -52,7 +52,7 @@ keep the app files for the parts that touch the OS: displays, keys, windows, net
 ### UI snapshots (visual regression)
 
 Each app can draw its panel and on-screen indicator offscreen from fixed, made-up state (two
-monitors, linked, one set by hand, none; no hardware and no Home Assistant), in light and dark at
+monitors, two and three linked, one set by hand, none; no hardware and no Home Assistant), in light and dark at
 2x. The baselines are committed in `mac/Tests/Snapshots/` and `windows/tests/Snapshots/`, so a
 pull request that changes the UI shows the before and after in GitHub's image diff (side by side,
 swipe, onion skin).

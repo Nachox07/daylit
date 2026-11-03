@@ -101,7 +101,7 @@ sun's position is computed locally; the tests check it against NOAA reference va
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.
 - **Battery.** A laptop on battery pauses all automatic work (gear menu → *Pause on battery*).
-- **Sync monitors.** With two or more monitors, the link button between them makes them move together: each keeps
+- **Sync monitors.** With two or more monitors, the link button at the top of the panel makes them all move together: each keeps
   how much brighter or darker it was when you switched it on ([details](docs/setup.md#sync-monitors)).
 - **A short panel.** It holds what you touch every day: a slider per monitor and *Automatic*.
   Everything set once (light/dark from daylight, pause on battery, open at login, shortcuts, token,

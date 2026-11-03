@@ -53,6 +53,7 @@ static class Snapshots {
         List<Mon> Two() => new() { Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48) };
         yield return ("panel-two", sun, Two, false, "Sun · 21.7° above the horizon");
         yield return ("panel-two-linked", sun, Two, true, "Sun · 21.7° above the horizon");
+        yield return ("panel-three-linked", sun, () => [.. Two(), Fake("LG 27UK850", 60)], true, "Sun · 21.7° above the horizon");
         yield return ("panel-one-manual", ha, () => new() { Fake("LG UltraFine 5K", 60, manual: true) }, false, "Home Assistant · sun 100% · blind 56%");
         yield return ("panel-empty", "{}", () => new(), false, "");
     }
