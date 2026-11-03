@@ -130,6 +130,8 @@ computer right now, or no token stored yet) and which config entry matched which
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
   Accessibility permission.
+- The gear menu's *Settings…* window lets the user change the source, location, levels and Home
+  Assistant entities later without editing JSON; it keeps every other key in the file.
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
   and *Automatic*. Hand-set levels survive a restart (kept for 12 hours).
