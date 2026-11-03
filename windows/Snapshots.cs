@@ -36,7 +36,7 @@ static class Snapshots {
                 flyout.Close();
             }
             var osd = new Osd();
-            Save(Frame(osd.Detach("Left monitor", 70), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
+            Save(Frame(osd.Detach("Studio Display", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
             osd.Close();
         }
         File.Delete(tmp);
@@ -50,16 +50,17 @@ static class Snapshots {
     static IEnumerable<(string name, string json, Func<List<Mon>> mons, bool sync, string subtitle)> Scenes() {
         const string sun = """{ "source": "sun", "location": { "latitude": 51.4769, "longitude": -0.0005 } }""";
         const string ha = """{ "source": "homeAssistant", "homeAssistant": { "url": "http://homeassistant.local:8123" } }""";
-        List<Mon> Two() => new() { Fake("Left monitor", 70, hdr: true), Fake("Right monitor", 45) };
+        List<Mon> Two() => new() { Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48) };
         yield return ("panel-two", sun, Two, false, "Sun · 21.7° above the horizon");
         yield return ("panel-two-linked", sun, Two, true, "Sun · 21.7° above the horizon");
-        yield return ("panel-one-manual", ha, () => new() { Fake("Studio monitor", 60, manual: true) }, false, "Home Assistant · sun 100% · blind 56%");
+        yield return ("panel-one-manual", ha, () => new() { Fake("LG UltraFine 5K", 60, manual: true) }, false, "Home Assistant · sun 100% · blind 56%");
         yield return ("panel-empty", "{}", () => new(), false, "");
     }
 
     /// The content on a fixed-width background, with the window's font and text colour.
     static FrameworkElement Frame(FrameworkElement content, double width, Brush background, double radius) {
-        var b = new Border { Child = content, Width = width, Background = background, CornerRadius = new CornerRadius(radius) };
+        var b = new Border { Child = content, Width = width, Background = background, CornerRadius = new CornerRadius(radius),
+                             BorderThickness = new Thickness(radius > 0 ? 1 : 0), BorderBrush = Palette.CardBorder };
         TextElement.SetFontFamily(b, Palette.Ui);
         TextElement.SetFontSize(b, 14);
         TextElement.SetForeground(b, Palette.Text);

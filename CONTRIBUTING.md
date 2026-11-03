@@ -125,36 +125,11 @@ publishes, idle/back, battery pause, theme switches, Home Assistant errors).
 
 ## Screenshots
 
-Files: `docs/screenshots/{mac,windows}-panel-{light,dark}.png`, plus the optional on-screen
-indicator stills `mac-hud-{light,dark}.png` (committed) and `windows-osd-{light,dark}.png` (not
-committed: Windows' translucent indicator shows the desktop behind it, so only add them over a
-plain background). Capture the window only, with no shadow, desktop, other
-apps or personal names on screen. Use generic monitor labels (the system names are fine) and a
-config without your own Home Assistant address showing in the panel.
-
-**macOS:**
-
-```sh
-pkill -x Daylit
-DAYLIT_APPEARANCE=light DAYLIT_SHOW=panel ~/Applications/Daylit.app/Contents/MacOS/Daylit &
-sleep 3
-# the panel's window number
-swift -e 'import CoreGraphics
-for w in CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
-where (w["kCGWindowOwnerName"] as? String) == "Daylit" { print(w["kCGWindowNumber"]!, w["kCGWindowBounds"]!) }'
-screencapture -o -l <number> docs/screenshots/mac-panel-light.png
-```
-
-Repeat with `DAYLIT_APPEARANCE=dark`. For the indicator, press `⌃⌥⌘↑` and capture its window
-within a second (it fades out), or use `screencapture -o -w` and click it.
-
-**Windows:** open the panel from the tray and use Snipping Tool (`Win+Shift+S`) in *Window* mode.
-For the indicator, press `Ctrl+Alt+PgUp` first, then snip within a second; it is translucent, so put
-a plain, empty window behind it first. Switch light/dark in Settings → Personalization → Colors (or
-the gear menu's *Switch to dark mode*) and capture again.
-
-Check each image before committing: nothing personal, nothing cut off, same size as the one it
-replaces where possible. The README shows the two `panel` pairs; the indicator stills are optional.
+The README's panel pictures are the UI snapshot baselines (`mac/Tests/Snapshots/panel-two-linked-*.png`,
+`windows/tests/Snapshots/panel-two-linked-*.png`): drawn from made-up monitors, so they are always
+current and never show anyone's setup. Re-recording the snapshots (*Tests → UI snapshots* above)
+updates them. To change what they show, edit the scenes in `mac/Sources/Daylit/Snapshots.swift` and
+`windows/Snapshots.cs` (generic monitor names, round levels), then re-record.
 
 ### Demo GIF (macOS)
 

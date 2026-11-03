@@ -24,14 +24,14 @@ import DaylitCore
             d.problem = nil; d.builtIn = nil
             return d
         }
-        let two = [mon(1, "Left monitor", 70), mon(2, "Right monitor", 45)]
+        let two = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48)]
         return [
             ("panel-two", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon")))),
             ("panel-two-linked", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon", sync: true)))),
-            ("panel-one-manual", AnyView(Panel(m: model([mon(1, "Studio Display", 60, manual: true)], source: .homeAssistant,
+            ("panel-one-manual", AnyView(Panel(m: model([mon(1, "LG UltraFine 5K", 60, manual: true)], source: .homeAssistant,
                                                         detail: "Home Assistant · sun 100% · blind 56%")))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
-            ("hud", AnyView(HUDView(label: "Left monitor", value: 70))),
+            ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) }
     }
 
@@ -51,20 +51,39 @@ import DaylitCore
 
     static func image(_ view: AnyView, dark: Bool) -> Data? {
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
-        let host = NSHostingView(rootView: view.environment(\.colorScheme, dark ? .dark : .light))
+        let host = NSHostingView(rootView: activeLook(view.environment(\.colorScheme, dark ? .dark : .light)))
         host.appearance = appearance
         let size = host.fittingSize
         host.frame = NSRect(origin: .zero, size: size)
-        let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        let window = ActiveWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = appearance
         window.contentView = host
+        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         host.layoutSubtreeIfNeeded()
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
                                          bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                          colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
         rep.size = size
         appearance.performAsCurrentDrawingAppearance { host.cacheDisplay(in: host.bounds, to: rep) }
+        window.orderOut(nil)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    /// SwiftUI controls in their active look (accent colours), as in the open panel.
+    static func activeLook(_ v: some View) -> AnyView {
+        #if compiler(>=6.0)
+        return AnyView(v.environment(\.controlActiveState, .key).environment(\.appearsActive, true))
+        #else
+        return AnyView(v.environment(\.controlActiveState, .key))
+        #endif
+    }
+
+    /// Controls draw their accent colours only in the key window; an offscreen one never is.
+    final class ActiveWindow: NSWindow {
+        override var isKeyWindow: Bool { true }
+        override var isMainWindow: Bool { true }
     }
 
     // MARK: compare

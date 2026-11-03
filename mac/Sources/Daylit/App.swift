@@ -92,6 +92,8 @@ struct PanelBackground: View {
     var body: some View {
         if Self.plain {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
         } else if Glass.available {
             Glass(cornerRadius: cornerRadius)
         } else {

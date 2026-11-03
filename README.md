@@ -32,13 +32,13 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mac-panel-dark.png">
-    <img src="docs/screenshots/mac-panel-light.png" width="300" alt="Daylit panel on macOS">
+    <source media="(prefers-color-scheme: dark)" srcset="mac/Tests/Snapshots/panel-two-linked-dark.png">
+    <img src="mac/Tests/Snapshots/panel-two-linked-light.png" width="300" alt="Daylit panel on macOS">
   </picture>
   &nbsp;
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/windows-panel-dark.png">
-    <img src="docs/screenshots/windows-panel-light.png" width="300" alt="Daylit panel on Windows">
+    <source media="(prefers-color-scheme: dark)" srcset="windows/tests/Snapshots/panel-two-linked-dark.png">
+    <img src="windows/tests/Snapshots/panel-two-linked-light.png" width="300" alt="Daylit panel on Windows">
   </picture>
 </p>
 
