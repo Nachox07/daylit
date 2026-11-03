@@ -12,26 +12,6 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
     public (double Value, double Changed)?[] Remote { get; init; } = [];
 }
 
-/// Solar elevation from latitude/longitude and the clock (low-precision almanac; matches HA's sun.sun to ~0.01°).
-static class Sun {
-    static double Rad(double d) => d * Math.PI / 180;
-    static double Deg(double r) => r * 180 / Math.PI;
-    static double Mod(double a, double m) => ((a % m) + m) % m;
-
-    public static double Elevation(DateTimeOffset t, double lat, double lon) {
-        double jd = t.ToUnixTimeMilliseconds() / 86400000.0 + 2440587.5, d = jd - 2451545.0;
-        double g = Rad(Mod(357.529 + 0.98560028 * d, 360));
-        double q = Mod(280.459 + 0.98564736 * d, 360);
-        double L = Rad(q + 1.915 * Math.Sin(g) + 0.020 * Math.Sin(2 * g));
-        double e = Rad(23.439 - 0.00000036 * d);
-        double ra = Deg(Math.Atan2(Math.Cos(e) * Math.Sin(L), Math.Cos(L)));
-        double dec = Math.Asin(Math.Sin(e) * Math.Sin(L));
-        double gmst = Mod(18.697374558 + 24.06570982441908 * d, 24);
-        double ha = Rad(gmst * 15 + lon - ra);
-        return Deg(Math.Asin(Math.Sin(Rad(lat)) * Math.Sin(dec) + Math.Cos(Rad(lat)) * Math.Cos(dec) * Math.Cos(ha)));
-    }
-}
-
 /// Home Assistant REST: one template call per tick returns everything; sensors are posted back.
 static class HAClient {
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(6) };
@@ -39,35 +19,6 @@ static class HAClient {
     public static string? LastError;
 
     record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100);
-
-    static string Num(string? entity, double fallback) =>
-        string.IsNullOrWhiteSpace(entity) ? fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                                          : $"{{{{ states('{entity}') | float({fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)}) }}}}";
-
-    /// -1 marks "use the local number" (no entity, or the entity is unknown).
-    static string BuildTemplate(HaConfig h, IReadOnlyList<Mon> mons) {
-        string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(100)" : "100";
-        string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
-        string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
-        string sat = h.Lights is { Length: > 0 } l3 ? $"(state_attr('{l3}','hs_color') or [0, 100])[1] | float(100)" : "100";
-        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson }}}}" : "null";
-        string mons_ = string.Join(", ", mons.Select(m => {
-            var e = m.Spec?.HomeAssistant;
-            string set = e?.Set is { Length: > 0 } st
-                ? $"{Num(st, -1)}, {{{{ as_timestamp(states.{st}.last_changed) if states.{st} else 0 }}}}" : "-1, 0";   // states.domain.name: None when missing
-            return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {set}]";
-        }));
-        string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
-        return $$$"""
-            {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},
-             "pos": {{ {{{pos}}} }},
-             "lights": {{ {{{lights}}} }},
-             "auto": {{{auto}}},
-             "m": [{{{mons_}}}],
-             "bri": {{ {{{bri}}} }},
-             "sat": {{ {{{sat}}} }} }
-            """;
-    }
 
     public static async Task<string?> Call(Config c, string path, object body) {
         if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; return null; }
@@ -86,7 +37,7 @@ static class HAClient {
 
     public static async Task<Inputs?> State(Config c, IReadOnlyList<Mon> mons) {
         var h = c.HomeAssistant!;
-        var s = await Call(c, "/api/template", new { template = BuildTemplate(h, mons) });
+        var s = await Call(c, "/api/template", new { template = HaTemplate.Build(h, mons.Select(m => m.Spec?.HomeAssistant)) });
         if (s == null) return null;
         try {
             var a = JsonSerializer.Deserialize<Answer>(s);

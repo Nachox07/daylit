@@ -64,11 +64,13 @@ sealed class Config {
         PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
     /// Never fails: a broken file gives the defaults plus an error to show in the panel.
-    public static (Config cfg, string? error) Load() {
+    public static (Config cfg, string? error) Load() => Load(PathName);
+
+    public static (Config cfg, string? error) Load(string path) {
         Config c; string? err;
         try {
-            if (!File.Exists(PathName)) c = new Config();
-            else c = JsonSerializer.Deserialize<Config>(File.ReadAllText(PathName), Json) ?? new Config();
+            if (!File.Exists(path)) c = new Config();
+            else c = JsonSerializer.Deserialize<Config>(File.ReadAllText(path), Json) ?? new Config();
         } catch (Exception e) {
             return (Resolve(new Config(), out _), "config.json is not valid: " + Short(e.Message));
         }

@@ -57,7 +57,8 @@ sealed class Controller {
     readonly DispatcherTimer timer = new(), idleWatch = new() { Interval = TimeSpan.FromSeconds(2) };
     DateTime panelHidden;
     bool busy, again, wasHere = true, wasIdle;
-    bool? lookDark, daylight, whiteLights;
+    bool? lookDark;
+    readonly LookRule look = new();   // light/dark decision with hysteresis (Rules.cs)
     string? lastHaError;
     // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
@@ -111,7 +112,7 @@ sealed class Controller {
         HAClient.Token = Source == Source.HomeAssistant ? Cred.Read(Cfg.TokenName) : null;
         HAClient.LastError = null;
         AutoOn = Settings.Auto;
-        lookDark = daylight = whiteLights = null;
+        lookDark = null; look.Reset();
         foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; }
         Log.Write($"config: source {Source}" + (ConfigError != null ? $" — {ConfigError}" : ""));
     }
@@ -240,7 +241,7 @@ sealed class Controller {
         _ = Tick("pause on battery");
     }
 
-    public void SetLook(bool on) { Settings.AutoLook = on; lookDark = daylight = whiteLights = null; _ = Tick("look"); }
+    public void SetLook(bool on) { Settings.AutoLook = on; lookDark = null; look.Reset(); _ = Tick("look"); }
     public void ToggleDark() { Look.SetDark(!Theme.Dark); tray.Icon = Theme.SunIcon(); panel.ApplyTheme(); }
 
     // MARK: the decision
@@ -282,13 +283,6 @@ sealed class Controller {
         }
     }
 
-    static int Target(double[] v, Inputs s, double sun) {   // v = [day, blindDown, night]
-        double daytime = v[1] + (v[0] - v[1]) * s.Pos / 100;
-        double x = v[2] + (daytime - v[2]) * sun;
-        if (s.Lights && sun < 0.3) x = Math.Max(x, v[2] + 5);
-        return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
-    }
-
     Inputs SunInputs(IReadOnlyList<Mon> mons) {
         var l = Cfg.Location!;
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), 100, false, 0, 100,
@@ -324,7 +318,7 @@ sealed class Controller {
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         AutoOn = s.Auto ?? Settings.Auto;
-        double sun = Math.Clamp((s.Elev + 3) / 15, 0, 1);
+        double sun = Sun.Fraction(s.Elev);
         // The Mac and this PC may share these monitors through input switching. Only the machine in
         // use drives them; coming back applies the current target and publishes again.
         bool here = Win.IdleSeconds() < Config.IdleSeconds;
@@ -337,30 +331,15 @@ sealed class Controller {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = Target(s.Levels[i], s, sun);
-            // Set from Home Assistant: acts once per change of the helper, even when this PC is idle
-            // (e.g. dimming from the phone while away). Then it is a hand-set level like any other.
-            bool remote = false;
-            if (s.Remote.ElementAtOrDefault(i) is { } r) {
-                if (m.RemoteSeen == null) m.RemoteSeen = r.Changed;   // first look: an old value is not a command
-                else if (r.Changed > m.RemoteSeen) {
-                    m.RemoteSeen = r.Changed;
-                    int v = (int)Math.Round(Math.Clamp(r.Value, 0, 100), MidpointRounding.AwayFromZero);
-                    Log.Write($"remote: {m.Label} {c}% → {v}% from Home Assistant");
-                    if (c != v) await Task.Run(() => m.Write(v));
-                    m.Cur = c = v; remote = true;
-                    m.LastTarget = target; m.LastSet = v == target ? null : target;   // held as hand-set until the target moves
-                }
-            }
-            int applied = c;
-            if (AutoOn) {
-                bool handSet = m.LastSet != null && c != m.LastSet;
-                if (remote || (handSet && Math.Abs(target - (m.LastTarget ?? target)) < Cfg.Hold)) m.Manual = true;
-                else if (here) {
-                    if (c != target) { Log.Write($"auto: {m.Label} {c}% → {target}%"); await Task.Run(() => m.Write(target)); }
-                    applied = target; m.Cur = target; m.LastSet = target; m.LastTarget = target;
-                }
-            }
+            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
+            (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
+            bool remote = step.Remote != null;
+            if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
+            else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");
+            if (step.Write is int v) await Task.Run(() => m.Write(v));
+            m.Cur = step.Current; m.Manual = step.Manual;
+            int applied = step.Applied;
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
@@ -375,28 +354,15 @@ sealed class Controller {
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Home Assistant unreachable — using the sun · " + where
                  : Source == Source.Sun ? "Sun · " + where
-                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + LightsNote(s);
-    }
-
-    /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
-    static string LightsNote(Inputs s) {
-        if (!s.Lights) return "";
-        if (s.Bri <= 0) return " · lights on";
-        string tone = s.Sat <= 35 ? " white" : s.Sat > 45 ? " warm" : "";
-        return $" · lights {(int)Math.Round(s.Bri / 2.55)}%{tone}";
+                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat);
     }
 
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
     // dark otherwise. Each condition has a gap between its on and off thresholds so it doesn't flip
     // back and forth. Only acts when the decision changes, so a manual switch stays until then.
     void UpdateLook(Inputs s, bool sunOnly) {
-        if (!Settings.AutoLook) { lookDark = daylight = whiteLights = null; return; }
-        daylight = s.HasBlind
-            ? s.Elev > 4 && s.Pos >= 55 ? true : s.Elev < 1 || s.Pos <= 35 ? false : daylight ?? (s.Elev > 3 && s.Pos >= 50)
-            : s.Elev > 4 ? true : s.Elev < 1 ? false : daylight ?? s.Elev > 3;
-        bool lit = !sunOnly && s.Lights && s.Bri > 0;   // brightness 0-255; hs saturation 0 = white, ~60+ = warm
-        whiteLights = lit && s.Bri >= 200 && s.Sat <= 35 ? true : !lit || s.Bri < 170 || s.Sat > 45 ? false : whiteLights ?? false;
-        bool dark = !(daylight.Value || whiteLights.Value);
+        if (!Settings.AutoLook) { lookDark = null; look.Reset(); return; }
+        bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat);
         if (dark != lookDark) {
             Log.Write("theme: " + (dark ? "dark" : "light"));
             Look.SetDark(dark);
