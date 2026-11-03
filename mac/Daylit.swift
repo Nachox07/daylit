@@ -80,6 +80,7 @@ struct Config: Decodable {
     var source: String?
     var location: Location?
     var manualHold: Int?
+    var pauseOnBattery: Bool?    // default for the panel switch (true when missing)
     var ddcTool: String?
     var homeAssistant: HAConfig?
     var monitors: [MonitorConfig]?
@@ -147,7 +148,8 @@ struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
 
 /// External displays only: the built-in screen keeps its own brightness handling.
 @MainActor func externalScreens() -> [Screen] {
-    NSScreen.screens.compactMap { s in
+    if ProcessInfo.processInfo.environment["DAYLIT_DEBUG_NO_DISPLAYS"] == "1" { return [] }   // tests: the empty state
+    return NSScreen.screens.compactMap { s in
         guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
               CGDisplayIsBuiltin(id) == 0 else { return nil }
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
@@ -195,6 +197,30 @@ enum Power {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return false }
         return (type as String) == kIOPMBatteryPowerKey
+    }
+    /// Macs without an internal battery (desktops) hide the pause-on-battery switch.
+    static var hasBattery: Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return false }
+        return list.contains { ps in
+            let d = IOPSGetPowerSourceDescription(info, ps)?.takeUnretainedValue() as? [String: Any]
+            return d?[kIOPSTypeKey] as? String == kIOPSInternalBatteryType
+        }
+    }
+}
+
+/// macOS light/dark mode through System Events (needs the Automation permission, asked once).
+@MainActor enum Appearance {
+    static var isDark: Bool { NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
+    /// nil on success, else a short reason (e.g. the permission was refused).
+    @discardableResult static func setDark(_ dark: Bool) -> String? {
+        var err: NSDictionary?
+        NSAppleScript(source: "tell application \"System Events\" to tell appearance preferences to set dark mode to \(dark)")?
+            .executeAndReturnError(&err)
+        guard let err else { return nil }
+        let n = err[NSAppleScript.errorNumber] as? Int ?? 0
+        return n == -1743 ? "Allow Daylit to control System Events (System Settings → Privacy & Security → Automation)"
+                          : "Could not change light/dark mode (\(n))"
     }
 }
 
@@ -342,6 +368,14 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
     @Published var detail = ""          // one line under the Automatic switch
     @Published var problem: String?     // config / connection problem, shown as a caption
     @Published var login = SMAppService.mainApp.status == .enabled
+    @Published var pauseOnBattery = true
+    @Published var hasBattery = Power.hasBattery
+    @Published var onBattery = Power.onBattery
+    @Published var lookOn = UserDefaults.standard.bool(forKey: "autoLook")   // off by default on the Mac
+    @Published var dark = false
+    var lookDark: Bool?, daylight: Bool?, whiteLights: Bool?
+    /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
+    var paused: Bool { pauseOnBattery && hasBattery && onBattery }
     var config = Config()
     var configProblem: String?
     var dragging: Set<CGDirectDisplayID> = []
@@ -372,6 +406,8 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
     func reload() {
         let (c, err) = Config.load()
         config = c
+        pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
+        lookDark = nil; daylight = nil; whiteLights = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr
@@ -432,6 +468,17 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
     }
 
     func check() {
+        if Appearance.isDark != dark { dark = Appearance.isDark }
+        let battery = Power.onBattery
+        if battery != onBattery {
+            onBattery = battery
+            if hasBattery && pauseOnBattery && source != .off {
+                Log.write(battery ? "battery: paused" : "power: resumed")
+                if !battery { refresh(); return }
+                detail = "Paused on battery"
+            }
+        }
+        if paused || mons.isEmpty { return }   // nothing to do until power or a monitor comes back
         let here = idleSeconds() < Self.idleLimit
         if here && !wasHere {
             // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
@@ -490,6 +537,49 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
         refresh()
     }
 
+    func setPause(_ on: Bool) {
+        pauseOnBattery = on
+        UserDefaults.standard.set(on, forKey: "pauseOnBattery")
+        Log.write("pause on battery: " + (on ? "on" : "off"))
+        refresh()
+    }
+
+    func setLook(_ on: Bool) {
+        lookOn = on
+        UserDefaults.standard.set(on, forKey: "autoLook")
+        lookDark = nil; daylight = nil; whiteLights = nil
+        refresh()
+    }
+
+    /// Manual switch; it stays until the automatic decision next changes.
+    func toggleDark() {
+        if let e = Appearance.setDark(!Appearance.isDark) { problem = e }
+        Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); self.dark = Appearance.isDark }
+    }
+
+    // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
+    // dark otherwise. Same rule as Windows, with a gap between on and off thresholds so it does not
+    // flip back and forth. Only acts when the decision changes, so a manual switch stays until then.
+    func updateLook(_ s: Inputs) {
+        guard lookOn else { lookDark = nil; daylight = nil; whiteLights = nil; return }
+        if s.hasBlind {
+            daylight = s.elev > 4 && s.pos >= 55 ? true : s.elev < 1 || s.pos <= 35 ? false : daylight ?? (s.elev > 3 && s.pos >= 50)
+        } else {
+            daylight = s.elev > 4 ? true : s.elev < 1 ? false : daylight ?? (s.elev > 3)
+        }
+        let lit = s.fromHA && s.lights && s.bri > 0   // brightness 0-255; hs saturation 0 = white, ~60+ = warm
+        whiteLights = lit && s.bri >= 200 && s.sat <= 35 ? true : !lit || s.bri < 170 || s.sat > 45 ? false : whiteLights ?? false
+        let wantDark = !(daylight! || whiteLights!)
+        if wantDark != lookDark {
+            Log.write("theme: " + (wantDark ? "dark" : "light"))
+            if wantDark != Appearance.isDark, let e = Appearance.setDark(wantDark) {
+                problem = e; Log.write("theme: " + e)
+            }
+            lookDark = wantDark
+            dark = Appearance.isDark
+        }
+    }
+
     func setLogin(_ on: Bool) {
         try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
         login = SMAppService.mainApp.status == .enabled
@@ -512,7 +602,10 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
 
     // MARK: tick
 
-    struct Inputs { let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String; var fromHA = false }
+    struct Inputs {
+        let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String
+        var fromHA = false, hasBlind = false, bri = 0.0, sat = 100.0
+    }
 
     var lastHAError: String?
 
@@ -551,6 +644,9 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
         }
 
         guard source != .off else { detail = ""; problem = configProblem; return }
+        // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
+        guard !mons.isEmpty else { detail = ""; return }
+        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; return }
         guard let inp = await inputs(), gen == generation else { return }
 
         let sun = min(max((inp.elev + 3) / 15, 0), 1)
@@ -605,6 +701,7 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
                 }
             }
         }
+        if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
     }
@@ -639,7 +736,8 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
                 if ha.lights != nil { line += Self.lightsNote(s) }
-                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true)
+                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                              hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
             case .failure(let f):
                 problem = HAClient.describe(f, ha)
                 if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
@@ -953,30 +1051,41 @@ struct Panel: View {
                     Divider()
                     Button("Open Config File…") { m.openConfig() }
                     Button("Reload Config") { m.reload() }
+                    Divider()
+                    Button(m.dark ? "Switch to Light Mode" : "Switch to Dark Mode") { m.toggleDark() }
                 } label: { Image(systemName: "gearshape") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("Settings").accessibilityLabel("Settings")
             }
 
             if m.mons.isEmpty {
-                Text("No external monitor connected. The brightness keys control the built-in screen.")
+                Text("No external monitors. Plug one in and Daylit takes over; the built-in screen stays with macOS.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(spacing: 8) { ForEach(m.mons.indices, id: \.self) { i in row(i) } }
             }
 
             if m.source != .off {
-                Toggle(isOn: Binding(get: { m.auto }, set: { m.setAuto($0) })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Automatic")
-                        if !m.detail.isEmpty {
-                            Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                VStack(alignment: .leading, spacing: 8) {
+                    switchRow("Automatic brightness", Binding(get: { m.auto }, set: { m.setAuto($0) }), .small) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Automatic")
+                            if !m.detail.isEmpty {
+                                Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
                         }
                     }
+                    .accessibilityHint(m.detail)
+                    switchRow("Light or dark mode from daylight", Binding(get: { m.lookOn }, set: { m.setLook($0) }), .mini) {
+                        Text("Light or dark mode from daylight").font(.caption)
+                    }
+                    if m.hasBattery {
+                        switchRow("Pause on battery", Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) }), .mini) {
+                            Text("Pause on battery").font(.caption)
+                        }
+                        .help("On battery: no automatic changes and no Home Assistant traffic. Sliders and keys still work.")
+                    }
                 }
-                .toggleStyle(.switch).controlSize(.small)
-                .accessibilityLabel("Automatic brightness")
-                .accessibilityHint(m.detail)
             } else {
                 Text("Set a location or Home Assistant in the config file for automatic brightness.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -1008,6 +1117,15 @@ struct Panel: View {
         .padding(14)
         .frame(width: 320)
 
+    }
+
+    /// A label on the left and its switch on the right edge, like System Settings.
+    func switchRow<L: View>(_ name: String, _ isOn: Binding<Bool>, _ size: SwiftUI.ControlSize, @ViewBuilder label: () -> L) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            label()
+            Spacer(minLength: 8)
+            Toggle(name, isOn: isOn).labelsHidden().toggleStyle(.switch).controlSize(size).accessibilityLabel(name)
+        }
     }
 
     func row(_ i: Int) -> some View {
