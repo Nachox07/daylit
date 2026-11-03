@@ -12,6 +12,7 @@ struct Panel: View {
             HStack {
                 Text("Daylit").font(.system(size: 13, weight: .semibold))
                 Spacer()
+                if m.mons.count > 1 { linkButton }
                 gearMenu
             }
 
@@ -61,21 +62,15 @@ struct Panel: View {
         .help("Settings").accessibilityLabel("Settings")
     }
 
-    /// The monitor cards. With two or more, a round link button sits in the gap between the first two.
+    /// The monitor cards; linked ones get an accent border.
     var monitors: some View {
         let linked = m.sync && m.mons.count > 1
-        return VStack(spacing: 0) {
-            ForEach(m.mons.indices, id: \.self) { i in
-                row(i, linked: linked)
-                if i == 0 && m.mons.count > 1 {
-                    linkButton.frame(height: 10).zIndex(1)
-                } else if i < m.mons.count - 1 {
-                    Spacer().frame(height: 10)
-                }
-            }
+        return VStack(spacing: 10) {
+            ForEach(m.mons.indices, id: \.self) { i in row(i, linked: linked) }
         }
     }
 
+    /// In the header next to the gear, so it reads as one switch for every monitor, however many there are.
     var linkButton: some View {
         let on = m.sync
         return Button { m.setSync(!on) } label: {
@@ -83,9 +78,7 @@ struct Panel: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(on ? Color.white : Color.secondary)
                 .frame(width: 24, height: 24)
-                .background(Circle().fill(on ? Color.accentColor : Color(nsColor: .windowBackgroundColor)))
-                .overlay(Circle().strokeBorder(on ? Color.clear : Color.primary.opacity(0.15), lineWidth: 0.5))
-                .opacity(on ? 1 : 0.9)
+                .background(Circle().fill(on ? Color.accentColor : Color.clear))
         }
         .buttonStyle(.plain)
         .help(on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."

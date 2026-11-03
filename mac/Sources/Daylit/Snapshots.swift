@@ -25,9 +25,11 @@ import DaylitCore
             return d
         }
         let two = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48)]
+        let three = two + [mon(3, "LG 27UK850", 60)]
         return [
             ("panel-two", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon")))),
             ("panel-two-linked", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon", sync: true)))),
+            ("panel-three-linked", AnyView(Panel(m: model(three, source: .sun, detail: "Sun · 21.7° above the horizon", sync: true)))),
             ("panel-one-manual", AnyView(Panel(m: model([mon(1, "LG UltraFine 5K", 60, manual: true)], source: .homeAssistant,
                                                         detail: "Home Assistant · sun 100% · blind 56%")))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
