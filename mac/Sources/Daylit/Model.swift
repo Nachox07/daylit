@@ -46,6 +46,9 @@ import DaylitCore
     var timer: Timer?
     var screenDebounce: DispatchWorkItem?
 
+    /// A model with fixed state and no side effects (no displays, keys, timers or network): snapshots.
+    init(preview: Void) {}
+
     init() {
         reload()
         if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt

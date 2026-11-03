@@ -64,6 +64,13 @@ sealed class Controller {
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
 
+    /// Fixed state and nothing else: no tray, hotkeys, timers, monitors or network (UI snapshots).
+    public Controller(Config cfg, List<Mon> mons, string subtitle) {
+        app = Application.Current; ui = app.Dispatcher;
+        Cfg = cfg; Mons = mons; AutoOn = true; Subtitle = subtitle; HotkeysOk = true;
+        tray = null!; panel = null!; keys = null!;
+    }
+
     public Controller(Application app) {
         this.app = app;
         ui = app.Dispatcher;

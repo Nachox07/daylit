@@ -205,34 +205,42 @@ struct Panel: View {
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel = p; return p
         }()
-        p.contentView = NSHostingView(rootView:
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
-                    Text(label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Spacer()
-                    Text("\(Int(v))%").font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
-                }
-                HStack(spacing: 8) {
-                    Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.quaternary)
-                            Capsule().fill(.primary).frame(width: max(6, g.size.width * v / 100))
-                        }
-                    }.frame(height: 6)
-                    Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 14)
-            .frame(width: size.width, height: size.height)
-            .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))))
+        p.contentView = NSHostingView(rootView: HUDView(label: label, value: v).frame(width: size.width, height: size.height))
         let f = screen.frame
         p.setFrame(NSRect(x: f.midX - size.width / 2, y: f.minY + f.height * 0.12, width: size.width, height: size.height), display: true)
         p.alphaValue = 1; p.orderFrontRegardless()
         hide?.cancel()
         let w = DispatchWorkItem { NSAnimationContext.runAnimationGroup { $0.duration = 0.3; p.animator().alphaValue = 0 } }
         hide = w; DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
+    }
+}
+
+/// The on-screen indicator's content.
+struct HUDView: View {
+    let label: String
+    let value: Double
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer()
+                Text("\(Int(value))%").font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.quaternary)
+                        Capsule().fill(.primary).frame(width: max(6, g.size.width * value / 100))
+                    }
+                }.frame(height: 6)
+                Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(width: 240, height: 70)
+        .background(PanelBackground(cornerRadius: 18))
     }
 }
 

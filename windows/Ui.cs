@@ -32,7 +32,7 @@ static class Palette {
     /// The Windows accent colour (DWM stores it as ABGR).
     public static Brush Accent {
         get {
-            if (Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM", "AccentColor", null) is int abgr) {
+            if (Theme.Force == null && Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM", "AccentColor", null) is int abgr) {
                 uint v = unchecked((uint)abgr);
                 var b = new SolidColorBrush(Color.FromRgb((byte)v, (byte)(v >> 8), (byte)(v >> 16))); b.Freeze(); return b;
             }
@@ -403,17 +403,24 @@ sealed class Osd : Window {
     }
 
     public void Flash(string name, int v, string gdi) {
+        Fill(name, v);
+        BeginAnimation(OpacityProperty, null); Opacity = 1;
+        if (!IsVisible) Show();
+        var b = (WF.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == gdi) ?? WF.Screen.PrimaryScreen!).Bounds;
+        if (hwnd != IntPtr.Zero) Win.Place(hwnd, (w, h) => (b.Left + (b.Width - w) / 2, b.Bottom - (int)(b.Height * 0.12) - h));
+        hideT.Stop(); hideT.Start();
+    }
+
+    /// The indicator's content alone, filled in and detached from the window (snapshots).
+    public FrameworkElement Detach(string name, int v) { Fill(name, v); Content = null; panel.Width = Width; return panel; }
+
+    void Fill(string name, int v) {
         panel.Background = Palette.Osd; panel.BorderBrush = Palette.CardBorder;
         Foreground = Palette.Text; track.Background = Palette.Track; fill.Background = Palette.Accent;
         label.Text = name; pct.Text = v + "%";
         bar.ColumnDefinitions[0].Width = new GridLength(Math.Max(v, 0.0001), GridUnitType.Star);
         bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(100 - v, 0.0001), GridUnitType.Star);
         fill.Visibility = v > 0 ? Visibility.Visible : Visibility.Hidden;
-        BeginAnimation(OpacityProperty, null); Opacity = 1;
-        if (!IsVisible) Show();
-        var b = (WF.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == gdi) ?? WF.Screen.PrimaryScreen!).Bounds;
-        if (hwnd != IntPtr.Zero) Win.Place(hwnd, (w, h) => (b.Left + (b.Width - w) / 2, b.Bottom - (int)(b.Height * 0.12) - h));
-        hideT.Stop(); hideT.Start();
     }
 }
 

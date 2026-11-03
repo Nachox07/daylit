@@ -83,7 +83,9 @@ static class Settings {
     }
 
     /// "Sync monitors" and the offsets captured when it was switched on (JSON: monitor key → offset).
-    public static bool SyncMonitors { get => Get("SyncMonitors", false); set => Set("SyncMonitors", value); }
+    public static bool SyncMonitors { get => SyncOverride ?? Get("SyncMonitors", false); set => Set("SyncMonitors", value); }
+    /// Snapshots: a fixed value instead of the registry.
+    public static bool? SyncOverride;
     public static SyncOffsets SyncOffsets {
         get {
             try {
@@ -115,7 +117,9 @@ static class Settings {
 
 static class Theme {
     const string Key = @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-    public static bool Dark => Registry.GetValue(Key, "AppsUseLightTheme", 1) is int i && i == 0;
+    /// Snapshots force light or dark instead of reading the system setting.
+    public static bool? Force;
+    public static bool Dark => Force ?? (Registry.GetValue(Key, "AppsUseLightTheme", 1) is int i && i == 0);
     static bool DarkTaskbar => !(Registry.GetValue(Key, "SystemUsesLightTheme", 0) is int i && i == 1);
 
     [DllImport("user32")] static extern bool DestroyIcon(IntPtr h);
