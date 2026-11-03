@@ -130,11 +130,6 @@ struct VisualEffect: View {
     }
 }
 
-struct DaylitApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    var body: some Scene { Settings { EmptyView() } }
-}
-
 @main enum Main {
     static func main() {
         if let code = CLI.run(Array(CommandLine.arguments.dropFirst())) { exit(code) }
@@ -144,6 +139,14 @@ struct DaylitApp: App {
             DistributedNotificationCenter.default().postNotificationName(AppDelegate.showNote, object: nil, userInfo: nil, deliverImmediately: true)
             exit(0)
         }
-        DaylitApp.main()
+        // Plain AppKit run loop: the app has no windows of its own besides the panel, so no SwiftUI
+        // scene (an empty Settings scene used to open on ⌘,).
+        MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            let delegate = AppDelegate()
+            app.delegate = delegate
+            app.setActivationPolicy(.accessory)
+            withExtendedLifetime(delegate) { app.run() }
+        }
     }
 }
