@@ -209,3 +209,29 @@ sealed class SyncOffsets {
         return r;
     }
 }
+
+/// Hand-set state kept across restarts, so quitting or rebooting does not jump every monitor back to
+/// the automatic target. Saved per monitor (its stable key) with the time it was saved; an entry older
+/// than MaxAge is forgotten, since the target has moved on by then anyway.
+sealed class SavedHolds {
+    public sealed record Entry(int? LastSet, int? LastTarget, double Saved);
+    public static readonly double MaxAge = 12 * 3600;
+    public Dictionary<string, Entry> Entries { get; set; } = new();
+
+    /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
+    public bool Record(string key, int? lastSet, int? lastTarget, double now) {
+        if (lastSet == null && lastTarget == null) return Entries.Remove(key);
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == lastSet && e.LastTarget == lastTarget) return false;   // keep "last decided" time
+        Entries[key] = new Entry(lastSet, lastTarget, now);
+        return true;
+    }
+    /// The state to start a monitor with after a restart, or null when there is none or it is too old.
+    public (int? LastSet, int? LastTarget)? Restore(string key, double now) =>
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= MaxAge ? (e.LastSet, e.LastTarget) : null;
+
+    public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
+    public static SavedHolds FromJson(string? json) {
+        try { return new SavedHolds { Entries = json == null ? new() : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, Entry>>(json) ?? new() }; }
+        catch { return new SavedHolds(); }
+    }
+}

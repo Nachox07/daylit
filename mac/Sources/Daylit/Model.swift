@@ -26,6 +26,11 @@ import DaylitCore
         guard let d = UserDefaults.standard.data(forKey: "syncOffsets"), let o = try? JSONDecoder().decode(SyncOffsets.self, from: d) else { return SyncOffsets() }
         return o
     }()
+    /// Hand-set state kept across restarts (DaylitCore.SavedHolds), so a restart doesn't jump the monitors.
+    var holds: SavedHolds = {
+        guard let d = UserDefaults.standard.data(forKey: "holds"), let h = try? JSONDecoder().decode(SavedHolds.self, from: d) else { return SavedHolds() }
+        return h
+    }()
     var lookDark: Bool?
     var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
     /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
@@ -104,6 +109,9 @@ import DaylitCore
                     // Another control reads on its own scale: the new reading is not a level set by hand.
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
                 }
+            }
+            else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970) {
+                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
             }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
             if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)") }
@@ -405,9 +413,22 @@ import DaylitCore
                 }
             }
         }
+        saveHolds()
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
+    }
+
+    func saveHolds() {
+        let before = holds, now = Date().timeIntervalSince1970
+        for m in mons {
+            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget)
+            // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
+            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget }) != true {
+                holds.record(key: m.uuid, state: st, now: now)
+            }
+        }
+        if holds != before, let d = try? JSONEncoder().encode(holds) { UserDefaults.standard.set(d, forKey: "holds") }
     }
 
     func write(_ m: Mon, _ v: Int) {

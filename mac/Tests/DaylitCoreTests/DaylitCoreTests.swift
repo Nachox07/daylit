@@ -391,4 +391,32 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(s.follow(key: "z", level: 30, keys: ["a", "z"]), [:])
         XCTAssertEqual(s.follow(key: "a", level: 30, keys: ["a", "z"]), [:])
     }
+
+    // MARK: saved hand-set state
+
+    func testSavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
+        var saved = SavedHolds()
+        saved.record(key: "A", state: HoldState(lastSet: 70, lastTarget: 70), now: 1000)
+        let back = try! JSONDecoder().decode(SavedHolds.self, from: try! JSONEncoder().encode(saved))
+        let st = back.restore(key: "A", now: 1000 + 3600)
+        XCTAssertEqual(st, HoldState(lastSet: 70, lastTarget: 70))
+        // The monitor is at 40 (set by hand before the restart) and the target barely moved: kept.
+        let s = decide(current: 40, want: 72, remote: nil, state: st!, here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertNil(s.write)
+        XCTAssertTrue(s.manual)
+    }
+
+    func testWithoutSavedHoldARestartAppliesTheTarget() {
+        let s = decide(current: 40, want: 72, remote: nil, state: HoldState(), here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertEqual(s.write, 72)
+    }
+
+    func testSavedHoldExpiresAndEmptyStateIsDropped() {
+        var saved = SavedHolds()
+        saved.record(key: "A", state: HoldState(lastSet: 70, lastTarget: 70), now: 0)
+        XCTAssertNil(saved.restore(key: "A", now: SavedHolds.maxAge + 1))
+        XCTAssertNil(saved.restore(key: "B", now: 10))
+        saved.record(key: "A", state: HoldState(), now: 5)
+        XCTAssertTrue(saved.entries.isEmpty)
+    }
 }

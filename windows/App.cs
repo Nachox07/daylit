@@ -239,6 +239,9 @@ sealed class Controller {
     }
 
     SyncOffsets syncOffsets = Settings.SyncOffsets;
+    /// Hand-set state kept across restarts, so a restart doesn't jump the monitors to the automatic target.
+    readonly SavedHolds holds = Settings.Holds;
+    static double Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
     static int LevelOf(Mon m) => m.Cur ?? 50;
     void AdoptSync() {
         if (syncOffsets.Adopt(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))).ToList())) Settings.SyncOffsets = syncOffsets;
@@ -298,7 +301,11 @@ sealed class Controller {
         var ext = found.Where(d => !d.Internal).ToList();
         var next = ext.Select(d => {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
-            if (m == null) return new Mon(d, Mon.Match(d, Cfg.Monitors));
+            if (m == null) {
+                var fresh = new Mon(d, Mon.Match(d, Cfg.Monitors));
+                if (holds.Restore(d.Key, Now) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
+                return fresh;
+            }
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
                 Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
@@ -371,6 +378,7 @@ sealed class Controller {
             AdoptSync();
             synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun), mons.Select(x => x.Key));
         }
+        bool holdsChanged = false;
         for (int i = 0; i < mons.Length; i++) {
             var m = mons[i];
             m.Manual = false;
@@ -378,6 +386,7 @@ sealed class Controller {
             int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
             (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
+            if (holds.Record(m.Key, m.LastSet, m.LastTarget, Now)) holdsChanged = true;
             bool remote = step.Remote != null;
             if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
             else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");
@@ -392,6 +401,8 @@ sealed class Controller {
                 }
             }
         }
+
+        if (holdsChanged) Settings.Holds = holds;
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
         Subtitle = !AutoOn ? "Off — sliders and hotkeys only"

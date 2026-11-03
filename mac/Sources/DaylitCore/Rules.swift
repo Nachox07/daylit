@@ -198,3 +198,29 @@ public struct SyncOffsets: Equatable, Codable {
         return r
     }
 }
+
+/// Hand-set state kept across restarts, so quitting or rebooting does not jump every monitor back to
+/// the automatic target. Saved per monitor (keyed by its display identity) with the time it was saved;
+/// an entry older than `maxAge` is forgotten, since the target has moved on by then anyway.
+public struct SavedHolds: Equatable, Codable {
+    public struct Entry: Equatable, Codable {
+        public var lastSet: Int?
+        public var lastTarget: Int?
+        public var saved: Double     // Unix seconds
+        public init(lastSet: Int?, lastTarget: Int?, saved: Double) { self.lastSet = lastSet; self.lastTarget = lastTarget; self.saved = saved }
+    }
+    public static let maxAge: Double = 12 * 3600
+    public var entries: [String: Entry]
+    public init(entries: [String: Entry] = [:]) { self.entries = entries }
+
+    /// Records a monitor's state; one with nothing to remember is removed.
+    public mutating func record(key: String, state: HoldState, now: Double) {
+        if state.lastSet == nil && state.lastTarget == nil { entries[key] = nil; return }
+        entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, saved: now)
+    }
+    /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
+    public func restore(key: String, now: Double) -> HoldState? {
+        guard let e = entries[key], now - e.saved <= Self.maxAge, now >= e.saved else { return nil }
+        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget)
+    }
+}

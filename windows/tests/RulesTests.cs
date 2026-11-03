@@ -342,4 +342,37 @@ public class SyncTests {
         Assert.Empty(s.Follow("z", 30, new[] { "a", "z" }));
         Assert.Empty(s.Follow("a", 30, new[] { "a", "z" }));
     }
+
+    // Saved hand-set state
+
+    [Fact]
+    public void SavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
+        var saved = new SavedHolds();
+        Assert.True(saved.Record("A", 70, 70, 1000));
+        var back = SavedHolds.FromJson(saved.ToJson());
+        var r = back.Restore("A", 1000 + 3600);
+        Assert.Equal((70, 70), (r!.Value.LastSet, r.Value.LastTarget));
+        // At 40 (set by hand before the restart), target barely moved: kept, nothing written.
+        var step = Rules.Decide(40, 72, null, new Hold(null, r.Value.LastSet, r.Value.LastTarget), true, true, 5);
+        Assert.Null(step.Write);
+        Assert.True(step.Manual);
+    }
+
+    [Fact]
+    public void WithoutSavedHoldARestartAppliesTheTarget() {
+        var step = Rules.Decide(40, 72, null, new Hold(null, null, null), true, true, 5);
+        Assert.Equal(72, step.Write);
+    }
+
+    [Fact]
+    public void SavedHoldExpiresAndEmptyStateIsDropped() {
+        var saved = new SavedHolds();
+        saved.Record("A", 70, 70, 0);
+        Assert.Null(saved.Restore("A", SavedHolds.MaxAge + 1));
+        Assert.Null(saved.Restore("B", 10));
+        Assert.False(saved.Record("A", 70, 70, 50));   // unchanged: keeps the original time
+        Assert.True(saved.Record("A", null, null, 60));
+        Assert.Empty(saved.Entries);
+        Assert.NotNull(SavedHolds.FromJson("not json"));
+    }
 }
