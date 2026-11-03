@@ -4,3 +4,5 @@ out/
 *.app
 .DS_Store
 config.json
+.build/
+.swiftpm/

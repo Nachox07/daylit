@@ -1,13 +1,14 @@
 #!/bin/sh
-# Builds Daylit.app (needs the Xcode command-line tools). Output: ~/Applications/Daylit.app,
-# or the folder given as the first argument.
+# Builds Daylit.app with Swift Package Manager (needs Xcode or its command-line tools).
+# Output: ~/Applications/Daylit.app, or the folder given as the first argument. Tests: swift test.
 set -e
 cd "$(dirname "$0")"
 OUT="${1:-$HOME/Applications}"
 APP="$OUT/Daylit.app"
 mkdir -p "$APP/Contents/MacOS"
-# Target macOS 14 explicitly; otherwise the binary requires the SDK's (newer) macOS version.
-swiftc -O -swift-version 5 -parse-as-library -target "$(uname -m)-apple-macos14.0" Daylit.swift -o "$APP/Contents/MacOS/Daylit"
+# Package.swift sets macOS 14 as the minimum, so the binary runs there whatever SDK builds it.
+swift build -c release --product Daylit
+cp "$(swift build -c release --show-bin-path)/Daylit" "$APP/Contents/MacOS/Daylit"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -1,0 +1,371 @@
+// The app's state and the tick: reads the monitors, asks the source, applies the decisions from DaylitCore.
+import SwiftUI
+import AppKit
+import ServiceManagement
+import DaylitCore
+
+@MainActor final class Daylit: ObservableObject {
+    static let idleLimit: Double = 300
+
+    @Published var mons: [Mon] = []
+    @Published var source: Source = .off
+    @Published var auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
+    @Published var detail = ""          // one line under the Automatic switch
+    @Published var problem: String?     // config / connection problem, shown as a caption
+    @Published var login = SMAppService.mainApp.status == .enabled
+    @Published var pauseOnBattery = true
+    @Published var hasBattery = Power.hasBattery
+    @Published var onBattery = Power.onBattery
+    @Published var lookOn = UserDefaults.standard.bool(forKey: "autoLook")   // off by default on the Mac
+    @Published var dark = false
+    var lookDark: Bool?
+    var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
+    /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
+    var paused: Bool { pauseOnBattery && hasBattery && onBattery }
+    var config = Config()
+    var configProblem: String?
+    var dragging: Set<CGDirectDisplayID> = []
+    let ddcQ = DispatchQueue(label: "ddc")
+    var pending: [CGDirectDisplayID: DispatchWorkItem] = [:]
+    var busy = false, again = false, wasHere = true
+    var generation = 0
+    var lastTick = Date.distantPast
+    var timer: Timer?
+    var screenDebounce: DispatchWorkItem?
+
+    init() {
+        reload()
+        if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt
+        HotKeys.shared.start { [weak self] up, fine in self?.hotkey(up: up, fine: fine) }
+        // A cheap check every 5 s; the real work runs every 30 s (120 s on battery) or on an event.
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in Task { @MainActor in self.check() } }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in log("wake"); try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in self.screensChanged() }
+        }
+    }
+
+    // MARK: setup
+
+    func reload() {
+        let (c, err) = Config.load()
+        config = c
+        pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
+        lookDark = nil; look = LookRule()
+        let (src, srcErr) = c.resolvedSource()
+        source = src
+        configProblem = err ?? srcErr
+        problem = configProblem
+        DDC.tool = c.ddcTool ?? DDC.defaultTool
+        HAClient.tokenCache = [:]
+        log("config \(Config.path.path): source=\(src) problem=\(configProblem ?? "none")")
+        if src == .sun, let l = c.location {
+            log(String(format: "sun elevation now %.2f° at %.3f, %.3f", solarElevation(latitude: l.latitude, longitude: l.longitude), l.latitude, l.longitude))
+        }
+        redetect()
+    }
+
+    func screensChanged() {
+        screenDebounce?.cancel()
+        let w = DispatchWorkItem { Task { @MainActor in self.redetect() } }
+        screenDebounce = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: w)
+    }
+
+    /// Rebuilds the monitor list from the connected displays, keeping per-monitor state where possible.
+    func redetect() {
+        generation += 1
+        let old = Dictionary(mons.map { ($0.uuid, $0) }, uniquingKeysWith: { a, _ in a })
+        mons = externalScreens().map { s in
+            let cfg = config.monitors?.first { s.name.localizedCaseInsensitiveContains($0.match) }
+            let control: Control
+            switch cfg?.control {
+            case "native": control = .native
+            case "ddc": control = .ddc
+            default: control = Native.get(s.id) != nil ? .native : DDC.available ? .ddc : .none
+            }
+            var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
+                        day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
+            if let o = old[s.uuid] {
+                m.level = o.level; m.remoteSeen = o.remoteSeen
+                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published }
+                else {
+                    // Another control reads on its own scale: the new reading is not a level set by hand.
+                    Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
+                }
+            }
+            if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
+            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)") }
+            log("display \"\(s.name)\" id=\(s.id) uuid=\(s.uuid) control=\(control.rawValue)\(cfg != nil ? " (config \"\(cfg!.match)\")" : "")")
+            return m
+        }
+        if mons.isEmpty { log("no external displays") }
+        refresh()
+    }
+
+    // MARK: actions
+
+    /// Run a tick now (or right after the current one).
+    func refresh() {
+        if busy { again = true; return }
+        Task { await tick() }
+    }
+
+    func check() {
+        if Appearance.isDark != dark { dark = Appearance.isDark }
+        let battery = Power.onBattery
+        if battery != onBattery {
+            onBattery = battery
+            if hasBattery && pauseOnBattery && source != .off {
+                Log.write(battery ? "battery: paused" : "power: resumed")
+                if !battery { refresh(); return }
+                detail = "Paused on battery"
+            }
+        }
+        if paused || mons.isEmpty { return }   // nothing to do until power or a monitor comes back
+        let here = idleSeconds() < Self.idleLimit
+        if here && !wasHere {
+            // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
+            Log.write("back: applying targets")
+            for i in mons.indices { mons[i].published = nil }
+            wasHere = here
+            refresh(); return
+        }
+        if !here && wasHere && source != .off { Log.write("idle: paused") }
+        wasHere = here
+        guard source != .off else { return }
+        let interval: Double = Power.onBattery ? 120 : 30
+        if Date().timeIntervalSince(lastTick) >= interval { refresh() }
+    }
+
+    func setLevel(_ i: Int, _ v: Double) {
+        guard mons.indices.contains(i) else { return }
+        mons[i].level = v
+        let m = mons[i]
+        if m.control == .native { Native.set(m.id, Int(v)); return }
+        guard m.control == .ddc else { return }
+        pending[m.id]?.cancel()   // DDC is slow: only send the last value of a quick series
+        let uuid = m.uuid, val = Int(v)
+        let w = DispatchWorkItem { DDC.set(uuid, val) }
+        pending[m.id] = w; ddcQ.asyncAfter(deadline: .now() + 0.15, execute: w)
+    }
+
+    func dragChanged(_ i: Int, _ editing: Bool) {
+        guard mons.indices.contains(i) else { return }
+        if editing { dragging.insert(mons[i].id) } else { dragging.remove(mons[i].id) }
+    }
+
+    /// Brightness keys: change the monitor that holds the focused window.
+    func key(up: Bool, fine: Bool, on id: CGDirectDisplayID) {
+        guard let i = mons.firstIndex(where: { $0.id == id }), mons[i].control != .none else { return }
+        let step = Double(fine ? 1 : 6)
+        setLevel(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
+        HUD.show(mons[i].label, mons[i].level, on: id)
+    }
+
+    /// Keyboard shortcut: the managed monitor with the active window, else the first one that works.
+    func hotkey(up: Bool, fine: Bool) {
+        let id = Focus.screenID().flatMap { s in mons.first { $0.id == s && $0.control != .none }?.id }
+            ?? mons.first { $0.control != .none && $0.available }?.id
+        if let id { key(up: up, fine: fine, on: id) }
+    }
+
+    func setAuto(_ on: Bool) {
+        auto = on
+        if source == .homeAssistant, let ha = config.homeAssistant, let sw = ha.autoSwitch {
+            Task { _ = await HAClient.call(ha, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), ["entity_id": sw]) }
+        } else {
+            UserDefaults.standard.set(on, forKey: "auto")
+        }
+        if on { for i in mons.indices { mons[i].lastSet = nil; mons[i].manual = false } }
+        refresh()
+    }
+
+    func setPause(_ on: Bool) {
+        pauseOnBattery = on
+        UserDefaults.standard.set(on, forKey: "pauseOnBattery")
+        Log.write("pause on battery: " + (on ? "on" : "off"))
+        refresh()
+    }
+
+    func setLook(_ on: Bool) {
+        lookOn = on
+        UserDefaults.standard.set(on, forKey: "autoLook")
+        lookDark = nil; look = LookRule()
+        refresh()
+    }
+
+    /// Manual switch; it stays until the automatic decision next changes.
+    func toggleDark() {
+        if let e = Appearance.setDark(!Appearance.isDark) { problem = e }
+        Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); self.dark = Appearance.isDark }
+    }
+
+    // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
+    // dark otherwise. Same rule as Windows, with a gap between on and off thresholds so it does not
+    // flip back and forth. Only acts when the decision changes, so a manual switch stays until then.
+    func updateLook(_ s: Inputs) {
+        guard lookOn else { lookDark = nil; look = LookRule(); return }
+        let wantDark = look.wantDark(elev: s.elev, pos: s.pos, hasBlind: s.hasBlind, lightsOn: s.fromHA && s.lights, bri: s.bri, sat: s.sat)
+        if wantDark != lookDark {
+            Log.write("theme: " + (wantDark ? "dark" : "light"))
+            if wantDark != Appearance.isDark, let e = Appearance.setDark(wantDark) {
+                problem = e; Log.write("theme: " + e)
+            }
+            lookDark = wantDark
+            dark = Appearance.isDark
+        }
+    }
+
+    func setLogin(_ on: Bool) {
+        try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+        login = SMAppService.mainApp.status == .enabled
+    }
+
+    /// Opens the config file in the default text editor, creating a starting one if there is none.
+    func openConfig() {
+        let p = Config.path
+        if !FileManager.default.fileExists(atPath: p.path) {
+            try? FileManager.default.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let monitors = mons.map { m in
+                "    { \"match\": \"\(m.name)\", \"label\": \"\(m.label)\", \"control\": \"\(m.control == .none ? "auto" : m.control.rawValue)\", \"day\": 70, \"blindDown\": 40, \"night\": 20 }"
+            }.joined(separator: ",\n")
+            let text = "{\n  \"manualHold\": 5,\n  \"monitors\": [\n\(monitors)\n  ]\n}\n"
+            try? text.write(to: p, atomically: true, encoding: .utf8)
+        }
+        let o = Process(); o.executableURL = URL(fileURLWithPath: "/usr/bin/open"); o.arguments = ["-t", p.path]
+        try? o.run()
+    }
+
+    // MARK: tick
+
+    struct Inputs {
+        let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String
+        var fromHA = false, hasBlind = false, bri = 0.0, sat = 100.0
+    }
+
+    var lastHAError: String?
+    /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
+    /// network at login or after wake does not jump the monitors to the fallback levels.
+    var haDownSince: Date?
+
+    func tick() async {
+        if busy { again = true; return }
+        busy = true
+        defer {
+            busy = false
+            if again { again = false; Task { await self.tick() } }
+        }
+        lastTick = Date()
+        let gen = generation
+        let snapshot = mons
+
+        // Current brightness: detects values set by hand (keys, the monitor's own buttons).
+        var cur: [Int?] = []
+        for m in snapshot {
+            switch m.control {
+            case .native: cur.append(Native.get(m.id))   // NSScreen-backed API: main thread
+            case .ddc: cur.append(await withCheckedContinuation { c in ddcQ.async { c.resume(returning: DDC.get(m.uuid)) } })
+            case .none: cur.append(nil)
+            }
+        }
+        guard gen == generation else { return }   // displays changed meanwhile; a new tick follows
+        for i in mons.indices {
+            mons[i].available = cur[i] != nil
+            if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
+        }
+
+        guard source != .off else { detail = ""; problem = configProblem; return }
+        // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
+        guard !mons.isEmpty else { detail = ""; return }
+        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; return }
+        guard let inp = await inputs(), gen == generation else { return }
+
+        let sun = daylightFraction(elevation: inp.elev)
+        let here = idleSeconds() < Self.idleLimit
+        let hold = config.manualHold ?? 5
+        for i in mons.indices {
+            guard let c0 = cur[i] else { continue }
+            let m = mons[i]
+            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+            let want = target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+            let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
+                              state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen),
+                              here: here, auto: auto, dragging: dragging.contains(m.id), hold: hold)
+            mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen
+            if let v = step.remote { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
+            if let v = step.write {
+                if step.remote == nil { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
+                write(m, v)
+            }
+            if let v = step.level { mons[i].level = Double(v) }
+            if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
+            let applied = step.applied, manual = step.manual
+            mons[i].manual = manual
+            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, mons[i].published != applied {
+                let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
+                    "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
+                    "target": want, "manual": manual, "daylight": (sun * 100).rounded() / 100,
+                    "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
+                guard gen == generation else { return }
+                if case .success = r {   // retried next tick if the post failed
+                    mons[i].published = applied
+                    Log.write("publish: \(sensor) = \(applied)" + (manual ? " (manual)" : ""))
+                }
+            }
+        }
+        if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
+        detail = here || !auto ? inp.line : "Paused — this Mac is idle"
+        log("tick: \(detail) · auto=\(auto)")
+    }
+
+    func write(_ m: Mon, _ v: Int) {
+        log("set \"\(m.label)\" → \(v)")
+        if m.control == .native { Native.set(m.id, v) }
+        else if m.control == .ddc { let u = m.uuid; ddcQ.async { DDC.set(u, v) } }
+    }
+
+    /// Sun, blind, lights and levels from the configured source; nil when there is nothing to act on.
+    func inputs() async -> Inputs? {
+        func fromSun(_ note: String?) -> Inputs? {
+            guard let l = config.location else { return nil }
+            let e = solarElevation(latitude: l.latitude, longitude: l.longitude)
+            let where_ = e >= 0 ? String(format: "%.1f° above the horizon", e) : String(format: "%.1f° below the horizon", -e)
+            return Inputs(elev: e, pos: 100, lights: false, levels: [:], line: note ?? "Sun · " + where_)
+        }
+        switch source {
+        case .off: return nil
+        case .sun:
+            problem = configProblem
+            return fromSun(nil)
+        case .homeAssistant:
+            guard let ha = config.homeAssistant else { return nil }
+            switch await HAClient.state(ha, mons) {
+            case .success(let s):
+                problem = configProblem
+                haDownSince = nil
+                if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
+                if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
+                let sun = Int((daylightFraction(elevation: s.elev) * 100).rounded())
+                var line = "Home Assistant · sun \(sun)%"
+                if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
+                if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat) }
+                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                              hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
+            case .failure(let f):
+                problem = HAClient.describe(f, ha)
+                if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
+                if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
+                if haDownSince == nil { haDownSince = Date() }
+                if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
+                    auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
+                    return fromSun("Home Assistant unreachable — using the sun")
+                }
+                detail = "Home Assistant · not connected"
+                return nil
+            }
+        }
+    }
+}
