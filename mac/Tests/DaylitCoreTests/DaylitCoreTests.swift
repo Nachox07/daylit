@@ -231,9 +231,47 @@ final class ConfigTests: XCTestCase {
         let unknown = Config(source: "moon").resolvedSource()
         XCTAssertEqual(unknown.0, .off); XCTAssertNotNil(unknown.1)
     }
+    func testEntityIdShape() {
+        XCTAssertTrue(Config.isEntityId("light.office_2"))
+        for bad in ["light", "light.", ".x", "light.Office", "light.a.b", "light.x')}}{{ 7*7 }}", "light.x }}", "light.x\n", "light.x y", ""] {
+            XCTAssertFalse(Config.isEntityId(bad), bad)
+        }
+    }
+    func testInjectedEntityIdIsRejectedAndNotUsed() {
+        let text = #"{ "homeAssistant": { "url": "http://ha.local:8123", "cover": "cover.x')}}{{ 7*7 }}{{('" },"#
+            + #" "monitors": [ { "match": "DELL", "day": 60 } ] }"#
+        let (c, err) = Config.load(from: write(text))
+        XCTAssertTrue(err?.contains("homeAssistant.cover") ?? false, err ?? "")
+        XCTAssertNil(c.homeAssistant)                       // source settings dropped
+        XCTAssertEqual(c.resolvedSource().0, .off)
+        XCTAssertEqual(c.monitors?.first?.day, 60)          // monitors kept
+    }
+    func testInjectedMonitorEntityIsRejected() {
+        let text = #"{ "homeAssistant": { "url": "http://ha.local:8123" }, "monitors": [ { "match": "DELL", "homeAssistant": { "sensor": "sensor.a/../../api/services" } } ] }"#
+        let (_, err) = Config.load(from: write(text))
+        XCTAssertTrue(err?.contains("homeAssistant.sensor") ?? false, err ?? "")
+    }
+    func testURLMustBeHTTP() {
+        let (c, err) = Config.load(from: write(#"{ "homeAssistant": { "url": "file:///etc/passwd" } }"#))
+        XCTAssertNotNil(err); XCTAssertNil(c.homeAssistant)
+    }
+    func testCleartextNote() {
+        for local in ["http://192.168.1.20:8123", "http://10.0.0.2", "http://172.20.1.1", "http://homeassistant.local:8123",
+                      "http://homeassistant:8123", "http://localhost:8123", "http://[fd00::1]:8123", "https://ha.example.com"] {
+            XCTAssertFalse(Config.isCleartextToNonLocal(local), local)
+        }
+        XCTAssertTrue(Config.isCleartextToNonLocal("http://ha.example.com"))
+        XCTAssertTrue(Config.isCleartextToNonLocal("http://203.0.113.5:8123"))
+    }
 }
 
 final class TemplateTests: XCTestCase {
+    func testTemplateDropsAnyBadIdThatSlipsThrough() {
+        let t = HATemplate.build(HAConfig(url: "http://x", cover: "cover.x')}}{{ 7*7 }}"), [("U", MonitorHA(day: "input_number.d'}}"))])
+        XCTAssertFalse(t.contains("7*7"), t)
+        XCTAssertFalse(t.contains("input_number.d'"), t)
+        XCTAssertTrue(t.contains(#""pos": {{ 100 }}"#))
+    }
     func testNoAutoSwitchRendersJSONNull() {
         let t = HATemplate.build(HAConfig(url: "http://x"), [])
         XCTAssertTrue(t.contains(#""auto": null,"#), t)

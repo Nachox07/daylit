@@ -64,10 +64,69 @@ public struct Config: Decodable {
     }()
 
     /// A missing file is fine (all defaults). A broken one is reported, and the app still runs with defaults.
+    /// A file that parses but fails validation keeps only the safe parts (monitors and local settings) and
+    /// drops the source settings, so a bad entity id or URL is never sent to Home Assistant.
     public static func load(from url: URL = path) -> (Config, String?) {
         guard let d = try? Data(contentsOf: url) else { return (Config(), nil) }
-        do { return (try JSONDecoder().decode(Config.self, from: d), nil) }
+        let c: Config
+        do { c = try JSONDecoder().decode(Config.self, from: d) }
         catch { return (Config(), "config.json is not valid: \(Self.describe(error))") }
+        if let err = c.validate() {
+            var safe = Config(manualHold: c.manualHold, pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
+            safe.builtIn = c.builtIn
+            return (safe, err)
+        }
+        return (c, nil)
+    }
+
+    /// Home Assistant entity ids are pasted into a Jinja template and URL paths, so only the plain
+    /// `domain.object_id` form is accepted.
+    public static func isEntityId(_ s: String) -> Bool {
+        // Checked by hand rather than with a regex: ICU's `$` also matches before a trailing newline.
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789_")
+        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(allowed.contains) }
+    }
+
+    /// First problem found, or nil.
+    public func validate() -> String? {
+        if let u = homeAssistant?.url, !u.isEmpty {
+            guard let url = URL(string: u), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil else {
+                return "config.json: homeAssistant.url is not an http(s) URL"
+            }
+        }
+        if let l = location, !(-90...90).contains(l.latitude) || !(-180...180).contains(l.longitude) {
+            return "config.json: location latitude/longitude out of range"
+        }
+        if let h = manualHold, !(0...100).contains(h) { return "config.json: manualHold must be 0–100" }
+        var ids: [(String, String?)] = []
+        if let h = homeAssistant {
+            ids += [("homeAssistant.autoSwitch", h.autoSwitch), ("homeAssistant.sun", h.sun),
+                    ("homeAssistant.cover", h.cover), ("homeAssistant.lights", h.lights)]
+        }
+        for m in monitors ?? [] {
+            guard let h = m.homeAssistant else { continue }
+            let at = "monitor \"\(m.match)\" homeAssistant."
+            ids += [(at + "sensor", h.sensor), (at + "day", h.day), (at + "blindDown", h.blindDown),
+                    (at + "night", h.night), (at + "set", h.set)]
+        }
+        for (key, v) in ids { if let v, !Self.isEntityId(v) { return "config.json: \(key) is not an entity id like light.office" } }
+        return nil
+    }
+
+    /// True when the token would travel unencrypted beyond the local network: http:// to a host that
+    /// is not a private IP, a *.local name or a single-label name.
+    public static func isCleartextToNonLocal(_ s: String) -> Bool {
+        guard let u = URL(string: s), u.scheme?.lowercased() == "http", let host = u.host?.lowercased() else { return false }
+        if host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":") { return false }
+        let p = host.split(separator: ".").compactMap { Int($0) }
+        if p.count == 4 {
+            if p[0] == 10 || p[0] == 127 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && (16...31).contains(p[1])) || (p[0] == 169 && p[1] == 254) { return false }
+            return true
+        }
+        let h6 = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if h6 == "::1" || h6.hasPrefix("fe80:") || h6.hasPrefix("fc") || h6.hasPrefix("fd") { return false }
+        return true
     }
     static func describe(_ e: Error) -> String {
         switch e as? DecodingError {

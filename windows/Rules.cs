@@ -108,7 +108,12 @@ static class HaTemplate {
                                           : $"{{{{ states('{entity}') | float({fallback.ToString(CultureInfo.InvariantCulture)}) }}}}";
 
     /// One row per monitor, in order; -1 marks "use the local number" (no entity, or the entity is unknown).
-    public static string Build(HaConfig h, IEnumerable<MonitorHa?> monitors) {
+    public static string Build(HaConfig h0, IEnumerable<MonitorHa?> monitors0) {
+        // Config.Validate already rejects bad ids; this second filter keeps any that slip through out of the Jinja.
+        static string? Ok(string? e) => e != null && Config.IsEntityId(e) ? e : null;
+        var h = new HaConfig { Url = h0.Url, TokenName = h0.TokenName, AutoSwitch = Ok(h0.AutoSwitch), Sun = Ok(h0.Sun), Cover = Ok(h0.Cover), Lights = Ok(h0.Lights) };
+        var monitors = monitors0.Select(m => m == null ? null : new MonitorHa {
+            Sensor = Ok(m.Sensor), Day = Ok(m.Day), BlindDown = Ok(m.BlindDown), Night = Ok(m.Night), Set = Ok(m.Set) });
         string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(100)" : "100";
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";

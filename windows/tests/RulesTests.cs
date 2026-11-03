@@ -192,9 +192,46 @@ public class ConfigTests {
         Assert.NotNull(err);
         Assert.Equal(fallback, c.Effective.ToString());
     }
+
+    [Theory]
+    [InlineData("light.office_2", true)]
+    [InlineData("light", false)] [InlineData("light.", false)] [InlineData(".x", false)] [InlineData("light.Office", false)]
+    [InlineData("light.a.b", false)] [InlineData("light.x')}}{{ 7*7 }}", false)] [InlineData("light.x }}", false)]
+    [InlineData("light.x\n", false)] [InlineData("light.x y", false)] [InlineData("", false)]
+    public void EntityIdShape(string id, bool ok) => Assert.Equal(ok, Config.IsEntityId(id));
+
+    [Fact]
+    public void InjectedEntityIdIsRejectedAndNotUsed() {
+        var (c, err) = Config.Load(Write("""{ "homeAssistant": { "url": "http://ha.local:8123", "cover": "cover.x')}}{{ 7*7 }}{{('" }, "monitors": [ { "match": "DELL", "day": 60 } ] }"""));
+        Assert.Contains("homeAssistant.cover", err);
+        Assert.Null(c.HomeAssistant);                 // source settings dropped
+        Assert.Equal(Source.Off, c.Effective);
+        Assert.Equal(60, c.Monitors![0].Day);          // monitors kept
+    }
+
+    [Fact]
+    public void InjectedMonitorEntityIsRejected() {
+        var (_, err) = Config.Load(Write("""{ "homeAssistant": { "url": "http://ha.local:8123" }, "monitors": [ { "match": "DELL", "homeAssistant": { "sensor": "sensor.a/../../api/services" } } ] }"""));
+        Assert.Contains("homeAssistant.sensor", err);
+    }
+
+    [Theory]
+    [InlineData("http://192.168.1.20:8123", false)] [InlineData("http://10.0.0.2", false)] [InlineData("http://172.20.1.1", false)]
+    [InlineData("http://homeassistant.local:8123", false)] [InlineData("http://homeassistant:8123", false)]
+    [InlineData("http://localhost:8123", false)] [InlineData("http://[fd00::1]:8123", false)] [InlineData("https://ha.example.com", false)]
+    [InlineData("http://ha.example.com", true)] [InlineData("http://203.0.113.5:8123", true)]
+    public void CleartextNote(string url, bool warn) => Assert.Equal(warn, Config.IsCleartextToNonLocal(url));
 }
 
 public class TemplateTests {
+    [Fact]
+    public void TemplateDropsAnyBadIdThatSlipsThrough() {
+        var t = HaTemplate.Build(new HaConfig { Url = "http://x", Cover = "cover.x')}}{{ 7*7 }}" }, [new MonitorHa { Day = "input_number.d'}}" }]);
+        Assert.DoesNotContain("7*7", t);
+        Assert.DoesNotContain("input_number.d'", t);
+        Assert.Contains("\"pos\": {{ 100 }}", t);
+    }
+
     [Fact]
     public void NoAutoSwitchRendersJsonNull() {
         var t = HaTemplate.Build(new HaConfig { Url = "http://x" }, []);

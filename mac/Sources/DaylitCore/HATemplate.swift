@@ -20,7 +20,13 @@ public struct HAState: Decodable {
 
 public enum HATemplate {
     /// One template call returns everything a tick needs. Monitors: display UUID and its HA entities.
-    public static func build(_ ha: HAConfig, _ mons: [(uuid: String, ha: MonitorHA?)]) -> String {
+    public static func build(_ ha0: HAConfig, _ mons0: [(uuid: String, ha: MonitorHA?)]) -> String {
+        // Config.validate() already rejects bad ids; this second filter keeps any that slip through out of the Jinja.
+        func ok(_ e: String?) -> String? { e.flatMap { Config.isEntityId($0) ? $0 : nil } }
+        let ha = HAConfig(url: ha0.url, tokenName: ha0.tokenName, autoSwitch: ok(ha0.autoSwitch), sun: ok(ha0.sun),
+                          cover: ok(ha0.cover), lights: ok(ha0.lights))
+        let mons = mons0.map { m in (uuid: m.uuid, ha: m.ha.map { MonitorHA(sensor: ok($0.sensor), day: ok($0.day), blindDown: ok($0.blindDown),
+                                                                              night: ok($0.night), set: ok($0.set)) }) }
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(100)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
         let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null

@@ -105,8 +105,21 @@ sealed class Config {
 
     static string? Validate(Config c) {
         if (c.HomeAssistant is { } h && !string.IsNullOrWhiteSpace(h.Url) &&
-            (!Uri.TryCreate(h.Url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https")))
+            (!Uri.TryCreate(h.Url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https") || string.IsNullOrEmpty(u.Host)))
             return "config.json: homeAssistant.url is not an http(s) URL";
+        // Entity ids are pasted into a Jinja template and URL paths, so only the plain domain.object_id form is accepted.
+        var ids = new List<(string key, string? id)>();
+        if (c.HomeAssistant is { } ha)
+            ids.AddRange([("homeAssistant.autoSwitch", ha.AutoSwitch), ("homeAssistant.sun", ha.Sun),
+                          ("homeAssistant.cover", ha.Cover), ("homeAssistant.lights", ha.Lights)]);
+        foreach (var m in c.Monitors ?? [])
+            if (m?.HomeAssistant is { } mh) {
+                string at = $"monitor \"{m.Match}\" homeAssistant.";
+                ids.AddRange([(at + "sensor", mh.Sensor), (at + "day", mh.Day), (at + "blindDown", mh.BlindDown),
+                              (at + "night", mh.Night), (at + "set", mh.Set)]);
+            }
+        foreach (var (key, id) in ids)
+            if (id != null && !IsEntityId(id)) return $"config.json: {key} is not an entity id like light.office";
         if (c.Location is { } l && (l.Latitude is < -90 or > 90 || l.Longitude is < -180 or > 180))
             return "config.json: location latitude/longitude out of range";
         if (c.ManualHold is < 0 or > 100) return "config.json: manualHold must be 0–100";
@@ -114,6 +127,27 @@ sealed class Config {
             foreach (var m in c.Monitors)
                 if (m == null || string.IsNullOrWhiteSpace(m.Match)) return "config.json: every monitor needs a match";
         return null;
+    }
+
+    public static bool IsEntityId(string s) {
+        var parts = s.Split('.');
+        return parts.Length == 2 && parts.All(p => p.Length > 0 && p.All(ch => ch is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_'));
+    }
+
+    /// True when the token would travel unencrypted beyond the local network: http:// to a host that is
+    /// not a private IP, a *.local name or a single-label name.
+    public static bool IsCleartextToNonLocal(string url) {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != "http") return false;
+        string host = u.Host.ToLowerInvariant().Trim('[', ']');
+        if (host == "localhost" || host.EndsWith(".local") || (!host.Contains('.') && !host.Contains(':'))) return false;
+        if (System.Net.IPAddress.TryParse(host, out var ip)) {
+            if (System.Net.IPAddress.IsLoopback(ip)) return false;
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                return !(ip.IsIPv6LinkLocal || ip.IsIPv6UniqueLocal || ip.IsIPv6SiteLocal);
+            var b = ip.GetAddressBytes();
+            return !(b[0] == 10 || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 169 && b[1] == 254));
+        }
+        return true;
     }
 
     static string Short(string s) => s.Length > 140 ? s[..140] + "…" : s;

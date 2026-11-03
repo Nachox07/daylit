@@ -337,7 +337,7 @@ import DaylitCore
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = step.applied, manual = step.manual
             mons[i].manual = manual
-            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, mons[i].published != applied {
+            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
                     "target": want, "manual": manual, "daylight": (sun * 100).rounded() / 100,

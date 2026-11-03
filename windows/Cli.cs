@@ -84,6 +84,8 @@ static class Cli {
         foreach (var m in monitors.Where(m => m.connected == null)) notes.Add($"monitor \"{m.match}\" is not connected right now (fine if it is used elsewhere)");
         if (cfg.Effective == Source.HomeAssistant && !tokenStored)
             notes.Add($"no Home Assistant token stored yet as \"{cfg.TokenName}\": the app asks for it on start (the user pastes it)");
+        if (cfg.Effective == Source.HomeAssistant && cfg.HomeAssistant?.Url is { } haUrl && Config.IsCleartextToNonLocal(haUrl))
+            notes.Add("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://");
         var result = new {
             ok = problems.Count == 0,
             path = Config.PathName,

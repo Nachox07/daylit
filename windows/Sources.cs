@@ -53,6 +53,7 @@ static class HAClient {
     }
 
     public static Task<string?> Publish(Config c, Mon m, int applied, int target, bool manual, double sun, Inputs s) =>
+        !Config.IsEntityId(m.Spec!.HomeAssistant!.Sensor ?? "") ? Task.FromResult<string?>(null) :
         Call(c, "/api/states/" + m.Spec!.HomeAssistant!.Sensor, new {
             state = applied,
             attributes = new Dictionary<string, object> {

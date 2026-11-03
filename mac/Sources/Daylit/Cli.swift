@@ -92,6 +92,9 @@ import DaylitCore
             let name = ha.tokenName ?? "daylit-home-assistant"
             let stored = HAClient.tokenStored(name)   // presence only, never read or printed
             if !stored { notes.append("no Home Assistant token in the keychain as \"\(name)\" (see README; the user adds it)") }
+            if let u = ha.url, Config.isCleartextToNonLocal(u) {
+                notes.append("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://")
+            }
             result["notes"] = notes
             result["homeAssistant"] = ["url": (ha.url ?? NSNull()) as Any, "tokenName": name, "tokenStored": stored]
         } else {
