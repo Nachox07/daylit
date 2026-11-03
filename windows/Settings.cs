@@ -135,7 +135,7 @@ sealed class SettingsWindow : Window {
     static Style NavItemStyle() {
         var accent = Palette.Accent is SolidColorBrush a ? a.Color : Colors.DodgerBlue;
         string hover = Palette.Dark ? "#0FFFFFFF" : "#0A000000", selected = Palette.Dark ? "#15FFFFFF" : "#0F000000";
-        return (Style)System.Windows.Markup.XamlReader.Parse($"""
+        return (Style)System.Windows.Markup.XamlReader.Parse($$"""
             <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ListBoxItem">
               <Setter Property="Margin" Value="0,1"/>
               <Setter Property="Template">
@@ -146,12 +146,12 @@ sealed class SettingsWindow : Window {
                         <ContentPresenter VerticalAlignment="Center"/>
                       </Border>
                       <Border x:Name="pill" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="3" Height="16" CornerRadius="1.5" HorizontalAlignment="Left"
-                              Background="#{accent.R:X2}{accent.G:X2}{accent.B:X2}" Visibility="Collapsed"/>
+                              Background="#{{accent.R:X2}}{{accent.G:X2}}{{accent.B:X2}}" Visibility="Collapsed"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{hover}"/></Trigger>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{{hover}}"/></Trigger>
                       <Trigger Property="IsSelected" Value="True">
-                        <Setter TargetName="bg" Property="Background" Value="{selected}"/>
+                        <Setter TargetName="bg" Property="Background" Value="{{selected}}"/>
                         <Setter TargetName="pill" Property="Visibility" Value="Visible"/>
                       </Trigger>
                     </ControlTemplate.Triggers>
