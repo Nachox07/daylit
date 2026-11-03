@@ -64,27 +64,28 @@ struct Panel: View {
 
     /// The monitor cards; linked ones get an accent border.
     var monitors: some View {
-        let linked = m.sync && m.mons.count > 1
-        return VStack(spacing: 10) {
-            ForEach(m.mons.indices, id: \.self) { i in row(i, linked: linked) }
+        VStack(spacing: 10) {
+            ForEach(m.mons.indices, id: \.self) { i in row(i, linked: m.isLinked(m.mons[i])) }
         }
     }
 
     /// In the header next to the gear, so it reads as one switch for every monitor, however many there are.
     var linkButton: some View {
-        let on = m.sync
-        return Button { m.setSync(!on) } label: {
+        let on = m.sync, all = m.syncAll   // on but not all: some monitors were taken out of the group
+        return Button { m.setSync(!on || !all) } label: {
             Image(systemName: "link")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(on ? Color.white : Color.secondary)
+                .foregroundStyle(on ? (all ? Color.white : Color.accentColor) : Color.secondary)
                 .frame(width: 24, height: 24)
-                .background(Circle().fill(on ? Color.accentColor : Color.clear))
+                .background(Circle().fill(on && all ? Color.accentColor : Color.clear))
+                .overlay(Circle().strokeBorder(on && !all ? Color.accentColor : Color.clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
-        .help(on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."
-                 : "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is.")
+        .help(!on ? "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is."
+              : all ? "Monitors linked. Click to unlink." + (m.mons.count > 2 ? " The link on each monitor takes it out of the group." : "")
+              : "Some monitors linked. Click to link them all.")
         .accessibilityLabel("Sync monitors")
-        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityValue(!on ? "Off" : all ? "On" : "Some")
         .accessibilityAddTraits(.isToggle)
     }
 
@@ -146,6 +147,19 @@ struct Panel: View {
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
     }
 
+    /// With three or more monitors linked: leave or rejoin the group, one monitor at a time.
+    func memberButton(_ i: Int, linked: Bool) -> some View {
+        Button { m.toggleMember(i) } label: {
+            Image(systemName: "link").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(linked ? Color.accentColor : Color.secondary.opacity(0.5))
+        }
+        .buttonStyle(.plain)
+        .help(linked ? "Linked. Click to move this monitor on its own." : "Not linked. Click to link it with the others.")
+        .accessibilityLabel("Link \(m.mons[i].label)")
+        .accessibilityValue(linked ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
+    }
+
     func row(_ i: Int, linked: Bool) -> some View {
         let mon = m.mons[i]
         // A DDC monitor that has not reported its level yet can still be tried with the slider.
@@ -160,6 +174,7 @@ struct Panel: View {
                         .background(.quaternary, in: Capsule()).help("Set by hand: kept until the automatic level moves")
                 }
                 Spacer()
+                if m.sync && m.mons.count > 2 { memberButton(i, linked: linked) }
                 Text(usable && !unknown ? "\(Int(mon.level))%" : "–").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {

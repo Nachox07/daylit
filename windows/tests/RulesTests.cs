@@ -293,6 +293,27 @@ public class SyncTests {
     static SyncOffsets Two(int a, int b) => SyncOffsets.Capture(new[] { ("a", a), ("b", b) });
 
     [Fact]
+    public void ALeavingMonitorStaysOutAndTheOthersKeepTheirOffsets() {
+        var s = SyncOffsets.Capture(new[] { ("a", 60), ("b", 40), ("tv", 75) });
+        s.Leave("a");
+        Assert.Equal(new Dictionary<string, int> { ["b"] = -20, ["tv"] = 15 }, s.Offsets);
+        Assert.Equal(new Dictionary<string, int> { ["tv"] = 65 }, s.Follow("b", 30, new[] { "a", "b", "tv" }));
+        Assert.Empty(s.Follow("a", 10, new[] { "a", "b", "tv" }));
+        s.Adopt(new[] { ("a", 10), ("b", 30), ("tv", 65) });
+        Assert.False(s.IsMember("a"));
+        Assert.Equal(2, s.Members(new[] { "a", "b", "tv" }));
+    }
+
+    [Fact]
+    public void RejoiningUsesTheCurrentOffset() {
+        var s = Two(60, 40);
+        s.Leave("b");
+        s.Join("b", new[] { ("a", 50), ("b", 20) });
+        Assert.Equal(-30, s.Offsets["b"]);
+        Assert.Empty(s.Excluded);
+    }
+
+    [Fact]
     public void CaptureKeepsOffsetsFromTheFirstMonitor() {
         var s = SyncOffsets.Capture(new[] { ("a", 60), ("b", 40), ("c", 75) });
         Assert.Equal(new Dictionary<string, int> { ["a"] = 0, ["b"] = -20, ["c"] = 15 }, s.Offsets);

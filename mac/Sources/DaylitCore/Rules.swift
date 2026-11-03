@@ -158,7 +158,30 @@ public enum ReadState: Equatable {
 /// any monitor in the group can set the base, so the group survives one monitor being unplugged.
 public struct SyncOffsets: Equatable, Codable {
     public var offsets: [String: Int]
+    /// Monitors taken out of the group by hand; they are not adopted again until they rejoin.
+    public var excluded: Set<String> = []
     public init(offsets: [String: Int] = [:]) { self.offsets = offsets }
+    enum CodingKeys: String, CodingKey { case offsets, excluded }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        offsets = try c.decode([String: Int].self, forKey: .offsets)
+        excluded = try c.decodeIfPresent(Set<String>.self, forKey: .excluded) ?? []   // saved before groups existed
+    }
+
+    public func isMember(_ key: String) -> Bool { offsets[key] != nil }
+
+    /// Takes a monitor out of the group. The offsets are measured from a virtual base, not from one
+    /// monitor, so the others keep theirs and nothing moves.
+    public mutating func leave(_ key: String) { offsets[key] = nil; excluded.insert(key) }
+
+    /// Puts a monitor back at its current offset from the group (`levels` are the connected monitors').
+    public mutating func join(_ key: String, levels: [(key: String, level: Int)]) {
+        excluded.remove(key)
+        adopt(levels)
+    }
+
+    /// How many of `keys` are in the group.
+    public func members(of keys: [String]) -> Int { keys.filter(isMember).count }
 
     /// Captures the current levels; the first monitor's level is the base (its offset is 0).
     public init(levels: [(key: String, level: Int)]) {
@@ -178,8 +201,11 @@ public struct SyncOffsets: Equatable, Codable {
     /// `levels` are the connected monitors' current levels. If none of them is in the group (all the
     /// old ones are unplugged), the group starts again from these levels.
     public mutating func adopt(_ levels: [(key: String, level: Int)]) {
+        let levels = levels.filter { !excluded.contains($0.key) }
         guard let ref = levels.first(where: { offsets[$0.key] != nil }), let b = base(key: ref.key, level: ref.level) else {
+            let keep = excluded
             self = SyncOffsets(levels: levels)
+            excluded = keep
             return
         }
         for l in levels where offsets[l.key] == nil { offsets[l.key] = l.level - b }
