@@ -13,7 +13,7 @@ bright when daylight floods in, dimmer with the blind down, low at night.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.gif">
-    <img src="docs/demo-light.gif" width="320" alt="Daylit's macOS panel: dragging a monitor's brightness slider, with Automatic on and the status line showing Home Assistant, sun and blind">
+    <img src="docs/demo-light.gif" width="400" alt="Daylit's macOS panel: one monitor's slider moves alone, then the link button joins both monitors and they move together keeping their offset, then the link is turned off">
   </picture>
 </p>
 
