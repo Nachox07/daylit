@@ -859,8 +859,9 @@ final class Keys {
 
 /// Keyboard shortcuts window: click a box, press the combination.
 struct ShortcutsView: View {
-    @State var up = HotKeys.shared.up
-    @State var down = HotKeys.shared.down
+    // Passed in by the caller (main actor): older compilers treat @State defaults as nonisolated.
+    @State var up: HotKeys.Combo
+    @State var down: HotKeys.Combo
     @State var recording: Int? = nil     // 0 up, 1 down
     @State var error: String? = nil
     @State var monitor: Any? = nil
@@ -928,7 +929,7 @@ struct ShortcutsView: View {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Keyboard Shortcuts"; w.isReleasedWhenClosed = false
-        w.contentViewController = NSHostingController(rootView: ShortcutsView { window?.close() })
+        w.contentViewController = NSHostingController(rootView: ShortcutsView(up: HotKeys.shared.up, down: HotKeys.shared.down) { window?.close() })
         w.center(); window = w
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
             Task { @MainActor in window = nil; StatusController.shared?.model.objectWillChange.send() }
