@@ -175,6 +175,9 @@ struct VisualEffect: View {
         if ProcessInfo.processInfo.environment["DAYLIT_SHOW"] == "panel" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { PanelOpener.open() }
         }
+        if ProcessInfo.processInfo.environment["DAYLIT_SHOW"] == "settings" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { SettingsWindow.show(m) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { TokenWindow.askIfMissing(m) }
     }
     /// Opening the app again (Finder, Spotlight, `open -a Daylit`) shows the panel.

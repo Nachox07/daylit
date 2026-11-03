@@ -68,7 +68,7 @@ mac/build.sh            # macOS 14+, Xcode command-line tools → ~/Applications
 windows\build.ps1       # Windows 10/11, .NET 10 SDK → %LOCALAPPDATA%\Programs\Daylit\Daylit.exe
 ```
 
-Then [set it up](docs/setup.md): location, Home Assistant, keys, permissions. Using an AI coding
+Then open the gear menu → **Settings…** for your location or Home Assistant ([details](docs/setup.md)). Using an AI coding
 agent? Point it at [AGENTS.md](AGENTS.md); the same steps are an [Agent Skill](https://agentskills.io)
 in [`.agents/skills/configure-daylit`](.agents/skills/configure-daylit/SKILL.md).
 
@@ -105,8 +105,8 @@ sun's position is computed locally; the tests check it against NOAA reference va
 - **Sync monitors.** With two or more monitors, the link button at the top of the panel makes them all move together: each keeps
   how much brighter or darker it was when you switched it on ([details](docs/setup.md#sync-monitors)).
 - **A short panel.** It holds what you touch every day: a slider per monitor and *Automatic*.
-  Everything set once (light/dark from daylight, pause on battery, open at login, shortcuts, token,
-  config) is in the gear menu. Levels you set by hand survive a restart.
+  Everything set once is in the gear menu: **Settings…** (source, location, levels per monitor, Home
+  Assistant), light/dark from daylight, pause on battery, open at login and shortcuts. Levels you set by hand survive a restart.
 - **The built-in screen is left to the system**, whose light sensor does a better job than any
   schedule. On a Mac with the lid open, the panel still shows its slider for quick manual changes
   (on Windows, the quick-settings slider covers it).
@@ -119,4 +119,6 @@ share their rules and have unit tests that run in CI on every push.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Home Assistant is a trademark of the Open Home Foundation; Daylit is not affiliated
+with it. The Home Assistant icon in the settings window comes from
+[Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache-2.0).

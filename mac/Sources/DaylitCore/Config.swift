@@ -76,7 +76,7 @@ public struct Config: Decodable {
     public static func load(from url: URL = path) -> (Config, String?) {
         guard let d = try? Data(contentsOf: url) else { return (Config(), nil) }
         let c: Config
-        do { c = try JSONDecoder().decode(Config.self, from: d) }
+        do { c = try JSONDecoder().decode(Config.self, from: ConfigText.relaxed(d)) }
         catch { return (Config(), "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
             var safe = Config(manualHold: c.manualHold, pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)

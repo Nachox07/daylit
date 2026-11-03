@@ -130,6 +130,8 @@ computer right now, or no token stored yet) and which config entry matched which
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
   Accessibility permission.
+- The gear menu's *Settings…* window lets the user change the source, location, levels and Home
+  Assistant entities later without editing JSON; it keeps every other key in the file.
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
   and *Automatic*. Hand-set levels survive a restart (kept for 12 hours).
@@ -151,7 +153,7 @@ computer right now, or no token stored yet) and which config entry matched which
 - `mac/`: a Swift package. `Sources/DaylitCore` decisions (pure, tested), `Sources/Daylit` the app.
   Tests: `cd mac && swift test`; build: `mac/build.sh` (0 errors and 0 warnings before pushing). `DAYLIT_CONFIG`
   overrides the config path, `DAYLIT_DEBUG=1` logs to stdout, `DAYLIT_NO_KEYS=1` skips the
-  Accessibility prompt, `DAYLIT_SHOW=panel` and `DAYLIT_APPEARANCE=light|dark` are for screenshots, `DAYLIT_DEMO=1` plays the scripted demo for recordings.
+  Accessibility prompt, `DAYLIT_SHOW=panel` (or `settings`) and `DAYLIT_APPEARANCE=light|dark` are for screenshots, `DAYLIT_DEMO=1` plays the scripted demo for recordings.
 - UI changes: CI compares offscreen renders of the panel and indicator with the baselines in
   `mac/Tests/Snapshots` and `windows/tests/Snapshots`. An intended change needs re-recorded
   baselines from CI (CONTRIBUTING.md → *UI snapshots*), so the PR shows the image diff.

@@ -22,6 +22,7 @@ import DaylitCore
             let d = Daylit(preview: ())
             d.mons = mons; d.source = source; d.auto = true; d.detail = detail; d.sync = sync
             d.problem = nil; d.builtIn = nil
+            d.login = false; d.hasBattery = true; d.lookOn = false; d.pauseOnBattery = true   // not this Mac's own settings
             if sync { d.syncOffsets = SyncOffsets(levels: mons.map { (key: $0.uuid, level: Int($0.level)) }) }
             return d
         }
@@ -40,11 +41,29 @@ import DaylitCore
                                                         detail: "Home Assistant · sun 100% · blind 56%")))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
-        ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) }
+        ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
+            ("settings-displays", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
+            ("settings-automatic", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
+            ("settings-homeassistant", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
+            ("settings-app", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
+        ]
+    }
+
+    /// A made-up config for the settings window scene.
+    static func settingsFile() -> URL {
+        let u = FileManager.default.temporaryDirectory.appendingPathComponent("daylit-snapshot-settings.json")
+        try? Data("""
+        { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
+          "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
+          "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
+                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ] }
+        """.utf8).write(to: u)
+        return u
     }
 
     static func render(to dir: URL) -> Int32 {
         PanelBackground.plain = true
+        SettingsView.fixedNow = Date(timeIntervalSince1970: 1_781_870_400)   // 2026-06-19 12:00 UTC
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for (name, view) in scenes() {
             for dark in [false, true] {

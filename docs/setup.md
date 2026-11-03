@@ -3,6 +3,17 @@
 Daylit runs with no setup: it finds your external monitors and gives you a slider and keys for each.
 This page covers everything else: automatic mode, Home Assistant, permissions and troubleshooting.
 
+## Settings window
+
+Gear menu → **Settings…** (on Windows also in the tray icon's menu) sets the common things without
+editing a file: what brightness follows (nothing, the sun or Home Assistant), your location (typed,
+or **Locate me** asks the system once), the day / blind closed / night levels and name of each
+connected monitor, and Home Assistant's URL, token and room entities, with a connection test.
+Moving its sliders does not change the screen; a line under each monitor shows its level right now.
+
+It saves into the config file below and keeps everything else in it (other monitors, per-monitor Home
+Assistant helpers, keys it does not show). Comments in the file are not kept.
+
 ## Config file
 
 - macOS: `~/.config/daylit/config.json`

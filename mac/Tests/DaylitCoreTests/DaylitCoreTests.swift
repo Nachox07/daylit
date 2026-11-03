@@ -460,3 +460,82 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
     }
 }
+
+final class ConfigEditTests: XCTestCase {
+    func json(_ d: Data) -> [String: Any] { try! JSONSerialization.jsonObject(with: d) as! [String: Any] }
+    let dell = SettingsEdit.Monitor(name: "DELL U2723QE", suggestedMatch: "U2723QE", label: "Left", day: 80, blindDown: 45, night: 15)
+
+    func testCommentsAndTrailingCommasAreIgnored() throws {
+        let text = """
+        { // where
+          "source": "sun", /* city level */ "location": { "latitude": 51.48, "longitude": -0.01, },
+          "monitors": [ { "match": "a//b", "label": "x /* y */" }, ],
+        }
+        """
+        let o = json(ConfigText.relaxed(Data(text.utf8)))
+        XCTAssertEqual(o["source"] as? String, "sun")
+        let m = (o["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["match"] as? String, "a//b")
+        XCTAssertEqual(m["label"] as? String, "x /* y */")
+    }
+
+    func testKeepsWhatTheWindowDoesNotOwn() throws {
+        let original = """
+        { "manualHold": 7, "futureKey": [1, 2],
+          "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc", "cover": "cover.blind" },
+          "monitors": [
+            { "match": "U2723QE", "control": "ddc", "day": 70, "homeAssistant": { "day": "input_number.left_day" } },
+            { "match": "Unplugged", "day": 33 } ] }
+        """
+        var e = SettingsEdit(source: "homeAssistant", latitude: 51.4769, longitude: -0.0005, monitors: [dell],
+                             haURL: "http://homeassistant.local:8123", cover: "")
+        e.lights = "light.desk"
+        let o = json(try ConfigPatch.apply(e, to: Data(original.utf8)))
+        XCTAssertEqual(o["manualHold"] as? Int, 7)
+        XCTAssertNotNil(o["futureKey"])
+        let ha = o["homeAssistant"] as! [String: Any]
+        XCTAssertEqual(ha["tokenName"] as? String, "kc")
+        XCTAssertNil(ha["cover"], "an emptied field removes the key")
+        XCTAssertEqual(ha["lights"] as? String, "light.desk")
+        let loc = o["location"] as! [String: Double]
+        XCTAssertEqual(loc["latitude"], 51.48); XCTAssertEqual(loc["longitude"], 0)
+        let text = String(data: try ConfigPatch.apply(e, to: Data(original.utf8)), encoding: .utf8)!
+        XCTAssertTrue(text.contains("51.48"), text); XCTAssertFalse(text.contains("51.479"), text)
+        let mons = o["monitors"] as! [[String: Any]]
+        XCTAssertEqual(mons.count, 2)
+        XCTAssertEqual(mons[0]["control"] as? String, "ddc")
+        XCTAssertEqual(mons[0]["label"] as? String, "Left")
+        XCTAssertEqual(mons[0]["day"] as? Int, 80)
+        XCTAssertNotNil(mons[0]["homeAssistant"])
+        XCTAssertEqual(mons[1]["day"] as? Int, 33)
+    }
+
+    func testANewMonitorIsAddedWithItsSuggestedMatch() throws {
+        let o = json(try ConfigPatch.apply(SettingsEdit(source: "off", monitors: [dell]), to: nil))
+        let m = (o["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["match"] as? String, "U2723QE")
+        XCTAssertNil(o["location"])
+        XCTAssertNil(o["homeAssistant"])
+    }
+
+    func testTwoMonitorsMatchingOneEntryDoNotOverwriteEachOther() throws {
+        let a = SettingsEdit.Monitor(name: "DELL U2723QE (1)", suggestedMatch: "U2723QE", label: "", day: 80, blindDown: 40, night: 20)
+        let b = SettingsEdit.Monitor(name: "DELL U2723QE (2)", suggestedMatch: "U2723QE", label: "", day: 10, blindDown: 10, night: 10)
+        let o = json(try ConfigPatch.apply(SettingsEdit(source: "off", monitors: [a, b]), to: Data(#"{"monitors":[{"match":"U2723QE"}]}"#.utf8)))
+        let mons = o["monitors"] as! [[String: Any]]
+        XCTAssertEqual(mons.count, 1); XCTAssertEqual(mons[0]["day"] as? Int, 80)
+    }
+    func testLocationKeepsOtherKeysAndCommentsAreDetected() throws {
+        let o = json(try ConfigPatch.apply(SettingsEdit(source: "sun", latitude: 1, longitude: 2),
+                                           to: Data(#"{"location":{"latitude":0,"longitude":0,"note":"x"}}"#.utf8)))
+        XCTAssertEqual((o["location"] as! [String: Any])["note"] as? String, "x")
+        XCTAssertTrue(ConfigText.hasComments(Data("{ // hi\n}".utf8)))
+        XCTAssertFalse(ConfigText.hasComments(Data(#"{ "a": "//not", }"#.utf8)))
+    }
+    func testAnInvalidResultIsRefused() {
+        XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "homeAssistant", haURL: "homeassistant.local"), to: nil))
+        XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun", lights: "Desk lamp"), to: nil))
+        XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun"), to: Data("[1]".utf8)))
+        XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "off"), to: Data(#"{"monitors":[null,{"match":"A"}]}"#.utf8)))
+    }
+}

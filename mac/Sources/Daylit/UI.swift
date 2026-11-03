@@ -43,6 +43,8 @@ struct Panel: View {
     /// Everything that is set once and left alone lives here, so the panel stays short.
     var gearMenu: some View {
         Menu {
+            Button("Settings…") { SettingsWindow.show(m) }
+            Divider()
             Button(m.dark ? "Switch to Light Mode" : "Switch to Dark Mode") { m.toggleDark() }
             Toggle("Light or Dark Mode from Daylight", isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) }))
                 .disabled(m.source == .off)
