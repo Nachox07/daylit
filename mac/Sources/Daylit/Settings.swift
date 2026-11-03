@@ -153,7 +153,7 @@ struct SettingsView: View {
     @State private var locating = false
     let close: () -> Void
     var path: URL = Config.path              // snapshots pass a made-up file
-    var height: CGFloat = 540
+    var height: CGFloat = 600
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     nonisolated(unsafe) static var fixedNow: Date?
     static var now: Date { fixedNow ?? Date() }
@@ -336,6 +336,12 @@ struct SettingsView: View {
                      "Switches as soon as you turn it on. macOS's own Auto appearance follows only sunset; this also knows your blind and lights.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let curve = sunCurve(["theme.lightSunAbove": ("Light", Color.orange, false), "theme.darkSunBelow": ("Dark", Color.indigo, true)]) {
+                Section { curve } header: { Text("Today's sun") } footer: {
+                    Text("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section {
                 ForEach(Tuning.appearanceFields.filter { themeRoom && source == "homeAssistant" || $0.group != "theme" || ["lightSunAbove", "darkSunBelow"].contains($0.key) }) { number($0) }
             } header: { Text("When to switch") } footer: {
@@ -346,9 +352,15 @@ struct SettingsView: View {
 
     var tuningPane: some View {
         Form {
+            if let curve = sunCurve(["brightness.sunDay": ("Full day", Color.orange, false), "brightness.sunNight": ("Night", Color.indigo, true)], preview: true) {
+                Section { curve } header: { Text("Today's sun") } footer: {
+                    Text("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section {
                 ForEach(Tuning.tuningFields.filter { $0.group == "brightness" }) { number($0) }
-            } header: { Text("Daylight") } footer: {
+            } header: { Text("Exact values") } footer: {
                 Text("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -381,6 +393,40 @@ struct SettingsView: View {
                     .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
                 Text(f.unit).foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
             }
+        }
+    }
+
+    /// The value a tuning field has in the window: what is typed, or its default.
+    func value(_ id: String) -> Double {
+        Double((tune[id] ?? "").replacingOccurrences(of: ",", with: ".")) ?? Tuning.allFields.first { $0.id == id }?.defaultValue ?? 0
+    }
+
+    /// Today's sun with draggable lines for the given fields; nil without a location.
+    func sunCurve(_ lines: KeyValuePairs<String, (String, Color, Bool)>, preview: Bool = false) -> SunCurve? {
+        guard let l = coords else { return nil }
+        var tz = TimeZone.current
+        if Self.fixedNow != nil { tz = TimeZone(identifier: "UTC")! }   // snapshots: the same on every machine
+        let first = monitors.first
+        return SunCurve(latitude: l.0, longitude: l.1, now: Self.now, timeZone: tz,
+                        markers: lines.map { SunMarker(id: $0.key, title: $0.value.0, color: $0.value.1, value: value($0.key), below: $0.value.2) },
+                        set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) },
+                        level: preview ? first.map { d in { e in
+                            var t = m.config.tuned
+                            t.brightness = .init()
+                            t.brightness?.sunNight = value("brightness.sunNight"); t.brightness?.sunDay = value("brightness.sunDay")
+                            return target(day: d.day, blindDown: d.blindDown, night: d.night, elev: e, pos: 100, lights: false, tuning: t)
+                        } } : nil,
+                        levelTitle: first.map { "\($0.label) through the day, blind open" } ?? "")
+    }
+
+    /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.
+    static func keepOrder(_ id: String, _ v: Double, _ value: (String) -> Double) -> Double {
+        switch id {
+        case "brightness.sunDay": return max(v, value("brightness.sunNight") + 0.5)
+        case "brightness.sunNight": return min(v, value("brightness.sunDay") - 0.5)
+        case "theme.lightSunAbove": return max(v, value("theme.darkSunBelow"))
+        case "theme.darkSunBelow": return min(v, value("theme.lightSunAbove"))
+        default: return v
         }
     }
 

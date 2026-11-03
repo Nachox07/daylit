@@ -85,9 +85,11 @@ sealed class SettingsWindow : Window {
         roomBox.Click += (_, _) => RefreshTuningRows();
         var appearancePane = Pane(Card(null, look, roomBox,
                 Hint("Windows has no automatic light/dark mode of its own; this follows the sun, and with Home Assistant your blind and lights.")),
-            Card("When to switch", TuningRows(TuningField.Appearance)));
+            Card("Today's sun", themeCurve, Hint("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")),
+            Card("Exact values", TuningRows(TuningField.Appearance)));
         var tuningPane = Pane(
-            Card("Daylight", TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")),
+            Card("Today's sun", dayCurve, Hint("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")),
+            Card("Exact values", TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")),
                  Hint("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")),
             Card("Timing", TuningRows(TuningField.Tuning.Where(f => f.Group == "timing"))));
         var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
@@ -192,6 +194,45 @@ sealed class SettingsWindow : Window {
         paneHost.Content = p.content;
     }
 
+    readonly ContentControl themeCurve = new(), dayCurve = new();
+
+    /// The value a tuning field has in the window: what is typed, or its default.
+    double TuneValue(string id) =>
+        tuneRows.TryGetValue(id, out var r) && Num(r.box.Text) is double v ? v : TuningField.All.First(f => f.Id == id).Default;
+
+    /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.
+    double KeepOrder(string id, double v) => id switch {
+        "brightness.sunDay" => Math.Max(v, TuneValue("brightness.sunNight") + 0.5),
+        "brightness.sunNight" => Math.Min(v, TuneValue("brightness.sunDay") - 0.5),
+        "theme.lightSunAbove" => Math.Max(v, TuneValue("theme.darkSunBelow")),
+        "theme.darkSunBelow" => Math.Min(v, TuneValue("theme.lightSunAbove")),
+        _ => v,
+    };
+
+    /// Today's sun pictures; a hint instead without a location.
+    void RebuildCurves() {
+        if (Coords is not var (la, lo)) {
+            themeCurve.Content = Hint("Set a location (Automatic) to see today's sun.");
+            dayCurve.Content = Hint("Set a location (Automatic) to see today's sun.");
+            return;
+        }
+        var tz = FixedNow != null ? TimeZoneInfo.Utc : TimeZoneInfo.Local;
+        var when = FixedNow ?? DateTimeOffset.Now;
+        void Set(string id, double v) { if (tuneRows.TryGetValue(id, out var r)) r.box.Text = Fmt(KeepOrder(id, v)); }
+        Color orange = Color.FromRgb(0xF7, 0x8C, 0x1E), purple = Color.FromRgb(0x6E, 0x5B, 0xD6);
+        themeCurve.Content = new SunCurve(la, lo, when, tz,
+            [new("theme.lightSunAbove", "Light", orange, false), new("theme.darkSunBelow", "Dark", purple, true)], TuneValue, Set);
+        var first = rows.FirstOrDefault();
+        dayCurve.Content = new SunCurve(la, lo, when, tz,
+            [new("brightness.sunDay", "Full day", orange, false), new("brightness.sunNight", "Night", purple, true)], TuneValue, Set,
+            first.mon == null ? null : e => {
+                double night = TuneValue("brightness.sunNight"), day = TuneValue("brightness.sunDay");
+                double sun = Math.Clamp((e - night) / (day - night), 0, 1);
+                return Rules.Target([first.day.Value, first.blind.Value, first.night.Value], 100, false, sun, app.Cfg.Tuned, false);
+            },
+            first.mon == null ? "" : $"{first.label.Text} through the day, blind open");
+    }
+
     readonly CheckBox roomBox = new() { Content = "Count the blind and the room lights", Margin = new Thickness(0, 2, 0, 2) };
     readonly Dictionary<string, (FrameworkElement row, TextBox box)> tuneRows = new();
 
@@ -204,7 +245,10 @@ sealed class SettingsWindow : Window {
             var box = new TextBox { TextAlignment = TextAlignment.Right };
             var hint = new TextBlock { Text = Fmt(f.Default), Opacity = 0.45, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Right,
                                        VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
-            box.TextChanged += (_, _) => hint.Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+            box.TextChanged += (_, _) => {
+                hint.Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+                (themeCurve.Content as UIElement)?.InvalidateVisual(); (dayCurve.Content as UIElement)?.InvalidateVisual();
+            };
             System.Windows.Automation.AutomationProperties.SetName(box, f.Label);
             System.Windows.Automation.AutomationProperties.SetHelpText(box, $"Default {Fmt(f.Default)}{f.Unit}");
             var cell = new Grid { Width = 90, Children = { box, hint } };
@@ -373,6 +417,7 @@ sealed class SettingsWindow : Window {
 
     /// The level each monitor would have right now with the blind open and the lights off: a preview only.
     void Refresh() {
+        RebuildCurves();
         double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
