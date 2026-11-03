@@ -124,6 +124,8 @@ Every key is optional; [`config.example.json`](config.example.json) shows them a
 
 Use **Reload config** in the panel after editing.
 
+On Windows, `Daylit.exe --list-monitors` prints the connected monitors with the `match` text to use, and `Daylit.exe --check-config` validates the file (pipe both to `Out-String`). Setting it up with an AI agent: see [AGENTS.md](AGENTS.md); Claude Code also picks up the `configure-daylit` skill.
+
 ### Home Assistant
 
 Create the helpers: one `input_boolean` for automatic mode and three `input_number`s per monitor

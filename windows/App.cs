@@ -12,9 +12,10 @@ namespace Daylit;
 
 static class Program {
     [STAThread]
-    static void Main() {
+    static int Main(string[] args) {
+        if (Cli.Run(args) is int code) return code;   // --list-monitors, --check-config (see AGENTS.md)
         using var mutex = new Mutex(true, @"Local\Daylit.Tray", out bool first);
-        if (!first) return;
+        if (!first) return 0;
         WF.Application.EnableVisualStyles();   // tray menu
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
 #pragma warning disable WPF0001   // Fluent theme API is marked experimental
@@ -25,6 +26,7 @@ static class Program {
         TaskScheduler.UnobservedTaskException += (_, e) => { Log.Write("task: " + e.Exception); e.SetObserved(); };
         _ = new Controller(app);
         app.Run();
+        return 0;
     }
 }
 
