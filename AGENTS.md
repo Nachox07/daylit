@@ -16,6 +16,11 @@ a blind and room lights). This file tells an agent how to **set it up for a user
 
 ## Set up Daylit for a user
 
+The short version of these steps is also an Agent Skill:
+[`.agents/skills/configure-daylit/SKILL.md`](.agents/skills/configure-daylit/SKILL.md)
+(`.claude/skills/configure-daylit` points Claude Code to it). Agents without skill support can
+follow this section directly.
+
 ### 1. Install
 
 | | |

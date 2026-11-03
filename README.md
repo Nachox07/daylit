@@ -162,7 +162,10 @@ Use **Reload config** in the panel after editing.
 
 `--list-monitors` prints the connected monitors with the `match` text to use, and `--check-config`
 validates the file: `Daylit.exe --list-monitors | Out-String` on Windows,
-`~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors` on macOS. Setting it up with an AI agent: see [AGENTS.md](AGENTS.md); Claude Code also picks up the `configure-daylit` skill.
+`~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors` on macOS. Setting it up with an AI agent: see [AGENTS.md](AGENTS.md). The same steps are an
+[Agent Skill](https://agentskills.io) in [`.agents/skills/configure-daylit`](.agents/skills/configure-daylit/SKILL.md),
+which Codex, Gemini CLI, GitHub Copilot and Cursor read from that folder; Claude Code finds it through
+`.claude/skills/configure-daylit`.
 
 ### Home Assistant
 
