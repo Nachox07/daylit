@@ -242,6 +242,10 @@ sealed class Controller {
         var next = ext.Select(d => {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
             if (m == null) return new Mon(d, Mon.Match(d, Cfg.Monitors));
+            if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
+                Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
+                m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
+            }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;
         }).ToList();
