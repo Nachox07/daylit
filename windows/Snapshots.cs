@@ -29,7 +29,10 @@ static class Snapshots {
                 File.WriteAllText(tmp, json);
                 var (cfg, _) = Config.Load(tmp);
                 Settings.SyncOverride = sync;
-                var flyout = new Flyout(new Controller(cfg, mons(), subtitle));
+                var list = mons();
+                var controller = new Controller(cfg, list, subtitle);
+                if (name.EndsWith("-partial")) controller.SnapshotLeave(list[^1]);   // the last monitor out of the group
+                var flyout = new Flyout(controller);
                 var root = (FrameworkElement)flyout.Content;
                 flyout.Content = null;
                 Save(Frame(root, 340, Palette.Solid, 8), Path.Combine(dir, $"{name}-{mode}.png"));
@@ -67,6 +70,8 @@ static class Snapshots {
         List<Mon> Two() => new() { Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48) };
         yield return ("panel-two", sun, Two, false, "Sun · 21.7° above the horizon");
         yield return ("panel-two-linked", sun, Two, true, "Sun · 21.7° above the horizon");
+        yield return ("panel-three-linked", sun, () => [.. Two(), Fake("LG 27UK850", 60)], true, "Sun · 21.7° above the horizon");
+        yield return ("panel-three-partial", sun, () => [.. Two(), Fake("LG 27UK850", 60)], true, "Sun · 21.7° above the horizon");
         yield return ("panel-one-manual", ha, () => new() { Fake("LG UltraFine 5K", 60, manual: true) }, false, "Home Assistant · sun 100% · blind 56%");
         yield return ("panel-empty", "{}", () => new(), false, "");
     }

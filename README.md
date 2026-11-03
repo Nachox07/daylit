@@ -50,7 +50,8 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
   Applications. The app is not notarized by Apple, so the first open is blocked: open System
   Settings → Privacy & Security, scroll to the message about Daylit and click **Open Anyway**. For
   DDC monitors on Apple silicon also run `brew install m1ddc`; m1ddc does not support Intel Macs,
-  where only monitors that accept macOS's own brightness control work.
+  where only monitors that accept macOS's own brightness control work. To update, quit Daylit (gear
+  menu → Quit) before replacing the app: a copy left running loses its connection to Home Assistant.
 - **Windows** (`Daylit-windows-<version>.zip`): unzip anywhere, for example
   `%LOCALAPPDATA%\Programs\Daylit`, and run `Daylit.exe`. SmartScreen may warn about an unknown
   publisher: **More info → Run anyway**. It needs the
@@ -101,7 +102,7 @@ sun's position is computed locally; the tests check it against NOAA reference va
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.
 - **Battery.** A laptop on battery pauses all automatic work (gear menu → *Pause on battery*).
-- **Sync monitors.** With two or more monitors, the link button between them makes them move together: each keeps
+- **Sync monitors.** With two or more monitors, the link button at the top of the panel makes them all move together: each keeps
   how much brighter or darker it was when you switched it on ([details](docs/setup.md#sync-monitors)).
 - **A short panel.** It holds what you touch every day: a slider per monitor and *Automatic*.
   Everything set once is in the gear menu: **Settings…** (source, location, levels per monitor, Home

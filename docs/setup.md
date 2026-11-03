@@ -109,8 +109,12 @@ reported as a config problem and Home Assistant is not contacted until it is fix
 
 ## Sync monitors
 
-With two or more external monitors connected, a round link button sits between the first two monitor
-cards (click it again to unlink; while linked it is filled with the accent colour).
+With two or more external monitors connected, a link button sits at the top of the panel, next to the
+gear. It links every monitor, however many there are (click it again to unlink; while linked it is
+filled with the accent colour and the monitor cards get an accent border).
+With three or more monitors, each linked card also shows a small link icon: click it to take that
+monitor out of the group (say a TV next to two matching monitors), and again to bring it back at
+its current offset. While some are out, the header button is only outlined; clicking it links them all.
 When you turn it on, Daylit remembers how far apart they are (say the Dell at 40 % and the other at
 60 %: an offset of −20). From then on:
 

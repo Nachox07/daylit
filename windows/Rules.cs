@@ -163,7 +163,17 @@ static class ReadRules {
 /// monitor in the group can set the base, so the group survives one monitor being unplugged.
 sealed class SyncOffsets {
     public Dictionary<string, int> Offsets { get; set; } = new();
+    /// Monitors taken out of the group by hand; they are not adopted again until they rejoin.
+    public HashSet<string> Excluded { get; set; } = new();
     public SyncOffsets() { }
+
+    public bool IsMember(string key) => Offsets.ContainsKey(key);
+    /// Takes a monitor out of the group. Offsets are measured from a virtual base, not from one monitor,
+    /// so the others keep theirs and nothing moves.
+    public void Leave(string key) { Offsets.Remove(key); Excluded.Add(key); }
+    /// Puts a monitor back at its current offset from the group (`levels` are the connected monitors').
+    public void Join(string key, IReadOnlyList<(string Key, int Level)> levels) { Excluded.Remove(key); Adopt(levels); }
+    public int Members(IEnumerable<string> keys) => keys.Count(IsMember);
 
     /// Captures the current levels; the first monitor's level is the base (its offset is 0).
     public static SyncOffsets Capture(IEnumerable<(string Key, int Level)> levels) {
@@ -180,6 +190,7 @@ sealed class SyncOffsets {
     /// If none of the connected monitors is in the group, the group starts again from these levels.
     /// Returns whether anything changed.
     public bool Adopt(IReadOnlyList<(string Key, int Level)> levels) {
+        levels = levels.Where(l => !Excluded.Contains(l.Key)).ToList();
         var known = levels.FirstOrDefault(l => Offsets.ContainsKey(l.Key));
         if (known.Key == null) {
             var fresh = Capture(levels);
