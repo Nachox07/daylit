@@ -86,7 +86,7 @@ macOS environment variables:
 | `DAYLIT_DEBUG=1` | detailed log on stdout |
 | `DAYLIT_NO_KEYS=1` | skip the Accessibility prompt and the brightness-key tap |
 | `DAYLIT_DEBUG_NO_DISPLAYS=1` | act as if no external monitor were connected (the empty state) |
-| `DAYLIT_SHOW=panel` | open the panel right after start |
+| `DAYLIT_SHOW=panel` | open the panel right after start and keep it open (screenshots, recordings) |
 | `DAYLIT_APPEARANCE=light` / `dark` | force the app's appearance (screenshots) |
 
 Run the binary directly to use them:
@@ -120,8 +120,29 @@ Repeat with `DAYLIT_APPEARANCE=dark`. For the indicator, press `⌃⌥⌘↑` an
 within a second (it fades out), or use `screencapture -o -w` and click it.
 
 **Windows:** open the panel from the tray and use Snipping Tool (`Win+Shift+S`) in *Window* mode.
-For the indicator, press `Ctrl+Alt+PgUp` first, then snip within a second. Switch light/dark in
-Settings → Personalization → Colors (or the panel's *Switch to dark mode* button) and capture again.
+For the indicator, press `Ctrl+Alt+PgUp` first, then snip within a second; it is translucent, so put
+a plain, empty window behind it first. Switch light/dark in Settings → Personalization → Colors (or
+the panel's *Switch to dark mode* button) and capture again.
 
 Check each image before committing: nothing personal, nothing cut off, same size as the one it
-replaces where possible.
+replaces where possible. The README shows the two `panel` pairs; the indicator stills are optional.
+
+### Demo GIF (macOS)
+
+`docs/demo-{light,dark}.gif` is the panel while a slider is dragged. With `DAYLIT_SHOW=panel` the
+panel stays open while you work in another app, so you can record it:
+
+```sh
+pkill -x Daylit
+DAYLIT_APPEARANCE=light DAYLIT_SHOW=panel ~/Applications/Daylit.app/Contents/MacOS/Daylit &
+sleep 3
+# X,Y,W,H from the window bounds printed by the snippet above
+screencapture -x -v -V 8 -R X,Y,W,H /tmp/demo.mov   # drag a slider during these 8 s
+ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -vf "fps=12,palettegen=max_colors=96:stats_mode=diff" /tmp/pal.png
+ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -i /tmp/pal.png \
+  -lavfi "fps=12[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
+  -loop 0 docs/demo-light.gif
+```
+
+Repeat with `DAYLIT_APPEARANCE=dark`. Keep each GIF under 1 MB (lower `fps` or `max_colors` if not),
+put the slider back where it was, and check a few frames: nothing outside the panel.
