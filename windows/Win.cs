@@ -41,12 +41,14 @@ static class Win {
     }
 
     /// Windows 11 22H2+ draws system backdrops (acrylic/Mica) behind a window.
-    public static bool HasBackdrop => Environment.OSVersion.Version.Build >= 22621;
+    /// Windows 11 22H2+ with "Transparency effects" on (Settings → Personalization → Colors).
+    public static bool HasBackdrop => Environment.OSVersion.Version.Build >= 22621
+        && !(Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1) is int t && t == 0);
 
     public static void RoundCorners(IntPtr h) { int v = 2 /* DWMWCP_ROUND */; DwmSetWindowAttribute(h, 33, ref v, 4); }
     public static void DarkFrame(IntPtr h, bool dark) { int v = dark ? 1 : 0; DwmSetWindowAttribute(h, 20, ref v, 4); }
     /// 3 = DWMSBT_TRANSIENTWINDOW (acrylic, what Windows uses for flyouts).
-    public static bool Backdrop(IntPtr h, int type = 3) => HasBackdrop && DwmSetWindowAttribute(h, 38, ref type, 4) == 0;
+    public static bool Backdrop(IntPtr h, int type = 4 /* DWMSBT_TABBEDWINDOW: Mica Alt */) => HasBackdrop && DwmSetWindowAttribute(h, 38, ref type, 4) == 0;
 
     /// Click-through, never activated, not in Alt+Tab.
     public static void MakeOverlay(IntPtr h) {
@@ -90,6 +92,12 @@ static class Settings {
             } catch { return new SyncOffsets(); }
         }
         set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SyncOffsets", System.Text.Json.JsonSerializer.Serialize(value.Offsets)); }
+    }
+
+    /// Hand-set levels kept across restarts (JSON, see SavedHolds).
+    public static SavedHolds Holds {
+        get => SavedHolds.FromJson(Registry.CurrentUser.OpenSubKey(Key)?.GetValue("Holds") as string);
+        set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("Holds", value.ToJson()); }
     }
 
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;

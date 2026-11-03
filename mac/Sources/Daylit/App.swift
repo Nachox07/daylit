@@ -90,12 +90,17 @@ struct VisualEffect: View {
     var body: some View {
         ZStack {
             Blur()
-            Color(nsColor: .windowBackgroundColor).opacity(0.72)
+            // Opaque enough that text behind the panel never shows through, in light or dark.
+            // With Reduce Transparency on, fully opaque.
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.9)
         }
     }
     struct Blur: NSViewRepresentable {
         func makeNSView(context: Context) -> NSVisualEffectView {
-            let v = NSVisualEffectView(); v.material = .menu; v.blendingMode = .behindWindow; v.state = .active; return v
+            let v = NSVisualEffectView(); v.material = .menu; v.blendingMode = .behindWindow; v.state = .active
+            v.isEmphasized = true
+            return v
         }
         func updateNSView(_ v: NSVisualEffectView, context: Context) {}
     }

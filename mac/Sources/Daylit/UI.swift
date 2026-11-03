@@ -12,56 +12,21 @@ struct Panel: View {
             HStack {
                 Text("Daylit").font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Menu {
-                    Button("Keyboard Shortcuts…") { ShortcutsWindow.show() }
-                    if m.source == .homeAssistant { Button("Home Assistant Token…") { TokenWindow.show(m) } }
-                    Divider()
-                    Button("Open Config File…") { m.openConfig() }
-                    Button("Reload Config") { m.reload() }
-                    Divider()
-                    Button(m.dark ? "Switch to Light Mode" : "Switch to Dark Mode") { m.toggleDark() }
-                } label: { Image(systemName: "gearshape") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("Settings").accessibilityLabel("Settings")
+                gearMenu
             }
 
             if m.mons.isEmpty {
                 Text("No external monitors. Plug one in and Daylit takes over; the built-in screen stays with macOS.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
-                VStack(spacing: 8) { ForEach(m.mons.indices, id: \.self) { i in row(i) } }
-                if m.mons.count > 1 {
-                    switchRow("Sync monitors", Binding(get: { m.sync }, set: { m.setSync($0) }), .mini) {
-                        Text("Sync monitors").font(.caption)
-                    }
-                    .help("Moving one monitor moves the others, keeping how much brighter or darker each one is.")
-                }
+                monitors
             }
             if m.builtIn != nil { builtInRow() }
 
             if m.source != .off {
-                VStack(alignment: .leading, spacing: 8) {
-                    switchRow("Automatic brightness", Binding(get: { m.auto }, set: { m.setAuto($0) }), .small) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Automatic")
-                            if !m.detail.isEmpty {
-                                Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        }
-                    }
-                    .accessibilityHint(m.detail)
-                    switchRow("Light or dark mode from daylight", Binding(get: { m.lookOn }, set: { m.setLook($0) }), .mini) {
-                        Text("Light or dark mode from daylight").font(.caption)
-                    }
-                    if m.hasBattery {
-                        switchRow("Pause on battery", Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) }), .mini) {
-                            Text("Pause on battery").font(.caption)
-                        }
-                        .help("On battery: no automatic changes and no Home Assistant traffic. Sliders and keys still work.")
-                    }
-                }
+                automaticRow
             } else {
-                Text("Set a location or Home Assistant in the config file for automatic brightness.")
+                Text("Set a location or Home Assistant in the config file (gear menu) for automatic brightness.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
 
@@ -69,28 +34,89 @@ struct Panel: View {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
-
-            if !m.mons.isEmpty {
-                let k = HotKeys.shared
-                Text(k.ok ? "Brightness keys or \(k.pairText) change the screen with the active window. Add ⇧ (⌥⇧ with brightness keys) for fine steps."
-                          : "\(k.pairText) are taken by another app; change them in the gear menu. Brightness keys still work (⌥⇧ for fine steps).")
-                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider()
-
-            HStack {
-                Toggle("Open at login", isOn: Binding(get: { m.login }, set: { m.setLogin($0) }))
-                    .toggleStyle(.switch).controlSize(.mini).font(.caption)
-                    .accessibilityLabel("Open at login")
-                Spacer()
-                Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }
-                    .buttonStyle(.borderless).help("Quit Daylit").accessibilityLabel("Quit Daylit")
-            }
         }
         .padding(14)
         .frame(width: 320)
+    }
 
+    /// Everything that is set once and left alone lives here, so the panel stays short.
+    var gearMenu: some View {
+        Menu {
+            Button(m.dark ? "Switch to Light Mode" : "Switch to Dark Mode") { m.toggleDark() }
+            Toggle("Light or Dark Mode from Daylight", isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) }))
+                .disabled(m.source == .off)
+            if m.hasBattery {
+                Toggle("Pause on Battery", isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) }))
+            }
+            Toggle("Open at Login", isOn: Binding(get: { m.login }, set: { m.setLogin($0) }))
+            Divider()
+            Button("Keyboard Shortcuts…") { ShortcutsWindow.show() }
+            if m.source == .homeAssistant { Button("Home Assistant Token…") { TokenWindow.show(m) } }
+            Button("Open Config File…") { m.openConfig() }
+            Button("Reload Config") { m.reload() }
+            Divider()
+            Button("Quit Daylit") { NSApp.terminate(nil) }
+        } label: { Image(systemName: "gearshape") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("Settings").accessibilityLabel("Settings")
+    }
+
+    /// The monitor cards. With two or more, a round link button sits in the gap between the first two.
+    var monitors: some View {
+        let linked = m.sync && m.mons.count > 1
+        return VStack(spacing: 0) {
+            ForEach(m.mons.indices, id: \.self) { i in
+                row(i, linked: linked)
+                if i == 0 && m.mons.count > 1 {
+                    linkButton.frame(height: 10).zIndex(1)
+                } else if i < m.mons.count - 1 {
+                    Spacer().frame(height: 10)
+                }
+            }
+        }
+    }
+
+    var linkButton: some View {
+        let on = m.sync
+        return Button { m.setSync(!on) } label: {
+            Image(systemName: "link")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(on ? Color.white : Color.secondary)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(on ? Color.accentColor : Color(nsColor: .windowBackgroundColor)))
+                .overlay(Circle().strokeBorder(on ? Color.clear : Color.primary.opacity(0.15), lineWidth: 0.5))
+                .opacity(on ? 1 : 0.9)
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."
+                 : "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is.")
+        .accessibilityLabel("Sync monitors")
+        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
+    }
+
+    var automaticRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Automatic").font(.system(size: 13, weight: .medium))
+                if !m.detail.isEmpty {
+                    Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                        .help(m.detail)
+                }
+            }
+            Spacer(minLength: 8)
+            Toggle("Automatic brightness", isOn: Binding(get: { m.auto }, set: { m.setAuto($0) }))
+                .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                .accessibilityLabel("Automatic brightness").accessibilityHint(m.detail)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    /// Shown on hover over a slider instead of a paragraph in the panel.
+    var keysHint: String {
+        let k = HotKeys.shared
+        return k.ok ? "Brightness keys or \(k.pairText) change the screen with the active window. Add ⇧ (⌥⇧ with brightness keys) for fine steps."
+                    : "\(k.pairText) are taken by another app; change them in the gear menu. Brightness keys still work (⌥⇧ for fine steps)."
     }
 
     func note(_ mon: Mon, usable: Bool, unknown: Bool) -> String? {
@@ -127,16 +153,7 @@ struct Panel: View {
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
     }
 
-    /// A label on the left and its switch on the right edge, like System Settings.
-    func switchRow<L: View>(_ name: String, _ isOn: Binding<Bool>, _ size: SwiftUI.ControlSize, @ViewBuilder label: () -> L) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            label()
-            Spacer(minLength: 8)
-            Toggle(name, isOn: isOn).labelsHidden().toggleStyle(.switch).controlSize(size).accessibilityLabel(name)
-        }
-    }
-
-    func row(_ i: Int) -> some View {
+    func row(_ i: Int, linked: Bool) -> some View {
         let mon = m.mons[i]
         // A DDC monitor that has not reported its level yet can still be tried with the slider.
         let unknown = mon.control == .ddc && mon.readState == .unknown && !mon.available
@@ -158,6 +175,7 @@ struct Panel: View {
                                       set: { m.userSet(i, $0.rounded()) }),
                        in: 0...100, onEditingChanged: { m.dragChanged(i, $0) })
                     .controlSize(.small)
+                    .help(keysHint)
                     .accessibilityLabel("\(mon.label) brightness")
                 Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
@@ -168,6 +186,8 @@ struct Panel: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(linked ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1))
     }
 }
 
