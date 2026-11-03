@@ -131,3 +131,24 @@ static class HaTemplate {
             """;
     }
 }
+
+/// Whether a DDC monitor reports its brightness. Some monitors accept DDC writes but never answer
+/// reads; they stay usable as "write-only", with the slider as the only record of their level.
+enum ReadState {
+    Unknown,    // no successful read yet since it was detected
+    Readable,   // has answered a read (a later failure means it is showing another computer)
+    WriteOnly,  // never answered a read, but accepted a write the user made here
+    Silent,     // never answered a read and refused a write: not controllable from here
+}
+
+static class ReadRules {
+    public static ReadState AfterRead(this ReadState s, bool ok) => ok ? ReadState.Readable : s;
+    /// Only a user action (slider or hotkey) can turn an unreadable monitor into a write-only one: it
+    /// proves the monitor is showing this PC, so the automatic writes that follow can't fight the Mac.
+    public static ReadState AfterUserWrite(this ReadState s, bool ok) =>
+        s is ReadState.Unknown or ReadState.Silent ? (ok ? ReadState.WriteOnly : ReadState.Silent) : s;
+    /// The level automatic mode treats as current: the reading, or for a write-only monitor the slider.
+    public static int? Current(this ReadState s, int? reading, int slider) =>
+        reading ?? (s == ReadState.WriteOnly ? slider : null);
+    public static bool Usable(this ReadState s) => s != ReadState.Silent;
+}

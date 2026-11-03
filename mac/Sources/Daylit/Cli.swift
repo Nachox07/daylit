@@ -45,7 +45,7 @@ import DaylitCore
             let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
             let entry = cfg.monitors?.first { s.localizedName.localizedCaseInsensitiveContains($0.match) }
             var control = "none", level: Int? = nil
-            if builtIn { control = "none (built-in screens are left to macOS)" }
+            if builtIn { control = "native (manual slider only; automatic mode leaves it to macOS)"; level = Native.get(id) }
             else {
                 let forced = entry?.control
                 if forced != "ddc", let v = Native.get(id) { control = "native"; level = v }

@@ -197,9 +197,9 @@ sealed class Controller {
     /// Ctrl+Alt+PageUp/PageDown: change the monitor holding the focused window. Shift = steps of 1.
     void Hotkey(bool up, bool fine) {
         var gdi = Win.ForegroundScreen();
-        var m = Mons.FirstOrDefault(x => x.On && x.D.Gdi == gdi) ?? Mons.FirstOrDefault(x => x.On);
+        var m = Mons.FirstOrDefault(x => x.Usable && x.D.Gdi == gdi) ?? Mons.FirstOrDefault(x => x.On);
         if (m == null) { _ = Tick("hotkey"); return; }   // nothing read yet (e.g. DDC was slow at start): read now
-        int v = Math.Clamp(m.Cur!.Value + (up ? 1 : -1) * (fine ? 1 : 6), 0, 100);
+        int v = Math.Clamp((m.Cur ?? 50) + (up ? 1 : -1) * (fine ? 1 : 6), 0, 100);   // 50: a monitor that doesn't report its level
         UserSet(m, v);
         panel.Sync();
         osd.Flash(m.Label, v, m.D.Gdi);
@@ -293,7 +293,14 @@ sealed class Controller {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
         var cur = await Task.Run(() => mons.Select(m => { try { return m.Read(); } catch { return (int?)null; } }).ToArray());
-        for (int i = 0; i < mons.Length; i++) mons[i].Cur = cur[i];
+        for (int i = 0; i < mons.Length; i++) {
+            var r = cur[i];
+            if (!mons[i].D.Hdr) {
+                mons[i].Reads = mons[i].Reads.AfterRead(r != null);
+                r = mons[i].Reads.Current(r, mons[i].Cur ?? 50);   // write-only: the slider is the record of its level
+            }
+            mons[i].Cur = r;
+        }
         Error = ConfigError;
 
         if (Source == Source.Off) { Subtitle = ""; foreach (var m in mons) m.Manual = false; return; }

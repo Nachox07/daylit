@@ -206,14 +206,16 @@ sealed class Flyout : Window {
         syncing = true;
         try {
             foreach (var (m, s, pct, note, card) in rowViews) {
-                s.IsEnabled = m.On;
-                card.Opacity = m.On ? 1 : 0.55;
-                note.Text = !m.On ? "no brightness control" : m.Manual ? "manual" : m.D.Hdr ? "HDR" : "";
+                s.IsEnabled = m.Usable;
+                card.Opacity = m.Usable ? 1 : 0.55;
+                note.Text = m.Untried ? "level not reported" : m.Reads == ReadState.Silent ? "refused (DDC/CI off?)"
+                          : !m.On ? "no brightness control" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
+                          : m.Reads == ReadState.WriteOnly ? "no readback" : "";
                 if (m.Cur is int c) {
                     bool held = s.IsMouseCaptureWithin || (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;
                     if (!held) s.Value = Math.Clamp(c, 0, 100);
                     pct.Text = (held ? (int)Math.Round(s.Value) : c) + "%";
-                } else pct.Text = "–";
+                } else { pct.Text = "–"; if (m.Untried && !s.IsMouseCaptureWithin) s.Value = 50; }
             }
             bool automatic = app.Source != Source.Off;
             offHint.Visibility = automatic ? Visibility.Collapsed : Visibility.Visible;

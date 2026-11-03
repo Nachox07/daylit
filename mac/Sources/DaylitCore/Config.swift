@@ -48,6 +48,7 @@ public struct Config: Decodable {
     public var manualHold: Int?
     public var pauseOnBattery: Bool?    // default for the panel switch (true when missing)
     public var ddcTool: String?
+    public var builtIn: Bool?           // macOS: show the built-in screen's slider while the lid is open (default true)
     public var homeAssistant: HAConfig?
     public var monitors: [MonitorConfig]?
 

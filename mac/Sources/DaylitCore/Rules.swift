@@ -117,3 +117,34 @@ public func lightsNote(lights: Bool, bri: Double, sat: Double) -> String {
     let tone = sat <= 35 ? " white" : sat > 45 ? " warm" : ""
     return " · lights \(Int((bri / 2.55).rounded()))%\(tone)"
 }
+
+/// Whether a DDC monitor reports its brightness. Some monitors accept DDC writes but never answer
+/// reads; they stay usable as "write-only", with the slider as the only record of their level.
+public enum ReadState: Equatable {
+    case unknown     // no successful read yet since it was detected
+    case readable    // has answered a read (a later failure means it is showing another computer)
+    case writeOnly   // never answered a read, but accepted a write the user made here
+    case silent      // never answered a read and refused a write: not controllable from here
+
+    /// After a read attempt.
+    public func afterRead(ok: Bool) -> ReadState {
+        ok ? .readable : self
+    }
+    /// After a write the user made (slider or keys). Only a user action can turn an unreadable monitor
+    /// into a write-only one: it proves the monitor is showing this computer, so automatic writes
+    /// that follow can't fight another machine on the same monitor.
+    public func afterUserWrite(ok: Bool) -> ReadState {
+        switch self {
+        case .unknown, .silent: return ok ? .writeOnly : .silent
+        case .readable, .writeOnly: return self
+        }
+    }
+    /// The level automatic mode should treat as current: the reading, or for a write-only monitor
+    /// the slider (what was last sent). nil = leave this monitor alone this tick.
+    public func current(reading: Int?, slider: Int) -> Int? {
+        if let r = reading { return r }
+        return self == .writeOnly ? slider : nil
+    }
+    /// Whether the slider and keys may act on it.
+    public var usable: Bool { self != .silent }
+}

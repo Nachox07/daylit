@@ -18,6 +18,19 @@ struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
     }
 }
 
+/// The laptop's own screen while the lid is open. Shown in the panel for manual use only: automatic
+/// mode never touches it (macOS's auto-brightness and light sensor do that job better).
+struct BuiltIn: Equatable { let id: CGDirectDisplayID; let name: String; var level: Double }
+
+@MainActor func builtInScreen() -> BuiltIn? {
+    for s in NSScreen.screens {
+        guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+              CGDisplayIsBuiltin(id) != 0, let v = Native.get(id) else { continue }
+        return BuiltIn(id: id, name: s.localizedName, level: Double(v))
+    }
+    return nil
+}
+
 enum Native {
     typealias GetF = @convention(c) (UInt32, UnsafeMutablePointer<Float>) -> Int32
     typealias SetF = @convention(c) (UInt32, Float) -> Int32
@@ -50,7 +63,8 @@ enum DDC {
         return p.terminationStatus == 0 ? s : nil
     }
     static func get(_ uuid: String) -> Int? { run(["display", uuid, "get", "luminance"]).flatMap { Int($0) } }
-    static func set(_ uuid: String, _ v: Int) { _ = run(["display", uuid, "set", "luminance", String(v)]) }
+    /// True when m1ddc reports success (the monitor acknowledged the write).
+    @discardableResult static func set(_ uuid: String, _ v: Int) -> Bool { run(["display", uuid, "set", "luminance", String(v)]) != nil }
 }
 
 enum Power {
@@ -86,6 +100,7 @@ struct Mon: Identifiable {
     let ha: MonitorHA?
     var level: Double = 0
     var available = true
+    var readState: ReadState = .unknown   // DDC only: does it report its level (DaylitCore)
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on

@@ -109,10 +109,11 @@ static class Ddc {
     }
     public static int? Get(string gdi) => With<int?>(gdi, h =>
         GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out uint c, out uint m) && m > 0 ? (int)Math.Round(c * 100.0 / m) : null, null);
-    public static void Set(string gdi, int v) => With(gdi, h => {
-        if (GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out _, out uint m) && m > 0) SetVCPFeature(h, 0x10, (uint)Math.Round(v * m / 100.0));
-        return 0;
-    }, 0);
+    /// True when the monitor acknowledged the write. Without a readable maximum, 100 is assumed (the usual VCP 0x10 range).
+    public static bool Set(string gdi, int v) => With(gdi, h => {
+        uint m = GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out _, out uint max) && max > 0 ? max : 100;
+        return SetVCPFeature(h, 0x10, (uint)Math.Round(v * m / 100.0));
+    }, false);
 }
 
 /// A detected external monitor plus its settings from config.json (if any entry matches).
@@ -123,6 +124,10 @@ sealed class Mon {
     public double? RemoteSeen;                 // last_changed of the HA "set" helper already acted on
     public bool Manual;                        // automatic mode is holding a hand-set value
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
+    public ReadState Reads = ReadState.Unknown; // DDC only: does it report its level (Rules.cs)
+    /// A DDC monitor that has not reported its level yet can still be tried with the slider.
+    public bool Untried => !D.Hdr && Reads == ReadState.Unknown && Cur == null;
+    public bool Usable => (Cur != null || Untried) && Reads.Usable();
     CancellationTokenSource? pending;
 
     public Mon(Display d, MonitorConfig? spec) { D = d; Spec = spec; }
@@ -140,7 +145,19 @@ sealed class Mon {
         var d = D;
         if (d.Hdr) { Native.SetSdr(d, v); return; }
         pending?.Cancel(); var cts = pending = new CancellationTokenSource();
-        Task.Delay(150, cts.Token).ContinueWith(t => { if (!t.IsCanceled) Ddc.Set(d.Gdi, v); }, TaskScheduler.Default);
+        var ui = SynchronizationContext.Current;   // the answer is recorded on the UI thread
+        Task.Delay(150, cts.Token).ContinueWith(t => {
+            if (t.IsCanceled) return;
+            bool ok = Ddc.Set(d.Gdi, v);
+            void Record() {
+                var after = Reads.AfterUserWrite(ok);
+                if (after == Reads) return;
+                Reads = after;
+                Log.Write(after == ReadState.WriteOnly ? $"display: {Label} accepts brightness but doesn't report it (write-only)"
+                                                       : $"display: {Label} did not accept a brightness change");
+            }
+            if (ui != null) ui.Post(_ => Record(), null); else Record();
+        }, TaskScheduler.Default);
     }
 
     public static MonitorConfig? Match(Display d, MonitorConfig[]? specs) =>

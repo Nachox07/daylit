@@ -257,3 +257,42 @@ final class TemplateTests: XCTestCase {
         XCTAssertNil(HAState.parse(Data("not json".utf8)))
     }
 }
+
+final class WriteOnlyTests: XCTestCase {
+    func testUnreadableMonitorStaysUntouchedUntilTheUserWrites() {
+        // Never answered a read: automatic mode has nothing to work from (it may be showing another computer).
+        XCTAssertNil(ReadState.unknown.afterRead(ok: false).current(reading: nil, slider: 50))
+        XCTAssertTrue(ReadState.unknown.usable)   // the slider can still be tried
+    }
+    func testAcceptedUserWriteMakesItWriteOnly() {
+        let s = ReadState.unknown.afterUserWrite(ok: true)
+        XCTAssertEqual(s, .writeOnly)
+        XCTAssertEqual(s.current(reading: nil, slider: 64), 64)   // the slider is the record of its level
+        XCTAssertEqual(s.afterRead(ok: false), .writeOnly)
+    }
+    func testRefusedUserWriteMakesItSilent() {
+        let s = ReadState.unknown.afterUserWrite(ok: false)
+        XCTAssertEqual(s, .silent)
+        XCTAssertFalse(s.usable)
+        XCTAssertEqual(s.afterUserWrite(ok: true), .writeOnly)   // e.g. DDC/CI switched on in the monitor's menu
+    }
+    func testAReadingAlwaysWins() {
+        XCTAssertEqual(ReadState.writeOnly.afterRead(ok: true), .readable)
+        XCTAssertEqual(ReadState.readable.current(reading: 30, slider: 70), 30)
+        // A readable monitor that stops answering is showing another computer: leave it alone.
+        XCTAssertNil(ReadState.readable.afterRead(ok: false).current(reading: nil, slider: 70))
+        XCTAssertEqual(ReadState.readable.afterUserWrite(ok: true), .readable)
+    }
+    func testWriteOnlyAutomaticFollowsTargetUntilTheUserMovesTheSlider() {
+        // Untouched: the slider holds what automatic last sent, so the next target is applied.
+        var st = HoldState(lastSet: 60, lastTarget: 60)
+        let auto = decide(current: 60, want: 72, remote: nil, state: st, here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertEqual(auto.write, 72)
+        XCTAssertFalse(auto.manual)
+        // Moved by hand to 40: kept as manual while the target moves less than the hold.
+        st = auto.state
+        let held = decide(current: 40, want: 74, remote: nil, state: st, here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertNil(held.write)
+        XCTAssertTrue(held.manual)
+    }
+}

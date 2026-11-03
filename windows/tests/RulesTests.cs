@@ -220,3 +220,36 @@ public class TemplateTests {
         Assert.Contains("[-1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
     }
 }
+
+public class WriteOnlyTests {
+    [Fact] public void UnreadableMonitorIsLeftAloneUntilTheUserWrites() {
+        Assert.Null(ReadState.Unknown.AfterRead(false).Current(null, 50));   // may be showing the Mac
+        Assert.True(ReadState.Unknown.Usable());                            // the slider can still be tried
+    }
+    [Fact] public void AcceptedUserWriteMakesItWriteOnly() {
+        var s = ReadState.Unknown.AfterUserWrite(true);
+        Assert.Equal(ReadState.WriteOnly, s);
+        Assert.Equal(64, s.Current(null, 64));                               // the slider is the record of its level
+        Assert.Equal(ReadState.WriteOnly, s.AfterRead(false));
+    }
+    [Fact] public void RefusedUserWriteMakesItSilent() {
+        var s = ReadState.Unknown.AfterUserWrite(false);
+        Assert.Equal(ReadState.Silent, s);
+        Assert.False(s.Usable());
+        Assert.Equal(ReadState.WriteOnly, s.AfterUserWrite(true));
+    }
+    [Fact] public void AReadingAlwaysWins() {
+        Assert.Equal(ReadState.Readable, ReadState.WriteOnly.AfterRead(true));
+        Assert.Equal(30, ReadState.Readable.Current(30, 70));
+        Assert.Null(ReadState.Readable.AfterRead(false).Current(null, 70));   // stopped answering: another computer
+        Assert.Equal(ReadState.Readable, ReadState.Readable.AfterUserWrite(true));
+    }
+    [Fact] public void WriteOnlyFollowsTargetUntilMovedByHand() {
+        var auto = Rules.Decide(60, 72, null, new Hold(null, 60, 60), true, true, 5);
+        Assert.Equal(72, auto.Write);
+        Assert.False(auto.Manual);
+        var held = Rules.Decide(40, 74, null, auto.State, true, true, 5);   // slider moved to 40 by hand
+        Assert.Null(held.Write);
+        Assert.True(held.Manual);
+    }
+}

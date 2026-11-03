@@ -30,6 +30,7 @@ struct Panel: View {
             } else {
                 VStack(spacing: 8) { ForEach(m.mons.indices, id: \.self) { i in row(i) } }
             }
+            if m.builtIn != nil { builtInRow() }
 
             if m.source != .off {
                 VStack(alignment: .leading, spacing: 8) {
@@ -85,6 +86,40 @@ struct Panel: View {
 
     }
 
+    func note(_ mon: Mon, usable: Bool, unknown: Bool) -> String? {
+        if mon.control == .none { return "No brightness control found (install m1ddc for DDC monitors)." }
+        if unknown { return "This monitor doesn't report its brightness. Move the slider to set it." }
+        if mon.control == .ddc && mon.readState == .writeOnly { return "Doesn't report its brightness: the slider shows the last level sent." }
+        if mon.control == .ddc && mon.readState == .silent { return "This monitor refused the change. Check that DDC/CI is on in its menu." }
+        if !usable { return "This monitor did not answer. It may be showing another computer." }
+        return nil
+    }
+
+    /// The laptop screen while the lid is open: a plain slider, lighter than the managed monitors.
+    func builtInRow() -> some View {
+        let b = m.builtIn!
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "laptopcomputer").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(b.name).font(.system(size: 13)).lineLimit(1)
+                Text("macOS").font(.caption2).foregroundStyle(.secondary)
+                    .help("Manual only: automatic mode leaves the built-in screen to macOS")
+                Spacer()
+                Text("\(Int(b.level))%").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
+                Slider(value: Binding(get: { m.builtIn?.level ?? 0 }, set: { m.setBuiltIn($0.rounded()) }),
+                       in: 0...100, onEditingChanged: { m.draggingBuiltIn = $0 })
+                    .controlSize(.small)
+                    .accessibilityLabel("\(b.name) brightness")
+                Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+    }
+
     /// A label on the left and its switch on the right edge, like System Settings.
     func switchRow<L: View>(_ name: String, _ isOn: Binding<Bool>, _ size: SwiftUI.ControlSize, @ViewBuilder label: () -> L) -> some View {
         HStack(alignment: .center, spacing: 8) {
@@ -96,7 +131,9 @@ struct Panel: View {
 
     func row(_ i: Int) -> some View {
         let mon = m.mons[i]
-        let usable = mon.control != .none && mon.available
+        // A DDC monitor that has not reported its level yet can still be tried with the slider.
+        let unknown = mon.control == .ddc && mon.readState == .unknown && !mon.available
+        let usable = mon.control != .none && (mon.available || unknown)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
@@ -106,7 +143,7 @@ struct Panel: View {
                         .background(.quaternary, in: Capsule()).help("Set by hand: kept until the automatic level moves")
                 }
                 Spacer()
-                Text(usable ? "\(Int(mon.level))%" : "–").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                Text(usable && !unknown ? "\(Int(mon.level))%" : "–").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
@@ -118,10 +155,8 @@ struct Panel: View {
                 Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
             .disabled(!usable)
-            if !usable {
-                Text(mon.control == .none ? "No brightness control found (install m1ddc for DDC monitors)."
-                                          : "This monitor did not answer. It may be showing another computer.")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let note = note(mon, usable: usable, unknown: unknown) {
+                Text(note).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)

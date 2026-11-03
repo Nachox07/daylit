@@ -8,6 +8,8 @@ import DaylitCore
     static let idleLimit: Double = 300
 
     @Published var mons: [Mon] = []
+    @Published var builtIn: BuiltIn?     // lid open: manual slider only (config "builtIn": false hides it)
+    var draggingBuiltIn = false
     @Published var source: Source = .off
     @Published var auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
     @Published var detail = ""          // one line under the Automatic switch
@@ -88,9 +90,10 @@ import DaylitCore
             }
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
+            if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
             if let o = old[s.uuid] {
                 m.level = o.level; m.remoteSeen = o.remoteSeen
-                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published }
+                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published; m.readState = o.readState }
                 else {
                     // Another control reads on its own scale: the new reading is not a level set by hand.
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
@@ -102,6 +105,7 @@ import DaylitCore
             return m
         }
         if mons.isEmpty { log("no external displays") }
+        builtIn = config.builtIn == false ? nil : builtInScreen()
         refresh()
     }
 
@@ -147,9 +151,31 @@ import DaylitCore
         if m.control == .native { Native.set(m.id, Int(v)); return }
         guard m.control == .ddc else { return }
         pending[m.id]?.cancel()   // DDC is slow: only send the last value of a quick series
-        let uuid = m.uuid, val = Int(v)
-        let w = DispatchWorkItem { DDC.set(uuid, val) }
+        let uuid = m.uuid, val = Int(v), id = m.id
+        let w = DispatchWorkItem {
+            let ok = DDC.set(uuid, val)
+            Task { @MainActor in self.userWrote(id, ok: ok) }
+        }
         pending[m.id] = w; ddcQ.asyncAfter(deadline: .now() + 0.15, execute: w)
+    }
+
+    /// A slider or key write reached (or didn't reach) a DDC monitor that has never reported its level.
+    func userWrote(_ id: CGDirectDisplayID, ok: Bool) {
+        guard let i = mons.firstIndex(where: { $0.id == id }) else { return }
+        let before = mons[i].readState
+        let after = before.afterUserWrite(ok: ok)
+        guard after != before else { return }
+        mons[i].readState = after
+        mons[i].available = after == .writeOnly
+        Log.write(after == .writeOnly ? "display: \(mons[i].label) accepts brightness but doesn't report it (write-only)"
+                                      : "display: \(mons[i].label) did not accept a brightness change")
+    }
+
+    /// The built-in screen's slider: macOS's own brightness, nothing automatic.
+    func setBuiltIn(_ v: Double) {
+        guard let b = builtIn else { return }
+        builtIn?.level = v
+        Native.set(b.id, Int(v))
     }
 
     func dragChanged(_ i: Int, _ editing: Bool) {
@@ -159,7 +185,7 @@ import DaylitCore
 
     /// Brightness keys: change the monitor that holds the focused window.
     func key(up: Bool, fine: Bool, on id: CGDirectDisplayID) {
-        guard let i = mons.firstIndex(where: { $0.id == id }), mons[i].control != .none else { return }
+        guard let i = mons.firstIndex(where: { $0.id == id }), mons[i].control != .none, mons[i].readState.usable else { return }
         let step = Double(fine ? 1 : 6)
         setLevel(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
         HUD.show(mons[i].label, mons[i].level, on: id)
@@ -260,6 +286,8 @@ import DaylitCore
         }
         lastTick = Date()
         let gen = generation
+        // The built-in screen's level can change under us (keys, auto-brightness): keep its slider current.
+        if let b = builtIn, !draggingBuiltIn, let v = Native.get(b.id) { builtIn?.level = Double(v) }
         let snapshot = mons
 
         // Current brightness: detects values set by hand (keys, the monitor's own buttons).
@@ -273,6 +301,11 @@ import DaylitCore
         }
         guard gen == generation else { return }   // displays changed meanwhile; a new tick follows
         for i in mons.indices {
+            if mons[i].control == .ddc {
+                mons[i].readState = mons[i].readState.afterRead(ok: cur[i] != nil)
+                // A write-only monitor: the slider is the record of its level.
+                cur[i] = mons[i].readState.current(reading: cur[i], slider: Int(mons[i].level))
+            }
             mons[i].available = cur[i] != nil
             if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
         }
