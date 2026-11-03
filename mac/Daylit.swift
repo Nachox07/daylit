@@ -13,9 +13,37 @@ import CoreGraphics
 import IOKit.ps
 import ServiceManagement
 import ApplicationServices
+import Carbon.HIToolbox
 
 let DEBUG = ProcessInfo.processInfo.environment["DAYLIT_DEBUG"] == "1"
+/// Debug detail: stdout only, with DAYLIT_DEBUG=1.
 func log(_ s: @autoclosure () -> String) { if DEBUG { print("[daylit] " + s()); fflush(stdout) } }
+
+/// What the app decided and did, in ~/Library/Logs/Daylit/daylit.log (also stdout with DAYLIT_DEBUG=1).
+enum Log {
+    static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Daylit/daylit.log")
+    static let q = DispatchQueue(label: "log")
+    static let fmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f
+    }()
+    static func write(_ msg: String) {
+        log(msg)
+        let line = fmt.string(from: Date()) + " " + msg + "\n"
+        q.async {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 512 * 1024 {
+                let old = url.appendingPathExtension("old")
+                try? fm.removeItem(at: old); try? fm.moveItem(at: url, to: old)
+            }
+            if let h = try? FileHandle(forWritingTo: url) {
+                h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
+            } else {
+                try? Data(line.utf8).write(to: url)
+            }
+        }
+    }
+}
 
 // MARK: config
 
@@ -33,6 +61,7 @@ struct MonitorHA: Decodable {
     let day: String?             // input_numbers that override the local levels
     let blindDown: String?
     let night: String?
+    let set: String?             // input_number: changing it in HA sets this monitor now, even when the Mac is idle
 }
 
 struct MonitorConfig: Decodable {
@@ -179,7 +208,11 @@ struct HAState: Decodable {
     let elev, pos: Double
     let lights: Bool
     let auto: Bool?                  // nil when there is no autoSwitch
-    let m: [String: [Double]]        // per display UUID: [day, blindDown, night]; -1 = use the local value
+    let bri: Double                  // room light brightness 0-255 (0 = unknown)
+    let sat: Double                  // its hs colour saturation (0 = white, ~60+ = warm)
+    /// Per display UUID: [day, blindDown, night, set, setChanged]; -1 = use the local value / no set helper;
+    /// setChanged is the set helper's last_changed (Unix seconds).
+    let m: [String: [Double]]
 }
 
 enum HAClient {
@@ -198,21 +231,37 @@ enum HAClient {
         return s
     }
 
+    /// Whether a token is stored, without reading it (security exits 0 when the item exists).
+    static func tokenStored(_ name: String) -> Bool {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["find-generic-password", "-s", name]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
     /// One template call returns everything a tick needs.
     static func template(_ ha: HAConfig, _ mons: [Mon]) -> String {
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(100)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
         let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null
+        let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"
+        let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
         let m = mons.compactMap { mon -> String? in
-            guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil else { return nil }
-            return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night))]"
+            guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
+            // states.domain.name is None when the entity is missing, so a typo gives "no set helper", not an error.
+            let set = h.set.map { "\(num($0)), {{ as_timestamp(states.\($0).last_changed) if states.\($0) else 0 }}" } ?? "-1, 0"
+            return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night)), \(set)]"
         }.joined(separator: ", ")
         return """
         {"elev": {{ state_attr('\(ha.sun ?? "sun.sun")','elevation') | float(-10) }},
          "pos": {{ \(pos) }},
          "lights": {{ \(lights) }},
          "auto": \(auto),
+         "bri": {{ \(bri) }},
+         "sat": {{ \(sat) }},
          "m": {\(m)}}
         """
     }
@@ -239,7 +288,7 @@ enum HAClient {
         switch await call(ha, "/api/template", ["template": template(ha, mons)]) {
         case .failure(let f): return .failure(f)
         case .success(let d):
-            guard let s = try? JSONDecoder().decode(HAState.self, from: d), s.m.values.allSatisfy({ $0.count == 3 })
+            guard let s = try? JSONDecoder().decode(HAState.self, from: d), s.m.values.allSatisfy({ $0.count == 5 })
             else { return .failure(.badAnswer) }
             return .success(s)
         }
@@ -270,6 +319,7 @@ struct Mon: Identifiable {
     var available = true
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
+    var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
 }
 
 /// Target level: the daytime value slides between "blind closed" and "blind open" with the blind
@@ -355,8 +405,16 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
             }
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
-            if let o = old[s.uuid] { m.level = o.level; m.lastSet = o.lastSet; m.lastTarget = o.lastTarget }
+            if let o = old[s.uuid] {
+                m.level = o.level; m.remoteSeen = o.remoteSeen
+                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published }
+                else {
+                    // Another control reads on its own scale: the new reading is not a level set by hand.
+                    Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
+                }
+            }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
+            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)") }
             log("display \"\(s.name)\" id=\(s.id) uuid=\(s.uuid) control=\(control.rawValue)\(cfg != nil ? " (config \"\(cfg!.match)\")" : "")")
             return m
         }
@@ -376,11 +434,12 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
         let here = idleSeconds() < Self.idleLimit
         if here && !wasHere {
             // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
-            log("user is back")
+            Log.write("back: applying targets")
             for i in mons.indices { mons[i].published = nil }
             wasHere = here
             refresh(); return
         }
+        if !here && wasHere && source != .off { Log.write("idle: paused") }
         wasHere = here
         guard source != .off else { return }
         let interval: Double = Power.onBattery ? 120 : 30
@@ -445,7 +504,17 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
 
     // MARK: tick
 
-    struct Inputs { let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String }
+    struct Inputs { let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String; var fromHA = false }
+
+    var lastHAError: String?
+
+    /// "lights 80% white" / "lights 40% warm": the colour matters to how bright the room feels, so show it.
+    static func lightsNote(_ s: HAState) -> String {
+        guard s.lights else { return "" }
+        guard s.bri > 0 else { return " · lights on" }
+        let tone = s.sat <= 35 ? " white" : s.sat > 45 ? " warm" : ""
+        return " · lights \(Int((s.bri / 2.55).rounded()))%\(tone)"
+    }
 
     func tick() async {
         if busy { again = true; return }
@@ -478,39 +547,57 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
 
         let sun = min(max((inp.elev + 3) / 15, 0), 1)
         let here = idleSeconds() < Self.idleLimit
-        if !here {
-            detail = auto ? "Paused — this Mac is idle" : inp.line
-            log("tick (idle): \(detail)")
-            return   // the other machine on these monitors may be in use: don't fight it
-        }
         let hold = config.manualHold ?? 5
         for i in mons.indices {
-            guard let c = cur[i] else { continue }
+            guard let c0 = cur[i] else { continue }
+            var c = c0
             let m = mons[i]
             var lv = [m.day, m.blindDown, m.night]
             if let ov = inp.levels[m.uuid] { for k in 0..<3 where ov[k] >= 0 { lv[k] = ov[k] } }
             let want = target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
-            var applied = c, manual = false
-            if auto && !dragging.contains(m.id) {
-                let handSet = m.lastSet != nil && c != m.lastSet!
-                if handSet && abs(want - (m.lastTarget ?? want)) < hold {
+
+            // Set from Home Assistant: acts once per change of the helper, even when this Mac is idle
+            // (e.g. dimming from the phone while away). Then it is a hand-set level like any other.
+            var remote = false
+            if let r = inp.levels[m.uuid], r.count == 5, r[3] >= 0, r[4] > 0 {
+                if m.remoteSeen == nil { mons[i].remoteSeen = r[4] }   // first look: an old value is not a command
+                else if r[4] > m.remoteSeen! {
+                    mons[i].remoteSeen = r[4]
+                    let v = Int(min(max(r[3], 0), 100).rounded())
+                    Log.write("remote: \(m.label) \(c)% → \(v)% from Home Assistant")
+                    if c != v { write(m, v) }
+                    c = v; remote = true
+                    mons[i].level = Double(v)
+                    mons[i].lastTarget = want; mons[i].lastSet = v == want ? nil : want   // held as hand-set until the target moves
+                }
+            }
+            // Idle: the other machine on these monitors may be in use, so don't fight it.
+            if !here && !remote { continue }
+
+            var applied = c, manual = remote
+            if auto && !remote && !dragging.contains(m.id) {
+                let handSet = mons[i].lastSet != nil && c != mons[i].lastSet!
+                if handSet && abs(want - (mons[i].lastTarget ?? want)) < hold {
                     manual = true
                 } else {
-                    if c != want { write(m, want) }
+                    if c != want { Log.write("auto: \(m.label) \(c)% → \(want)%"); write(m, want) }
                     applied = want; mons[i].lastSet = want; mons[i].lastTarget = want; mons[i].level = Double(want)
                 }
             }
             mons[i].manual = manual
-            if source == .homeAssistant, let ha = config.homeAssistant, let sensor = m.ha?.sensor, m.published != applied {
+            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, mons[i].published != applied {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
                     "target": want, "manual": manual, "daylight": (sun * 100).rounded() / 100,
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
-                if case .success = r { mons[i].published = applied }   // retried next tick if the post failed
+                if case .success = r {   // retried next tick if the post failed
+                    mons[i].published = applied
+                    Log.write("publish: \(sensor) = \(applied)" + (manual ? " (manual)" : ""))
+                }
             }
         }
-        detail = inp.line
+        detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
     }
 
@@ -538,15 +625,16 @@ func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Do
             switch await HAClient.state(ha, mons) {
             case .success(let s):
                 problem = configProblem
+                if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
                 let sun = Int((min(max((s.elev + 3) / 15, 0), 1) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
-                if ha.lights != nil && s.lights { line += " · lights on" }
-                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line)
+                if ha.lights != nil { line += Self.lightsNote(s) }
+                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true)
             case .failure(let f):
                 problem = HAClient.describe(f, ha)
-                log("Home Assistant: \(problem ?? "")")
+                if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
