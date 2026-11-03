@@ -50,7 +50,8 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
   Applications. The app is not notarized by Apple, so the first open is blocked: open System
   Settings → Privacy & Security, scroll to the message about Daylit and click **Open Anyway**. For
   DDC monitors on Apple silicon also run `brew install m1ddc`; m1ddc does not support Intel Macs,
-  where only monitors that accept macOS's own brightness control work.
+  where only monitors that accept macOS's own brightness control work. To update, quit Daylit (gear
+  menu → Quit) before replacing the app: a copy left running loses its connection to Home Assistant.
 - **Windows** (`Daylit-windows-<version>.zip`): unzip anywhere, for example
   `%LOCALAPPDATA%\Programs\Daylit`, and run `Daylit.exe`. SmartScreen may warn about an unknown
   publisher: **More info → Run anyway**. It needs the
