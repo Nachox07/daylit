@@ -347,6 +347,10 @@ import DaylitCore
     /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     /// network at login or after wake does not jump the monitors to the fallback levels.
     var haDownSince: Date?
+    /// The last levels and blind position Home Assistant gave. With Home Assistant down, the sun drives
+    /// the target but these stay, so a network blip does not swap them for the defaults and move the screens.
+    var lastHALevels: [String: [Double]] = [:]
+    var lastHAPos: Double?
     var lastProbe: String?
 
     func tick() async {
@@ -460,7 +464,9 @@ import DaylitCore
             guard let l = config.location else { return nil }
             let e = solarElevation(latitude: l.latitude, longitude: l.longitude)
             let where_ = e >= 0 ? String(format: "%.1f° above the horizon", e) : String(format: "%.1f° below the horizon", -e)
-            return Inputs(elev: e, pos: 100, lights: false, levels: [:], line: note ?? "Sun · " + where_)
+            let keep = source == .homeAssistant   // a sun-only config uses its own levels
+            return Inputs(elev: e, pos: keep ? lastHAPos ?? 100 : 100, lights: false, levels: keep ? lastHALevels : [:],
+                          line: note ?? "Sun · " + where_, hasBlind: keep && lastHAPos != nil)
         }
         switch source {
         case .off: return nil
@@ -481,6 +487,8 @@ import DaylitCore
                 problem = configProblem
                 haDownSince = nil
                 if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
+                lastHALevels = s.m.mapValues(fallbackLevels)
+                lastHAPos = ha.cover != nil ? s.pos : nil
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
                 let sun = Int((daylightFraction(elevation: s.elev) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
@@ -500,7 +508,7 @@ import DaylitCore
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
-                    return fromSun("Home Assistant unreachable — using the sun")
+                    return fromSun(nil)   // the error line under it says Home Assistant is unreachable
                 }
                 if show { detail = "Home Assistant · not connected" }
                 return nil

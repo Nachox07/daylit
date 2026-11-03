@@ -12,13 +12,14 @@ namespace Daylit;
 
 static class Program {
     public static EventWaitHandle? ShowSignal;
+    [System.Runtime.InteropServices.DllImport("user32")] static extern bool AllowSetForegroundWindow(int pid);
     [STAThread]
     static int Main(string[] args) {
         if (Cli.Run(args) is int code) return code;   // --list-monitors, --check-config (see AGENTS.md)
         using var mutex = new Mutex(true, @"Local\Daylit.Tray", out bool first);
         // Starting Daylit again (Start menu, shortcut) opens the running one's panel.
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Daylit.Show");
-        if (!first) { show.Set(); return 0; }
+        if (!first) { AllowSetForegroundWindow(-1 /* ASFW_ANY */); show.Set(); return 0; }   // let the running copy take focus, so its panel closes on an outside click
         ShowSignal = show;
         WF.Application.EnableVisualStyles();   // tray menu
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -329,11 +330,16 @@ sealed class Controller {
         }
     }
 
+    /// With Home Assistant down, the sun drives the target but the levels and the blind stay the last ones
+    /// Home Assistant gave: a network blip must not swap them for the defaults and move the screens.
     Inputs SunInputs(IReadOnlyList<Mon> mons) {
         var l = Cfg.Location!;
-        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), 100, false, 0, 100,
-                          mons.Select(m => new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null, false);
+        bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
+        return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
+                          mons.Select(m => (keep ? m.HaLevels : null) ?? new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null,
+                          keep && lastHaPos != null);
     }
+    double? lastHaPos;
 
     async Task TickOnce() {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
@@ -375,6 +381,10 @@ sealed class Controller {
             }
         } else s = SunInputs(mons);
         if (!haDown) haDownSince = null;
+        if (!haDown && Source == Source.HomeAssistant && s != null) {
+            for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
+            lastHaPos = s.HasBlind ? s.Pos : null;
+        }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
@@ -423,7 +433,7 @@ sealed class Controller {
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
         Subtitle = !AutoOn ? "Off — sliders and hotkeys only"
                  : !here ? "Paused — this PC is idle"
-                 : haDown ? "Home Assistant unreachable — using the sun · " + where
+                 : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
                  : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat);
     }

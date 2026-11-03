@@ -28,7 +28,7 @@ With HDR on, many monitors ignore the usual DDC brightness command. Daylit still
 | **Sun** | your latitude and longitude | the sun's height, computed on your computer |
 | **Home Assistant** | a URL and a token | the sun, a blind and the room lights; levels tunable from your dashboards |
 
-With Home Assistant and a location, Daylit uses the sun when Home Assistant is unreachable.
+With Home Assistant and a location, Daylit uses the sun when Home Assistant is unreachable, keeping the last levels and blind position Home Assistant gave, so a network blip doesn't move the screens.
 
 <p align="center">
   <picture>
