@@ -22,6 +22,7 @@ import DaylitCore
             let d = Daylit(preview: ())
             d.mons = mons; d.source = source; d.auto = true; d.detail = detail; d.sync = sync
             d.problem = nil; d.builtIn = nil
+            d.login = false; d.hasBattery = true; d.lookOn = false; d.pauseOnBattery = true   // not this Mac's own settings
             return d
         }
         let two = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48)]
@@ -33,7 +34,7 @@ import DaylitCore
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
-            ("settings", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), height: 1240, locator: Locator()))),
+            ("settings", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), height: 1420, locator: Locator()))),
         ]
     }
 

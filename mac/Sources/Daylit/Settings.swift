@@ -149,6 +149,16 @@ struct SettingsView: View {
                         Text(caption(d)).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Section {
+                    Toggle("Light or dark mode from daylight", isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) }))
+                        .disabled(source == "off")
+                    if m.hasBattery {
+                        Toggle("Pause on battery", isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) }))
+                    }
+                    Toggle("Open at login", isOn: Binding(get: { m.login }, set: { m.setLogin($0) }))
+                } header: { Text("App") } footer: {
+                    Text("These apply right away.").font(.caption).foregroundStyle(.secondary)
+                }
             }
             .formStyle(.grouped)
 

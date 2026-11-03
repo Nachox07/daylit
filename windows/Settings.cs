@@ -31,6 +31,7 @@ sealed class SettingsWindow : Window {
     readonly StackPanel haSection = new();
     readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new();
     readonly Button test = new() { Content = "Test connection" };
+    CheckBox? lookBox;
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock caption, bool haLevels)> rows = new();
@@ -74,6 +75,15 @@ sealed class SettingsWindow : Window {
             Hint("Entity ids, as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")));
         body.Children.Add(haSection);
         body.Children.Add(monitors);
+        var look = new CheckBox { Content = "Light or dark mode from daylight", IsChecked = Settings.AutoLook, Margin = new Thickness(0, 2, 0, 2) };
+        look.Click += (_, _) => app.SetLook(look.IsChecked == true);
+        var pause = new CheckBox { Content = "Pause on battery", IsChecked = app.PauseOnBattery, Margin = new Thickness(0, 2, 0, 2),
+                                   Visibility = Win.HasBattery ? Visibility.Visible : Visibility.Collapsed };
+        pause.Click += (_, _) => app.SetPause(pause.IsChecked == true);
+        var login = new CheckBox { Content = "Open at sign-in", IsChecked = Win.StartsWithWindows, Margin = new Thickness(0, 2, 0, 2) };
+        login.Click += (_, _) => Win.StartsWithWindows = login.IsChecked == true;
+        lookBox = look;
+        body.Children.Add(Card("App", look, pause, login, Hint("These apply right away.")));
 
         var openFile = new Button { Content = "Open config file" };
         openFile.Click += (_, _) => app.OpenConfig();
@@ -197,6 +207,7 @@ sealed class SettingsWindow : Window {
     void SourceChanged() {
         sourceHint.Text = Sources.FirstOrDefault(s => s.tag == SourceTag).hint ?? "";
         haSection.Visibility = SourceTag == "homeAssistant" ? Visibility.Visible : Visibility.Collapsed;
+        if (lookBox != null) lookBox.IsEnabled = SourceTag != "off";
         Refresh();
     }
 
