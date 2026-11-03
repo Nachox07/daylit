@@ -98,6 +98,7 @@ sealed class SettingsWindow : Window {
             System.Windows.Automation.AutomationProperties.SetName(item, p.title);
             nav.Items.Add(item);
         }
+        nav.ItemContainerStyle = NavItemStyle();
         nav.SelectionChanged += (_, _) => ShowPane();
 
         var save = new Button { Content = "Save", IsDefault = true, MinWidth = 90, Margin = new Thickness(8, 0, 0, 0), Style = AccentStyle() };
@@ -129,6 +130,37 @@ sealed class SettingsWindow : Window {
     readonly ContentControl paneHost = new();
     readonly TextBlock paneTitle = new() { FontSize = 24, FontWeight = FontWeights.SemiBold, Margin = new Thickness(32, 20, 32, 8) };
     readonly List<(string key, string title, string glyph, Color color, FrameworkElement content)> panes = new();
+
+    /// Windows 11 Settings style: a soft highlight and a short accent bar on the selected item, no solid block.
+    static Style NavItemStyle() {
+        var accent = Palette.Accent is SolidColorBrush a ? a.Color : Colors.DodgerBlue;
+        string hover = Palette.Dark ? "#0FFFFFFF" : "#0A000000", selected = Palette.Dark ? "#15FFFFFF" : "#0F000000";
+        return (Style)System.Windows.Markup.XamlReader.Parse($"""
+            <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ListBoxItem">
+              <Setter Property="Margin" Value="0,1"/>
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ListBoxItem">
+                    <Grid>
+                      <Border x:Name="bg" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" CornerRadius="4" Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                      </Border>
+                      <Border x:Name="pill" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="3" Height="16" CornerRadius="1.5" HorizontalAlignment="Left"
+                              Background="#{accent.R:X2}{accent.G:X2}{accent.B:X2}" Visibility="Collapsed"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bg" Property="Background" Value="{hover}"/></Trigger>
+                      <Trigger Property="IsSelected" Value="True">
+                        <Setter TargetName="bg" Property="Background" Value="{selected}"/>
+                        <Setter TargetName="pill" Property="Visibility" Value="Visible"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+            </Style>
+            """);
+    }
 
     static FrameworkElement Pane(params UIElement[] children) {
         var stack = new StackPanel { Margin = new Thickness(32, 4, 32, 8) };
