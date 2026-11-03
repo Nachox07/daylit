@@ -28,6 +28,7 @@ static class Program {
         app.DispatcherUnhandledException += (_, e) => { Log.Write("error: " + e.Exception); e.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write("fatal: " + e.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, e) => { Log.Write("task: " + e.Exception); e.SetObserved(); };
+        Log.Write($"start: Daylit {typeof(Controller).Assembly.GetName().Version?.ToString(3) ?? "dev"}");
         _ = new Controller(app);
         app.Run();
         return 0;
@@ -356,12 +357,20 @@ sealed class Controller {
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {
             s = await HAClient.State(Cfg, mons);
+            foreach (var delay in HaErrorRule.RetryDelays) {   // a first failure after start, wake or a network switch is usually brief
+                if (s != null || !HAClient.Transient) break;
+                Log.Write($"home assistant: retrying in {delay} s ({HAClient.LastCause ?? "no answer"})");
+                await Task.Delay(TimeSpan.FromSeconds(delay));
+                s = await HAClient.State(Cfg, mons);
+            }
             if (s == null) {
                 haDown = true;
-                if (lastHaError != HAClient.LastError) Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable"));
+                Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable") + (HAClient.LastCause is { } cause ? $" ({cause})" : ""));
                 lastHaError = HAClient.LastError;
-                Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
                 haDownSince ??= DateTime.UtcNow;
+                if (HaErrorRule.ShouldShow(HAClient.Transient, (haDownSince.Value - DateTime.UnixEpoch).TotalSeconds,
+                                           (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds))
+                    Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
                 if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= 60) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);

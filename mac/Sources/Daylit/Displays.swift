@@ -37,6 +37,11 @@ enum Native {
     static let h = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
     static let getF: GetF? = dlsym(h, "DisplayServicesGetBrightness").map { unsafeBitCast($0, to: GetF.self) }
     static let setF: SetF? = dlsym(h, "DisplayServicesSetBrightness").map { unsafeBitCast($0, to: SetF.self) }
+    typealias CanF = @convention(c) (UInt32) -> Bool
+    static let canF: CanF? = dlsym(h, "DisplayServicesCanChangeBrightness").map { unsafeBitCast($0, to: CanF.self) }
+    /// macOS can set this display's brightness right now. External monitors usually only qualify while
+    /// HDR is on, so this changes when HDR is switched on or off.
+    static func usable(_ id: CGDirectDisplayID) -> Bool { (canF?(id) ?? true) && get(id) != nil }
 
     static func get(_ id: CGDirectDisplayID) -> Int? {
         guard let getF else { return nil }
@@ -119,4 +124,5 @@ struct Mon: Identifiable {
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
+    var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
 }

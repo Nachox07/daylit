@@ -296,7 +296,7 @@ sealed class Flyout : Window {
                 s.IsEnabled = m.Usable;
                 card.Opacity = m.Usable ? 1 : 0.55;
                 note.Text = m.Untried ? "level not reported" : m.Reads == ReadState.Silent ? "refused (DDC/CI off?)"
-                          : !m.On ? "no brightness control" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
+                          : !m.On ? "no control: turn on HDR, or DDC/CI in its menu" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
                           : m.Reads == ReadState.WriteOnly ? "no readback" : "";
                 if (m.Cur is int c) {
                     bool held = s.IsMouseCaptureWithin || (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;

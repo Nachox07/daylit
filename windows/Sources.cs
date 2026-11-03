@@ -17,22 +17,32 @@ static class HAClient {
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(6) };
     public static string? Token;
     public static string? LastError;
+    /// The underlying cause of the last failure (exception or HTTP status), for the log.
+    public static string? LastCause;
+    /// The last failure was a connection problem that usually clears by itself (see HaErrorRule).
+    public static bool Transient;
 
     record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100);
 
     public static async Task<string?> Call(Config c, string path, object body) {
-        if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; return null; }
-        if (Token == null) { LastError = "No Home Assistant token (tray menu → Home Assistant token…)"; return null; }
+        if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; Transient = false; return null; }
+        if (Token == null) { LastError = "No Home Assistant token (tray menu → Home Assistant token…)"; Transient = false; return null; }
         try {
             using var req = new HttpRequestMessage(HttpMethod.Post, url.TrimEnd('/') + path) {
                 Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
             req.Headers.Authorization = new("Bearer", Token);
             using var r = await http.SendAsync(req);
-            if ((int)r.StatusCode == 401) { LastError = "Home Assistant rejected the token"; return null; }
-            if (!r.IsSuccessStatusCode) { LastError = $"Home Assistant answered {(int)r.StatusCode}"; return null; }
-            LastError = null;
+            Transient = false;
+            if ((int)r.StatusCode == 401) { LastError = "Home Assistant rejected the token"; LastCause = "HTTP 401"; return null; }
+            if (!r.IsSuccessStatusCode) { LastError = $"Home Assistant answered {(int)r.StatusCode}"; LastCause = $"HTTP {(int)r.StatusCode}"; return null; }
+            LastError = null; LastCause = null;
             return await r.Content.ReadAsStringAsync();
-        } catch { LastError = "Cannot reach Home Assistant"; return null; }
+        } catch (Exception e) {
+            LastError = "Cannot reach Home Assistant"; Transient = true;
+            var inner = e.InnerException ?? e;
+            LastCause = $"{inner.GetType().Name}: {inner.Message}";
+            return null;
+        }
     }
 
     public static async Task<Inputs?> State(Config c, IReadOnlyList<Mon> mons) {
@@ -42,14 +52,14 @@ static class HAClient {
         try {
             var a = JsonSerializer.Deserialize<Answer>(s);
             if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 5)) {
-                LastError = "Unexpected answer from Home Assistant"; return null;
+                LastError = "Unexpected answer from Home Assistant"; Transient = false; return null;
             }
             // Local numbers wherever HA has no value.
             var levels = mons.Select((m, i) => new[] {
                 a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
             var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
             return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote };
-        } catch { LastError = "Unexpected answer from Home Assistant"; return null; }
+        } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
     }
 
     public static Task<string?> Publish(Config c, Mon m, int applied, int target, bool manual, double sun, Inputs s) =>

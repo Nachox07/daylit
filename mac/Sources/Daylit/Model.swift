@@ -97,14 +97,20 @@ import DaylitCore
         mons = externalScreens().map { s in
             let cfg = config.monitors?.first { s.name.localizedCaseInsensitiveContains($0.match) }
             let control: Control
+            let nativeOK = Native.usable(s.id)
             switch cfg?.control {
             case "native": control = .native
             case "ddc": control = .ddc
-            default: control = Native.get(s.id) != nil ? .native : DDC.available ? .ddc : .none
+            default: control = nativeOK ? .native : DDC.available ? .ddc : .none
             }
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
             if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
+            if control == .native && !nativeOK {
+                m.noControl = "No brightness control right now. Turn on HDR for this display, or DDC/CI in its menu."
+            } else if control == .none {
+                m.noControl = "No brightness control. Turn on HDR for this display, or DDC/CI in its menu (\(DDC.hint))."
+            }
             if let o = old[s.uuid] {
                 m.level = o.level; m.remoteSeen = o.remoteSeen
                 if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published; m.readState = o.readState }
@@ -117,7 +123,10 @@ import DaylitCore
                 m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
             }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
-            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)") }
+            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)" + (m.noControl != nil ? ", no brightness control right now" : "")) }
+            else if old[s.uuid]?.noControl != m.noControl {
+                Log.write("control: \(m.label) " + (m.noControl == nil ? "brightness control is back (\(control.rawValue))" : "has no brightness control right now"))
+            }
             log("display \"\(s.name)\" id=\(s.id) uuid=\(s.uuid) control=\(control.rawValue)\(cfg != nil ? " (config \"\(cfg!.match)\")" : "")")
             return m
         }
@@ -136,6 +145,10 @@ import DaylitCore
 
     func check() {
         if Appearance.isDark != dark { dark = Appearance.isDark }
+        // Switching HDR on or off changes whether macOS can set an external display's brightness, and it
+        // does not always post a screen-change notification: re-probe cheaply and re-detect on a change.
+        let probe = externalScreens().map { "\($0.uuid)=\(Native.usable($0.id))" }.joined(separator: ",")
+        if probe != lastProbe { let first = lastProbe == nil; lastProbe = probe; if !first { redetect(); return } }
         let battery = Power.onBattery
         if battery != onBattery {
             onBattery = battery
@@ -334,6 +347,7 @@ import DaylitCore
     /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     /// network at login or after wake does not jump the monitors to the fallback levels.
     var haDownSince: Date?
+    var lastProbe: String?
 
     func tick() async {
         if busy { again = true; return }
@@ -455,7 +469,14 @@ import DaylitCore
             return fromSun(nil)
         case .homeAssistant:
             guard let ha = config.homeAssistant else { return nil }
-            switch await HAClient.state(ha, mons) {
+            var result = await HAClient.state(ha, mons)
+            for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
+                guard case .failure(.unreachable) = result else { break }
+                Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))")
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                result = await HAClient.state(ha, mons)
+            }
+            switch result {
             case .success(let s):
                 problem = configProblem
                 haDownSince = nil
@@ -468,15 +489,20 @@ import DaylitCore
                 return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                               hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
             case .failure(let f):
-                problem = HAClient.describe(f, ha)
-                if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
-                if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
+                let message = HAClient.describe(f, ha)
+                Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? ""))
+                lastHAError = message
                 if haDownSince == nil { haDownSince = Date() }
+                let transient = f == .unreachable
+                let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
+                                                  now: Date().timeIntervalSince1970)
+                problem = show ? message : configProblem
+                if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
                     return fromSun("Home Assistant unreachable — using the sun")
                 }
-                detail = "Home Assistant · not connected"
+                if show { detail = "Home Assistant · not connected" }
                 return nil
             }
         }

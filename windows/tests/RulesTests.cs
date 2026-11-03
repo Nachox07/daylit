@@ -376,3 +376,15 @@ public class SyncTests {
         Assert.NotNull(SavedHolds.FromJson("not json"));
     }
 }
+
+public class HaErrorRuleTests {
+    [Fact] public void TransientStaysQuietForAMinute() {
+        Assert.False(HaErrorRule.ShouldShow(true, null, 100));
+        Assert.False(HaErrorRule.ShouldShow(true, 100, 159));
+        Assert.True(HaErrorRule.ShouldShow(true, 100, 160));
+    }
+    [Fact] public void TokenProblemsShowAtOnce() {
+        Assert.True(HaErrorRule.ShouldShow(false, null, 0));
+        Assert.Equal(new double[] { 2, 5 }, HaErrorRule.RetryDelays);
+    }
+}

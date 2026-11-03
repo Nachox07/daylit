@@ -224,3 +224,18 @@ public struct SavedHolds: Equatable, Codable {
         return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget)
     }
 }
+
+/// Home Assistant errors. A connection that fails right after launch, wake or docking (macOS checks the
+/// local-network permission, or the network is still switching) usually works a few seconds later, so
+/// it is retried quickly and only shown once Home Assistant has been unreachable for a while. A
+/// rejected or missing token will not fix itself and shows at once.
+public enum HAErrorRule {
+    public static let retryDelays: [Double] = [2, 5]
+    public static let showAfter: Double = 60
+    /// Whether the panel should show the error: `downSince` is when the current outage started.
+    public static func shouldShow(transient: Bool, downSince: Double?, now: Double) -> Bool {
+        if !transient { return true }
+        guard let since = downSince else { return false }
+        return now - since >= showAfter
+    }
+}

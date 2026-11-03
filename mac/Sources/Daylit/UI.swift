@@ -120,7 +120,7 @@ struct Panel: View {
     }
 
     func note(_ mon: Mon, usable: Bool, unknown: Bool) -> String? {
-        if mon.control == .none { return "No brightness control found (\(DDC.hint))." }
+        if let r = mon.noControl { return r }
         if unknown { return "This monitor doesn't report its brightness. Move the slider to set it." }
         if mon.control == .ddc && mon.readState == .writeOnly { return "Doesn't report its brightness: the slider shows the last level sent." }
         if mon.control == .ddc && mon.readState == .silent { return "This monitor refused the change. Check that DDC/CI is on in its menu." }
@@ -157,7 +157,7 @@ struct Panel: View {
         let mon = m.mons[i]
         // A DDC monitor that has not reported its level yet can still be tried with the slider.
         let unknown = mon.control == .ddc && mon.readState == .unknown && !mon.available
-        let usable = mon.control != .none && (mon.available || unknown)
+        let usable = mon.control != .none && mon.noControl == nil && (mon.available || unknown)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)

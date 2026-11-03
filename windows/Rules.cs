@@ -235,3 +235,13 @@ sealed class SavedHolds {
         catch { return new SavedHolds(); }
     }
 }
+
+/// Home Assistant errors. A connection that fails right after start, wake or a network switch usually
+/// works a few seconds later, so it is retried quickly and only shown once Home Assistant has been
+/// unreachable for a while. A rejected or missing token will not fix itself and shows at once.
+public static class HaErrorRule {
+    public static readonly double[] RetryDelays = { 2, 5 };
+    public const double ShowAfter = 60;
+    public static bool ShouldShow(bool transient, double? downSince, double now) =>
+        !transient || (downSince is double since && now - since >= ShowAfter);
+}

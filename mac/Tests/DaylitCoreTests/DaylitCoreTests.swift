@@ -419,4 +419,15 @@ final class SyncTests: XCTestCase {
         saved.record(key: "A", state: HoldState(), now: 5)
         XCTAssertTrue(saved.entries.isEmpty)
     }
+
+    func testHAErrorTransientStaysQuietForAMinute() {
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: nil, now: 100))
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 100))
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 159))
+        XCTAssertTrue(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 160))
+    }
+    func testHAErrorTokenProblemsShowAtOnce() {
+        XCTAssertTrue(HAErrorRule.shouldShow(transient: false, downSince: nil, now: 0))
+        XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
+    }
 }
