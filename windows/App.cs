@@ -29,7 +29,8 @@ static class Program {
         app.DispatcherUnhandledException += (_, e) => { Log.Write("error: " + e.Exception); e.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write("fatal: " + e.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, e) => { Log.Write("task: " + e.Exception); e.SetObserved(); };
-        Log.Write($"start: Daylit {typeof(Controller).Assembly.GetName().Version?.ToString(3) ?? "dev"}");
+        var v = typeof(Controller).Assembly.GetName().Version?.ToString(3);
+        Log.Write($"start: Daylit {(v is null or "0.0.0" ? "dev" : v)}");
         _ = new Controller(app);
         app.Run();
         return 0;
