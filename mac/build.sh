@@ -9,7 +9,7 @@ OUT="${1:-$HOME/Applications}"
 APP="$OUT/Daylit.app"
 mkdir -p "$APP/Contents/MacOS"
 # Package.swift sets macOS 14 as the minimum, so the binary runs there whatever SDK builds it.
-VERSION="${DAYLIT_VERSION:-2.0.0}"
+VERSION="${DAYLIT_VERSION:-0.0.0}"   # 0.0.0 = a local build; the log calls it "dev"
 ARCHS=""
 [ "${DAYLIT_UNIVERSAL:-0}" = 1 ] && ARCHS="--arch arm64 --arch x86_64"
 swift build -c release --product Daylit $ARCHS
