@@ -1,0 +1,70 @@
+name: release
+# Push a tag like v2.0.0 to build both apps and publish them as a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+        working-directory: mac
+      - name: Build (Apple silicon + Intel)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DAYLIT_UNIVERSAL=1 DAYLIT_VERSION="$VERSION" mac/build.sh "$RUNNER_TEMP"
+          ditto -c -k --keepParent "$RUNNER_TEMP/Daylit.app" "Daylit-mac-$VERSION.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: Daylit-mac-*.zip
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test
+        run: dotnet test windows/tests/Daylit.Tests.csproj --nologo
+      - name: Build
+        shell: pwsh
+        run: |
+          $version = "$env:GITHUB_REF_NAME".TrimStart('v')
+          dotnet publish windows/Daylit.csproj -c Release -o out --nologo -p:Version=$version
+          Compress-Archive -Path out/* -DestinationPath "Daylit-windows-$version.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: Daylit-windows-*.zip
+  release:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          **macOS 14+** (Apple silicon and Intel): unzip `Daylit-mac-*.zip` and move `Daylit.app` to
+          Applications. The app is not notarized by Apple, so the first open is blocked: open System
+          Settings → Privacy & Security and click **Open Anyway** next to the message about Daylit.
+          For DDC monitors also run `brew install m1ddc`.
+
+          **Windows 10/11:** unzip `Daylit-windows-*.zip` (for example to `%LOCALAPPDATA%\Programs\Daylit`)
+          and run `Daylit.exe`. If SmartScreen warns about an unknown publisher: **More info → Run anyway**.
+          Needs the .NET 10 Desktop Runtime: `winget install Microsoft.DotNet.DesktopRuntime.10`.
+
+          Setup (location, Home Assistant, keys): see docs/setup.md in the repository.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" Daylit-mac-*.zip Daylit-windows-*.zip \
+            --repo "$GITHUB_REPOSITORY" --title "Daylit $GITHUB_REF_NAME" --notes-file notes.md

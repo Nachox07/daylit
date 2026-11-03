@@ -8,9 +8,14 @@ license: MIT
 
 The full guide is [AGENTS.md](../../../AGENTS.md) → *Set up Daylit for a user*. In short:
 
-1. **Install** if the app is missing. Windows: .NET 10 SDK, then `windows\build.ps1`
-   (→ `%LOCALAPPDATA%\Programs\Daylit\Daylit.exe`). macOS: `mac/build.sh`
-   (→ `~/Applications/Daylit.app`); for DDC monitors also `brew install m1ddc`.
+1. **Install** if the app is missing. Prefer the **latest release download** (AGENTS.md → *Install*
+   has the commands): `gh release download -R Nachox07/daylit -p 'Daylit-mac-*.zip'` (or
+   `'Daylit-windows-*.zip'`), unzip to `~/Applications` or `%LOCALAPPDATA%\Programs\Daylit`, then
+   walk the user through the one-time OS prompt: macOS System Settings → Privacy & Security →
+   **Open Anyway**; Windows SmartScreen **More info → Run anyway**, plus the .NET 10 Desktop Runtime
+   (`winget install Microsoft.DotNet.DesktopRuntime.10`) if missing. If the user prefers not to run
+   unsigned downloads, build from source instead: Windows .NET 10 SDK + `windows\build.ps1`; macOS
+   `mac/build.sh`. For DDC monitors on macOS also `brew install m1ddc`.
 2. **Detect** the monitors:
    - Windows: `& "$env:LOCALAPPDATA\Programs\Daylit\Daylit.exe" --list-monitors | Out-String`
    - macOS: `~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors`

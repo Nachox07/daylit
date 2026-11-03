@@ -23,10 +23,42 @@ follow this section directly.
 
 ### 1. Install
 
+Two ways. **Prefer the download**: no toolchain, a minute of work. Offer **building from source**
+when the user would rather not run an unsigned app, or wants to change the code.
+
+**Download the latest release** (the app is not signed by Apple or Microsoft, so the OS asks once):
+
+macOS 14+ (one app for Apple silicon and Intel):
+
+```sh
+gh release download -R Nachox07/daylit -p 'Daylit-mac-*.zip' -D /tmp/daylit --clobber
+# without gh: https://github.com/Nachox07/daylit/releases/latest
+ditto -x -k /tmp/daylit/Daylit-mac-*.zip ~/Applications/
+open ~/Applications/Daylit.app
+```
+
+The first open is blocked because the app is not notarized. Tell the user: System Settings →
+Privacy & Security → scroll to the message about Daylit → **Open Anyway**, then confirm. For DDC
+monitors also `brew install m1ddc`. Then walk them through the permissions macOS asks for
+(Accessibility for the brightness keys, Local Network for Home Assistant).
+
+Windows 10/11:
+
+```powershell
+gh release download -R Nachox07/daylit -p 'Daylit-windows-*.zip' -D $env:TEMP\daylit --clobber
+Expand-Archive "$env:TEMP\daylit\Daylit-windows-*.zip" "$env:LOCALAPPDATA\Programs\Daylit" -Force
+winget install Microsoft.DotNet.DesktopRuntime.10   # if `dotnet --list-runtimes` has no WindowsDesktop 10.x
+& "$env:LOCALAPPDATA\Programs\Daylit\Daylit.exe"
+```
+
+If SmartScreen shows "Windows protected your PC", tell the user to click **More info → Run anyway**.
+
+**Build from source** (needs the toolchain; the result is the same app):
+
 | | |
 |---|---|
 | Windows | .NET 10 SDK (`winget install Microsoft.DotNet.SDK.10`), then `windows\build.ps1` → `%LOCALAPPDATA%\Programs\Daylit\Daylit.exe` |
-| macOS | `mac/build.sh`; for DDC monitors also `brew install m1ddc` |
+| macOS | Xcode command-line tools, then `mac/build.sh` → `~/Applications/Daylit.app`; for DDC monitors also `brew install m1ddc` |
 
 ### 2. Find the monitors
 

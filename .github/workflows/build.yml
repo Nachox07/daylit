@@ -9,7 +9,13 @@ jobs:
         run: swift test
         working-directory: mac
       - name: Build Daylit.app
-        run: mac/build.sh "$RUNNER_TEMP"
+        run: DAYLIT_UNIVERSAL=1 mac/build.sh "$RUNNER_TEMP"
+      - name: Zip (ditto keeps the signature)
+        run: ditto -c -k --keepParent "$RUNNER_TEMP/Daylit.app" "$RUNNER_TEMP/Daylit-mac.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Daylit-mac
+          path: ${{ runner.temp }}/Daylit-mac.zip
   windows:
     runs-on: windows-latest
     steps:
