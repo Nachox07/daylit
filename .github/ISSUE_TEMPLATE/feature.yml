@@ -1,0 +1,31 @@
+name: Feature or change
+description: Something Daylit should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: about
+    attributes:
+      label: What it is about
+      description: The problem in plain words. What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: How you'd like it to work. Which app (macOS, Windows, both)? Keep in mind the panel stays minimal; settings live in the gear menu or the config file.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      description: Checkable statements, each with how it's verified (test, snapshot, a check on real hardware).
+      value: |
+        - [ ] 
+        - [ ] 
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: Related issues, PRs, other apps that do something similar.

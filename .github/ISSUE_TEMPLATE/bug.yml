@@ -1,0 +1,51 @@
+name: Bug report
+description: Daylit does something wrong on your machine.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't paste your Home Assistant token, URL or entity names; replace them with placeholders.
+  - type: textarea
+    id: seen
+    attributes:
+      label: What happens
+      description: What you did and what you saw. A screenshot of the panel helps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Daylit version and OS
+      placeholder: "Daylit 1.1.0 on macOS 26.1 (Apple silicon) / Windows 11 24H2"
+    validations:
+      required: true
+  - type: textarea
+    id: monitors
+    attributes:
+      label: Monitors
+      description: |
+        Paste the output of `Daylit --list-monitors` (macOS: `~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors`; Windows: `Daylit.exe --list-monitors | Out-String`). Say whether HDR is on, and how each monitor is connected (HDMI, DisplayPort, USB-C, dock).
+      render: json
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source
+      options:
+        - none (manual)
+        - sun
+        - Home Assistant
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The relevant lines from `~/Library/Logs/Daylit/daylit.log` (macOS) or `%LOCALAPPDATA%\Daylit\daylit.log` (Windows).
+      render: text
