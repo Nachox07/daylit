@@ -31,5 +31,13 @@
       "control": "native",
       "day": 90, "blindDown": 60, "night": 30
     }
-  ]
+  ],
+  "tuning": {
+    "brightness": { "sunNight": -3, "sunDay": 12, "lightsBoost": 5, "lightsBoostSunBelow": 1.5 },
+    "theme": { "lightSunAbove": 4, "darkSunBelow": 1, "lightBlindAbove": 55, "darkBlindBelow": 35,
+               "whiteLightsAbove": 78, "whiteLightsBelow": 67, "whiteSaturationMax": 35, "warmSaturationMin": 45,
+               "room": true },
+    "timing": { "pollSeconds": 30, "batteryPollSeconds": 120, "idleSeconds": 300,
+                "haFallbackSeconds": 60, "manualKeepHours": 12 }
+  }
 }

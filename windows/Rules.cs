@@ -37,10 +37,12 @@ record struct Step(Hold State, int Current, int? Write, int? Remote, int Applied
 static class Rules {
     /// v = [day, blindDown, night]. The daytime value slides between "blind down" and "blind up" with the
     /// blind position; the sun then blends it with the night value; room lights at night add a little.
-    public static int Target(double[] v, double pos, bool lights, double sun) {
+    /// `boost`: room lights may lift the night level now (the sun is below tuning's lightsBoostSunBelow);
+    /// without it, the default rule (daylight under 30%).
+    public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null) {
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
         double x = v[2] + (daytime - v[2]) * sun;
-        if (lights && sun < 0.3) x = Math.Max(x, v[2] + 5);
+        if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
 
@@ -75,10 +77,11 @@ static class Rules {
     }
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
-    public static string LightsNote(bool lights, double bri, double sat) {
+    public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {
+        t ??= new Tuning();
         if (!lights) return "";
         if (bri <= 0) return " · lights on";
-        string tone = sat <= 35 ? " white" : sat > 45 ? " warm" : "";
+        string tone = sat <= t.WhiteSaturationMax ? " white" : sat > t.WarmSaturationMin ? " warm" : "";
         return $" · lights {(int)Math.Round(bri / 2.55)}%{tone}";
     }
 }
@@ -91,12 +94,17 @@ sealed class LookRule {
     public void Reset() { daylight = whiteLights = null; }
 
     /// lightsOn: the room lights are on and come from Home Assistant (bri 0-255, hs saturation 0 white … ~60+ warm).
-    public bool WantDark(double elev, double pos, bool hasBlind, bool lightsOn, double bri, double sat) {
+    public bool WantDark(double elev, double pos, bool hasBlind, bool lightsOn, double bri, double sat, Tuning? t = null) {
+        t ??= new Tuning();
+        hasBlind &= t.Room; lightsOn &= t.Room;
+        // Before any answer, the middle of each gap decides (3° and 50% with the defaults).
+        double midSun = (t.LightSunAbove + t.DarkSunBelow) / 2 + 0.5, midBlind = (t.LightBlindAbove + t.DarkBlindBelow) / 2 + 5;
         daylight = hasBlind
-            ? elev > 4 && pos >= 55 ? true : elev < 1 || pos <= 35 ? false : daylight ?? (elev > 3 && pos >= 50)
-            : elev > 4 ? true : elev < 1 ? false : daylight ?? elev > 3;
-        bool lit = lightsOn && bri > 0;
-        whiteLights = lit && bri >= 200 && sat <= 35 ? true : !lit || bri < 170 || sat > 45 ? false : whiteLights ?? false;
+            ? elev > t.LightSunAbove && pos >= t.LightBlindAbove ? true : elev < t.DarkSunBelow || pos <= t.DarkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)
+            : elev > t.LightSunAbove ? true : elev < t.DarkSunBelow ? false : daylight ?? elev > midSun;
+        bool lit = lightsOn && bri > 0; double pct = bri / 2.55;
+        whiteLights = lit && pct >= t.WhiteLightsAbove && sat <= t.WhiteSaturationMax ? true
+                    : !lit || pct < t.WhiteLightsBelow || sat > t.WarmSaturationMin ? false : whiteLights ?? false;
         return !(daylight.Value || whiteLights.Value);
     }
 }
@@ -237,8 +245,8 @@ sealed class SavedHolds {
         return true;
     }
     /// The state to start a monitor with after a restart, or null when there is none or it is too old.
-    public (int? LastSet, int? LastTarget)? Restore(string key, double now) =>
-        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= MaxAge ? (e.LastSet, e.LastTarget) : null;
+    public (int? LastSet, int? LastTarget)? Restore(string key, double now, double? maxAge = null) =>
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= (maxAge ?? MaxAge) ? (e.LastSet, e.LastTarget) : null;
 
     public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
     public static SavedHolds FromJson(string? json) {

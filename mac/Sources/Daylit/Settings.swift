@@ -53,16 +53,25 @@ struct Tile: View {
 }
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case displays, automatic, homeAssistant, app
+    case displays, automatic, homeAssistant, appearance, tuning, app
     var id: String { rawValue }
     var title: String {
-        switch self { case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"; case .app: "App" }
+        switch self {
+        case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"
+        case .appearance: "Appearance"; case .tuning: "Tuning"; case .app: "App"
+        }
     }
     var color: Color {
-        switch self { case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue; case .app: .gray }
+        switch self {
+        case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue
+        case .appearance: .indigo; case .tuning: .pink; case .app: .gray
+        }
     }
     var icon: String {
-        switch self { case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"; case .app: "gearshape" }
+        switch self {
+        case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"
+        case .appearance: "circle.lefthalf.filled"; case .tuning: "slider.horizontal.3"; case .app: "gearshape"
+        }
     }
 }
 
@@ -135,6 +144,8 @@ struct SettingsView: View {
     @State private var sun = ""
     @State private var cover = ""
     @State private var lights = ""
+    @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
+    @State private var themeRoom = true
     @State private var opened: Data? = nil
     @State private var error: String? = nil
     @State private var note: String? = nil
@@ -186,6 +197,8 @@ struct SettingsView: View {
         case .displays: displaysPane
         case .automatic: automaticPane
         case .homeAssistant: homeAssistantPane
+        case .appearance: appearancePane
+        case .tuning: tuningPane
         case .app: appPane
         }
     }
@@ -287,9 +300,6 @@ struct SettingsView: View {
     var appPane: some View {
         Form {
             Section {
-                Toggle(isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) })) {
-                    Row("Light or dark mode from daylight", "circle.lefthalf.filled")
-                }.disabled(source == "off")
                 if m.hasBattery {
                     Toggle(isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) })) {
                         Row("Pause on battery", "battery.50")
@@ -311,6 +321,70 @@ struct SettingsView: View {
             }
         }
     }
+
+    var appearancePane: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) })) {
+                    Row("Light or dark mode from daylight", "circle.lefthalf.filled")
+                }.disabled(source == "off")
+                if source == "homeAssistant" {
+                    Toggle(isOn: $themeRoom) { Row("Count the blind and the room lights", "lightbulb") }
+                }
+            } footer: {
+                Text(source == "off" ? "Needs the sun or Home Assistant (Automatic)." :
+                     "Switches as soon as you turn it on. macOS's own Auto appearance follows only sunset; this also knows your blind and lights.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach(Tuning.appearanceFields.filter { themeRoom && source == "homeAssistant" || $0.group != "theme" || ["lightSunAbove", "darkSunBelow"].contains($0.key) }) { number($0) }
+            } header: { Text("When to switch") } footer: {
+                tuningFooter(Tuning.appearanceFields)
+            }
+        }
+    }
+
+    var tuningPane: some View {
+        Form {
+            Section {
+                ForEach(Tuning.tuningFields.filter { $0.group == "brightness" }) { number($0) }
+            } header: { Text("Daylight") } footer: {
+                Text("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach(Tuning.tuningFields.filter { $0.group == "timing" }) { number($0) }
+            } header: { Text("Timing") } footer: {
+                tuningFooter(Tuning.tuningFields)
+            }
+        }
+    }
+
+    func tuningFooter(_ fields: [TuningField]) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Empty fields use the default, shown in grey. Saved in config.json under \"tuning\".")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Reset to Defaults") {
+                for f in fields { tune[f.id] = "" }
+                if fields.contains(where: { $0.group == "theme" }) { themeRoom = true }
+            }
+            .controlSize(.small)
+            .disabled(fields.allSatisfy { (tune[$0.id] ?? "").isEmpty } && (themeRoom || !fields.contains { $0.group == "theme" }))
+        }
+    }
+
+    func number(_ f: TuningField) -> some View {
+        LabeledContent(f.label) {
+            HStack(spacing: 6) {
+                TextField(f.label, text: Binding(get: { tune[f.id] ?? "" }, set: { tune[f.id] = $0 }), prompt: Text(Self.fmt(f.defaultValue)))
+                    .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
+                Text(f.unit).foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
+            }
+        }
+    }
+
+    static func fmt(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
 
     func entity(_ title: String, _ icon: String, _ v: Binding<String>, _ example: String) -> some View {
         TextField(text: v, prompt: Text(example)) { Row(title, icon) }
@@ -342,7 +416,7 @@ struct SettingsView: View {
     func rightNow(_ d: MonitorDraft) -> Int? {
         guard let l = coords else { return nil }
         return target(day: d.day, blindDown: d.blindDown, night: d.night,
-                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false)
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned)
     }
 
     func caption(_ d: MonitorDraft) -> String {
@@ -359,6 +433,8 @@ struct SettingsView: View {
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
         haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""
+        tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
+        themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
             let cfg = c.monitors?.first { mon.name.localizedCaseInsensitiveContains($0.match) }
             let ha = cfg?.homeAssistant
@@ -375,10 +451,20 @@ struct SettingsView: View {
         if !blank && coords == nil { error = "Latitude is −90 to 90 and longitude −180 to 180, like 36.72 and -4.42."; return nil }
         if source == "sun" && coords == nil { error = "The sun needs a location: type it or use Locate Me."; return nil }
         if source == "homeAssistant" && haURL.trimmingCharacters(in: .whitespaces).isEmpty { error = "Home Assistant needs its URL."; return nil }
-        return SettingsEdit(source: source, latitude: coords?.0, longitude: coords?.1,
+        var values: [String: Double] = [:]
+        for f in Tuning.allFields {
+            let text = (tune[f.id] ?? "").trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+            if text.isEmpty { continue }
+            guard let v = Double(text) else { error = "\(f.label) \(f.unit): \"\(text)\" is not a number."; return nil }
+            values[f.id] = v
+        }
+        var e = SettingsEdit(source: source, latitude: coords?.0, longitude: coords?.1,
                             monitors: monitors.map { .init(name: $0.name, suggestedMatch: CLI.suggestMatch($0.name), label: $0.label,
                                                            day: Int($0.day.rounded()), blindDown: Int($0.blindDown.rounded()), night: Int($0.night.rounded())) },
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
+        e.tuning = values
+        e.themeRoom = themeRoom
+        return e
     }
 
     func save() {

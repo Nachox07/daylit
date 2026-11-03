@@ -140,8 +140,32 @@ and forth, and a manual switch stays until the automatic decision next changes.
 - macOS: it switches the system appearance through System Events, so the first switch asks for the
   Automation permission.
 
-Both apps: turn it on in the gear menu → *Light or dark mode from daylight*; the same menu has a
-manual *Switch to light/dark mode*.
+Both apps: turn it on in Settings → *Appearance* (or the gear menu → *Light or dark mode from
+daylight*); the gear menu also has a manual *Switch to light/dark mode*. The Appearance pane sets
+when it switches, and with Home Assistant *Count the blind and the room lights* can be turned off to
+follow the sun only.
+
+## Tuning
+
+Every number behind the rules can be changed, in Settings → *Appearance* and *Tuning*, or in the
+config file's optional `tuning` block. A missing key keeps the value below; values that make no
+sense (night above day, a dark edge above its light edge) are refused with the key's name.
+
+| Key | Default | What it does |
+|---|---|---|
+| `brightness.sunNight` | -3 | sun elevation (°) at or below which the night level applies |
+| `brightness.sunDay` | 12 | elevation from which the full daytime level applies |
+| `brightness.lightsBoost` | 5 | room lights on at dusk keep the monitor this many points above night |
+| `brightness.lightsBoostSunBelow` | 1.5 | …while the sun is below this elevation |
+| `theme.lightSunAbove` / `darkSunBelow` | 4 / 1 | light mode above, dark below (in between, no change) |
+| `theme.lightBlindAbove` / `darkBlindBelow` | 55 / 35 | blind open (%) needed for light mode / dark at or below |
+| `theme.whiteLightsAbove` / `whiteLightsBelow` | 78 / 67 | lights this bright (%) and white count as daylight / stop counting |
+| `theme.whiteSaturationMax` / `warmSaturationMin` | 35 / 45 | colour saturation for "white" / "warm" (0 white … 100 deep colour) |
+| `theme.room` | true | false: light/dark follows the sun only |
+| `timing.pollSeconds` / `batteryPollSeconds` | 30 / 120 | how often automatic mode checks |
+| `timing.idleSeconds` | 300 | no input this long: another computer may be using the monitors |
+| `timing.haFallbackSeconds` | 60 | Home Assistant down this long: the sun takes over |
+| `timing.manualKeepHours` | 12 | hand-set levels survive a restart this long |
 
 An idle computer, or one paused on battery, leaves the appearance alone.
 

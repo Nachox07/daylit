@@ -105,7 +105,7 @@ sealed class Controller {
 
         timer.Tick += (_, _) => _ = Tick("timer");
         idleWatch.Tick += (_, _) => {
-            bool idle = Win.IdleSeconds() >= Config.IdleSeconds;
+            bool idle = Win.IdleSeconds() >= Cfg.Tuned.IdleSeconds;
             if (wasIdle && !idle) _ = Tick("back from idle");
             wasIdle = idle;
         };
@@ -181,7 +181,7 @@ sealed class Controller {
     /// 30 s on mains power, 2 min on battery. Nothing periodic when there is no automatic source.
     void StartTimers() {
         if (Source == Source.Off || Paused) { timer.Stop(); idleWatch.Stop(); return; }
-        timer.Interval = TimeSpan.FromSeconds(Win.OnBattery ? 120 : 30);
+        timer.Interval = TimeSpan.FromSeconds(Win.OnBattery ? Cfg.Tuned.BatteryPollSeconds : Cfg.Tuned.PollSeconds);
         timer.Start(); idleWatch.Start();
     }
 
@@ -339,7 +339,7 @@ sealed class Controller {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
             if (m == null) {
                 var fresh = new Mon(d, Mon.Match(d, Cfg.Monitors));
-                if (holds.Restore(d.Key, Now) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
+                if (holds.Restore(d.Key, Now, Cfg.Tuned.ManualKeepHours * 3600) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
                 return fresh;
             }
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
@@ -404,7 +404,7 @@ sealed class Controller {
                 if (HaErrorRule.ShouldShow(HAClient.Transient, (haDownSince.Value - DateTime.UnixEpoch).TotalSeconds,
                                            (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds))
                     Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
-                if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= 60) s = SunInputs(mons);
+                if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= Cfg.Tuned.HaFallbackSeconds) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
         if (!haDown) haDownSince = null;
@@ -416,10 +416,11 @@ sealed class Controller {
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         AutoOn = s.Auto ?? Settings.Auto;
-        double sun = Sun.Fraction(s.Elev);
+        double sun = Cfg.Tuned.Fraction(s.Elev);
+        bool boost = s.Elev < Cfg.Tuned.LightsBoostSunBelow;
         // The Mac and this PC may share these monitors through input switching. Only the machine in
         // use drives them; coming back applies the current target and publishes again.
-        bool here = Win.IdleSeconds() < Config.IdleSeconds;
+        bool here = Win.IdleSeconds() < Cfg.Tuned.IdleSeconds;
         if (here != wasHere) Log.Write(here ? "back: applying targets" : "idle: paused");
         if (here && !wasHere) { ForgetHandSet(); foreach (var m in mons) m.Published = null; }
         wasHere = here;
@@ -429,14 +430,14 @@ sealed class Controller {
         var synced = new Dictionary<string, int>();
         if (Settings.SyncMonitors && mons.Length > 1) AdoptSync();
         if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) is int li && li >= 0) {
-            synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun), mons.Select(x => x.Key));
+            synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun, Cfg.Tuned, boost), mons.Select(x => x.Key));
         }
         bool holdsChanged = false;
         for (int i = 0; i < mons.Length; i++) {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
+            int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
             (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
             if (holds.Record(m.Key, m.LastSet, m.LastTarget, Now)) holdsChanged = true;
@@ -462,7 +463,7 @@ sealed class Controller {
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
-                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat);
+                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat, Cfg.Tuned);
     }
 
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
@@ -470,7 +471,7 @@ sealed class Controller {
     // back and forth. Only acts when the decision changes, so a manual switch stays until then.
     void UpdateLook(Inputs s, bool sunOnly) {
         if (!Settings.AutoLook) { lookDark = null; look.Reset(); return; }
-        bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat);
+        bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat, Cfg.Tuned);
         if (dark != lookDark) {
             Log.Write("theme: " + (dark ? "dark" : "light"));
             Look.SetDark(dark);

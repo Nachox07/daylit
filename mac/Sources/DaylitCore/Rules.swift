@@ -4,11 +4,12 @@ import Foundation
 /// Target level: the daytime value slides between "blind closed" and "blind open" with the blind
 /// position; the sun then blends it with the night value (0 below -3°, full daytime from 12°).
 /// Room lights on at night add a little.
-public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool) -> Int {
-    let sun = daylightFraction(elevation: elev)
+public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
+                   tuning t: Tuning = Tuning()) -> Int {
+    let sun = daylightFraction(elevation: elev, tuning: t)
     let daytime = blindDown + (day - blindDown) * pos / 100
     var v = night + (daytime - night) * sun
-    if lights && sun < 0.3 { v = max(v, night + 5) }
+    if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
     return Int(min(max(v, 0), 100).rounded())
 }
 
@@ -102,23 +103,29 @@ public struct LookRule: Equatable {
     public init() {}
 
     /// - lightsOn: the room lights are on and come from Home Assistant (bri 0-255, hs saturation 0 white ... ~60+ warm).
-    public mutating func wantDark(elev: Double, pos: Double, hasBlind: Bool, lightsOn: Bool, bri: Double, sat: Double) -> Bool {
+    public mutating func wantDark(elev: Double, pos: Double, hasBlind: Bool, lightsOn: Bool, bri: Double, sat: Double,
+                                  tuning t: Tuning = Tuning()) -> Bool {
+        let hasBlind = hasBlind && t.room, lightsOn = lightsOn && t.room
+        // Before any answer, the middle of each gap decides (3° and 50% with the defaults).
+        let midSun = (t.lightSunAbove + t.darkSunBelow) / 2 + 0.5, midBlind = (t.lightBlindAbove + t.darkBlindBelow) / 2 + 5
         if hasBlind {
-            daylight = elev > 4 && pos >= 55 ? true : elev < 1 || pos <= 35 ? false : daylight ?? (elev > 3 && pos >= 50)
+            daylight = elev > t.lightSunAbove && pos >= t.lightBlindAbove ? true
+                     : elev < t.darkSunBelow || pos <= t.darkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)
         } else {
-            daylight = elev > 4 ? true : elev < 1 ? false : daylight ?? (elev > 3)
+            daylight = elev > t.lightSunAbove ? true : elev < t.darkSunBelow ? false : daylight ?? (elev > midSun)
         }
-        let lit = lightsOn && bri > 0
-        whiteLights = lit && bri >= 200 && sat <= 35 ? true : !lit || bri < 170 || sat > 45 ? false : whiteLights ?? false
+        let lit = lightsOn && bri > 0, pct = bri / 2.55
+        whiteLights = lit && pct >= t.whiteLightsAbove && sat <= t.whiteSaturationMax ? true
+                    : !lit || pct < t.whiteLightsBelow || sat > t.warmSaturationMin ? false : whiteLights ?? false
         return !(daylight! || whiteLights!)
     }
 }
 
 /// "lights 80% white" / "lights 40% warm": the colour matters to how bright the room feels, so show it.
-public func lightsNote(lights: Bool, bri: Double, sat: Double) -> String {
+public func lightsNote(lights: Bool, bri: Double, sat: Double, tuning t: Tuning = Tuning()) -> String {
     guard lights else { return "" }
     guard bri > 0 else { return " · lights on" }
-    let tone = sat <= 35 ? " white" : sat > 45 ? " warm" : ""
+    let tone = sat <= t.whiteSaturationMax ? " white" : sat > t.warmSaturationMin ? " warm" : ""
     return " · lights \(Int((bri / 2.55).rounded()))%\(tone)"
 }
 
@@ -249,8 +256,8 @@ public struct SavedHolds: Equatable, Codable {
         entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, saved: now)
     }
     /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
-    public func restore(key: String, now: Double) -> HoldState? {
-        guard let e = entries[key], now - e.saved <= Self.maxAge, now >= e.saved else { return nil }
+    public func restore(key: String, now: Double, maxAge: Double = Self.maxAge) -> HoldState? {
+        guard let e = entries[key], now - e.saved <= maxAge, now >= e.saved else { return nil }
         return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget)
     }
 }

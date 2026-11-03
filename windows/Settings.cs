@@ -82,12 +82,22 @@ sealed class SettingsWindow : Window {
         lookBox = look;
         var openFile = new Button { Content = "Open config file" };
         openFile.Click += (_, _) => app.OpenConfig();
-        var appPane = Pane(Card(null, look, pause, login, Hint("These apply right away.")),
+        roomBox.Click += (_, _) => RefreshTuningRows();
+        var appearancePane = Pane(Card(null, look, roomBox,
+                Hint("Windows has no automatic light/dark mode of its own; this follows the sun, and with Home Assistant your blind and lights.")),
+            Card("When to switch", TuningRows(TuningField.Appearance)));
+        var tuningPane = Pane(
+            Card("Daylight", TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")),
+                 Hint("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")),
+            Card("Timing", TuningRows(TuningField.Tuning.Where(f => f.Group == "timing"))));
+        var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
             Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept.")));
 
         panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));
         panes.Add(("automatic", "Automatic", "\uE706", Color.FromRgb(0xF7, 0x8C, 0x1E), automaticPane));
         panes.Add(("homeAssistant", "Home Assistant", "ha", Color.FromRgb(0x18, 0xBC, 0xF2), haPane));
+        panes.Add(("appearance", "Appearance", "\uE771", Color.FromRgb(0x6E, 0x5B, 0xD6), appearancePane));
+        panes.Add(("tuning", "Tuning", "\uE9E9", Color.FromRgb(0xE8, 0x3E, 0x6C), tuningPane));
         panes.Add(("app", "App", "\uE713", Color.FromRgb(0x8A, 0x8A, 0x8A), appPane));
         foreach (var p in panes) {
             var item = new ListBoxItem { Tag = p.key, Padding = new Thickness(10, 8, 10, 8), Content = new StackPanel {
@@ -182,6 +192,54 @@ sealed class SettingsWindow : Window {
         paneHost.Content = p.content;
     }
 
+    readonly CheckBox roomBox = new() { Content = "Count the blind and the room lights", Margin = new Thickness(0, 2, 0, 2) };
+    readonly Dictionary<string, (FrameworkElement row, TextBox box)> tuneRows = new();
+
+    /// One row per number: label, a box that shows the default in grey while empty, the unit.
+    /// Empty means the default; Reset clears them all.
+    FrameworkElement TuningRows(IEnumerable<TuningField> fields) {
+        var list = fields.ToList();
+        var stack = new StackPanel();
+        foreach (var f in list) {
+            var box = new TextBox { TextAlignment = TextAlignment.Right };
+            var hint = new TextBlock { Text = Fmt(f.Default), Opacity = 0.45, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Right,
+                                       VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+            box.TextChanged += (_, _) => hint.Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+            System.Windows.Automation.AutomationProperties.SetName(box, f.Label);
+            System.Windows.Automation.AutomationProperties.SetHelpText(box, $"Default {Fmt(f.Default)}{f.Unit}");
+            var cell = new Grid { Width = 90, Children = { box, hint } };
+            var g = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
+            var label = new TextBlock { Text = f.Label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 12, 0) };
+            var unit = new TextBlock { Text = f.Unit, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75, Margin = new Thickness(8, 0, 0, 0) };
+            Grid.SetColumn(cell, 1); Grid.SetColumn(unit, 2);
+            g.Children.Add(label); g.Children.Add(cell); g.Children.Add(unit);
+            tuneRows[f.Id] = (g, box);
+            stack.Children.Add(g);
+        }
+        var reset = new Button { Content = "Reset to defaults", HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        reset.Click += (_, _) => {
+            foreach (var f in list) tuneRows[f.Id].box.Text = "";
+            if (list.Any(f => f.Group == "theme")) { roomBox.IsChecked = true; RefreshTuningRows(); }
+        };
+        stack.Children.Add(Hint("Empty boxes use the default, shown in grey. Saved in config.json under \"tuning\"."));
+        stack.Children.Add(reset);
+        return stack;
+    }
+
+    static string Fmt(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// The blind and lights thresholds matter only with Home Assistant and "count the blind and lights" on.
+    void RefreshTuningRows() {
+        bool ha = SourceTag == "homeAssistant", room = ha && roomBox.IsChecked == true;
+        roomBox.Visibility = ha ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var f in TuningField.Appearance)
+            if (tuneRows.TryGetValue(f.Id, out var r))
+                r.row.Visibility = room || f.Key is "lightSunAbove" or "darkSunBelow" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     /// Snapshots: the window's content, to render offscreen.
     public FrameworkElement Detach() { var c = (FrameworkElement)Content; Content = null; return c; }
 
@@ -267,6 +325,9 @@ sealed class SettingsWindow : Window {
         lon.Text = c.Location?.Longitude.ToString("0.00", CultureInfo.InvariantCulture) ?? "";
         var h = c.HomeAssistant;
         haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? "";
+        var set = TuningField.SetValues(c.Tuning);
+        foreach (var (id, r) in tuneRows) r.box.Text = set.TryGetValue(id, out var v) ? Fmt(v) : "";
+        roomBox.IsChecked = c.Tuning?.Theme?.Room ?? true;
 
         monitors.Children.Clear(); rows.Clear();
         var external = app.Mons.Where(m => !m.D.Internal).ToList();
@@ -301,6 +362,7 @@ sealed class SettingsWindow : Window {
             if (item.Tag as string == "homeAssistant") item.Visibility = SourceTag == "homeAssistant" ? Visibility.Visible : Visibility.Collapsed;
         if (SourceTag != "homeAssistant" && (nav.SelectedItem as ListBoxItem)?.Tag as string == "homeAssistant") nav.SelectedIndex = 1;
         if (lookBox != null) lookBox.IsEnabled = SourceTag != "off";
+        RefreshTuningRows();
         Refresh();
     }
 
@@ -314,7 +376,7 @@ sealed class SettingsWindow : Window {
         double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
-            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, Daylit.Sun.Fraction(el))}%" : "–";
+            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned)}%" : "–";
             var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
             r.caption.Text = text;
@@ -333,10 +395,18 @@ sealed class SettingsWindow : Window {
         if (!blank && Coords == null) { Say("Latitude is −90 to 90 and longitude −180 to 180, like 36.72 and -4.42.", true); return; }
         if (SourceTag == "sun" && Coords == null) { Say("The sun needs a location: type it or use Locate me.", true); return; }
         if (SourceTag == "homeAssistant" && haUrl.Text.Trim() == "") { Say("Home Assistant needs its URL.", true); return; }
+        var values = new Dictionary<string, double>();
+        foreach (var f in TuningField.All) {
+            if (!tuneRows.TryGetValue(f.Id, out var r)) continue;
+            string text = r.box.Text.Trim();
+            if (text == "") continue;
+            if (Num(text) is not double v) { Say($"{f.Label} {f.Unit}: \"{text}\" is not a number.", true); return; }
+            values[f.Id] = v;
+        }
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon,
             rows.Select(r => new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
                                                       (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value)).ToList(),
-            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text);
+            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true);
         try {
             string? now = File.Exists(path) ? File.ReadAllText(path) : null;
             if (now != opened) {
