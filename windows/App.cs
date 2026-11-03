@@ -11,11 +11,15 @@ using WF = System.Windows.Forms;
 namespace Daylit;
 
 static class Program {
+    public static EventWaitHandle? ShowSignal;
     [STAThread]
     static int Main(string[] args) {
         if (Cli.Run(args) is int code) return code;   // --list-monitors, --check-config (see AGENTS.md)
         using var mutex = new Mutex(true, @"Local\Daylit.Tray", out bool first);
-        if (!first) return 0;
+        // Starting Daylit again (Start menu, shortcut) opens the running one's panel.
+        using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Daylit.Show");
+        if (!first) { show.Set(); return 0; }
+        ShowSignal = show;
         WF.Application.EnableVisualStyles();   // tray menu
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
 #pragma warning disable WPF0001   // Fluent theme API is marked experimental
@@ -89,6 +93,8 @@ sealed class Controller {
 
         StartTimers();
         _ = Tick("start");
+        if (Program.ShowSignal is { } sig)
+            new Thread(() => { while (sig.WaitOne()) ui.BeginInvoke(ShowPanel); }) { IsBackground = true, Name = "show signal" }.Start();
         if (Source == Source.HomeAssistant && HAClient.Token == null) ui.BeginInvoke(AskToken);
     }
 

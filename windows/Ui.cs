@@ -76,6 +76,7 @@ sealed class Flyout : Window {
         header.Children.Add(new TextBlock { Text = "Daylit", FontSize = 15, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         var gear = new Button { Content = new TextBlock { Text = Palette.Gear, FontFamily = Palette.Icons, FontSize = 14 },
                                 Padding = new Thickness(8, 6, 8, 6), ToolTip = "Settings" };
+        System.Windows.Automation.AutomationProperties.SetName(gear, "Settings");
         gear.Click += (_, _) => GearMenu(gear);
         Grid.SetColumn(gear, 1);
         header.Children.Add(gear);
@@ -173,6 +174,7 @@ sealed class Flyout : Window {
             var high = new TextBlock { Text = Palette.SunHigh, FontFamily = Palette.Icons, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Foreground = Palette.Secondary, Tag = "secondary" };
             var s = new Slider { Minimum = 0, Maximum = 100, SmallChange = 1, LargeChange = 6, TickFrequency = 1, IsSnapToTickEnabled = true,
                                  IsMoveToPointEnabled = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0) };
+            System.Windows.Automation.AutomationProperties.SetName(s, $"{m.Label} brightness");   // screen readers and agents
             s.ValueChanged += (_, e) => {
                 if (syncing) return;
                 int v = (int)Math.Round(e.NewValue);
