@@ -13,6 +13,10 @@ VERSION="${DAYLIT_VERSION:-0.0.0}"   # 0.0.0 = a local build; the log calls it "
 ARCHS=""
 [ "${DAYLIT_UNIVERSAL:-0}" = 1 ] && ARCHS="--arch arm64 --arch x86_64"
 swift build -c release --product Daylit $ARCHS
+# A copy of this app that is running when its files are replaced loses its Local Network access
+# (every Home Assistant call fails as "offline" until it restarts), so quit it now and reopen it below.
+RUNNING=$(pgrep -f "$APP/Contents/MacOS/Daylit" || true)
+if [ -n "$RUNNING" ]; then kill $RUNNING; while pgrep -f "$APP/Contents/MacOS/Daylit" >/dev/null; do sleep 0.2; done; fi
 cp "$(swift build -c release --show-bin-path $ARCHS)/Daylit" "$APP/Contents/MacOS/Daylit"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,3 +40,4 @@ PL
 ID=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')
 codesign --force -s "${ID:--}" "$APP"
 echo "built $APP"
+if [ -n "$RUNNING" ]; then open "$APP"; echo "restarted the running Daylit"; fi
