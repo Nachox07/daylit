@@ -1,6 +1,6 @@
 // The tray flyout, the on-screen indicator, the token prompt and the global hotkeys.
-// WPF with the Fluent theme (Application.ThemeMode) for the controls; the windows themselves get a
-// system acrylic backdrop on Windows 11 22H2+ and a solid colour elsewhere.
+// WPF with the Fluent theme (Application.ThemeMode) for the controls; the flyout gets the Mica Alt
+// backdrop on Windows 11 22H2+ (with transparency effects on) and a solid colour elsewhere.
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -32,7 +32,7 @@ static class Palette {
     /// The Windows accent colour (DWM stores it as ABGR).
     public static Brush Accent {
         get {
-            if (Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM", "AccentColor", null) is int abgr) {
+            if (Theme.Force == null && Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM", "AccentColor", null) is int abgr) {
                 uint v = unchecked((uint)abgr);
                 var b = new SolidColorBrush(Color.FromRgb((byte)v, (byte)(v >> 8), (byte)(v >> 16))); b.Freeze(); return b;
             }
@@ -47,12 +47,12 @@ static class Palette {
 sealed class Flyout : Window {
     readonly Controller app;
     readonly StackPanel rows = new();
-    readonly TextBlock offHint, autoSub, hint, error;
-    readonly CheckBox auto, look, pause, login;
-    readonly Button modeBtn;
-    readonly Border autoCard;
+    readonly TextBlock offHint, autoSub, error;
+    readonly CheckBox auto;
+    readonly Grid autoRow;
     readonly List<Border> cards = new();
     readonly List<(Mon m, Slider s, TextBlock pct, TextBlock note, Border card)> rowViews = new();
+    Button? link;
     IntPtr hwnd;
     bool syncing;
 
@@ -68,7 +68,8 @@ sealed class Flyout : Window {
             CaptionHeight = 0, GlassFrameThickness = new Thickness(-1), ResizeBorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false });
 
-        var root = new StackPanel { Margin = new Thickness(16, 14, 16, 14) };
+        // Daily controls only: the monitors and Automatic. Everything set once lives in the gear menu.
+        var root = new StackPanel { Margin = new Thickness(16, 14, 16, 16) };
 
         var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
         header.ColumnDefinitions.Add(new ColumnDefinition());
@@ -84,40 +85,29 @@ sealed class Flyout : Window {
 
         root.Children.Add(rows);
 
-        offHint = Small("Set a location or Home Assistant in the config file for automatic brightness.");
-        offHint.Margin = new Thickness(2, 0, 2, 10);
+        offHint = Small("Set a location or Home Assistant in the config file (gear menu) for automatic brightness.");
+        offHint.Margin = new Thickness(2, 4, 2, 0);
         root.Children.Add(offHint);
 
-        auto = new CheckBox { Content = "Automatic brightness" };
+        // "Automatic": a label, a one-line caption with what it is following, and a switch on the right.
+        autoRow = new Grid { Margin = new Thickness(2, 4, 0, 0) };
+        autoRow.ColumnDefinitions.Add(new ColumnDefinition());
+        autoRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        autoSub = Small("");
+        autoSub.TextWrapping = TextWrapping.NoWrap; autoSub.TextTrimming = TextTrimming.CharacterEllipsis;
+        var autoText = new StackPanel { VerticalAlignment = VerticalAlignment.Center,
+                                        Children = { new TextBlock { Text = "Automatic", FontWeight = FontWeights.SemiBold }, autoSub } };
+        auto = new CheckBox { Style = SwitchStyle.Value, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        System.Windows.Automation.AutomationProperties.SetName(auto, "Automatic brightness");
         // Checked/Unchecked, not Click: UI Automation (Narrator, Voice Access, agents) toggles without a click.
         OnToggle(auto, on => app.SetAuto(on));
-        autoSub = Small("");
-        autoSub.Margin = new Thickness(28, 0, 0, 6);
-        look = new CheckBox { Content = "Light or dark mode from daylight" };
-        OnToggle(look, on => app.SetLook(on));
-        pause = new CheckBox { Content = "Pause on battery", ToolTip = "On battery: no automatic changes and no Home Assistant traffic. Sliders and hotkeys still work." };
-        OnToggle(pause, on => app.SetPause(on));
-        modeBtn = new Button { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(12, 5, 12, 6) };
-        modeBtn.Click += (_, _) => app.ToggleDark();
-        autoCard = Card(new StackPanel { Children = { auto, autoSub, look, pause, modeBtn } });
-        autoCard.Margin = new Thickness(0, 0, 0, 10);
-        root.Children.Add(autoCard);
+        auto.Checked += (_, _) => PaintSwitch(auto); auto.Unchecked += (_, _) => PaintSwitch(auto);
+        Grid.SetColumn(auto, 1);
+        autoRow.Children.Add(autoText); autoRow.Children.Add(auto);
+        root.Children.Add(autoRow);
 
-        hint = Small(""); hint.Margin = new Thickness(2, 0, 2, 6);
-        error = Small(""); error.Margin = new Thickness(2, 0, 2, 6);
-        root.Children.Add(hint);
+        error = Small(""); error.Margin = new Thickness(2, 10, 2, 0);
         root.Children.Add(error);
-
-        var footer = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition());
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        login = new CheckBox { Content = "Open at sign-in", VerticalAlignment = VerticalAlignment.Center };
-        OnToggle(login, on => Win.StartsWithWindows = on);
-        var quit = new Button { Content = "Quit", Padding = new Thickness(14, 5, 14, 6) };
-        quit.Click += (_, _) => app.Quit();
-        Grid.SetColumn(quit, 1);
-        footer.Children.Add(login); footer.Children.Add(quit);
-        root.Children.Add(footer);
 
         Content = root;
         SourceInitialized += (_, _) => { hwnd = new WindowInteropHelper(this).Handle; ApplyTheme(); };
@@ -125,6 +115,41 @@ sealed class Flyout : Window {
         SizeChanged += (_, _) => { if (IsVisible) PlaceAtTray(); };   // grows with the monitor list
         ApplyTheme();
         Rebuild();
+    }
+
+    /// A Windows 11-style switch for a CheckBox (WPF's Fluent theme has no ToggleSwitch). Its colours
+    /// come from Background / BorderBrush / Foreground, set by PaintSwitch from our palette.
+    static readonly Lazy<Style> SwitchStyle = new(() => (Style)System.Windows.Markup.XamlReader.Parse("""
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="CheckBox">
+          <Setter Property="Cursor" Value="Hand"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="CheckBox">
+                <Grid Background="Transparent">
+                  <Border Width="40" Height="20" CornerRadius="10" BorderThickness="1"
+                          BorderBrush="{TemplateBinding BorderBrush}" Background="{TemplateBinding Background}"/>
+                  <Ellipse x:Name="Knob" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="12" Height="12" HorizontalAlignment="Left"
+                           Margin="5,0,0,0" Fill="{TemplateBinding Foreground}"/>
+                </Grid>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="Knob" Property="Margin" Value="23,0,0,0"/>
+                  </Trigger>
+                  <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.5"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+        """));
+
+    static void PaintSwitch(CheckBox c) {
+        bool on = c.IsChecked == true;
+        c.Background = on ? Palette.Accent : Brushes.Transparent;
+        c.BorderBrush = on ? Palette.Accent : Palette.Secondary;
+        c.Foreground = on ? Brushes.White : Palette.Secondary;
     }
 
     static TextBlock Small(string t) => new() { Text = t, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = Palette.Secondary, Tag = "secondary" };
@@ -144,23 +169,78 @@ sealed class Flyout : Window {
     void GearMenu(Button anchor) {
         var m = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
         MenuItem Item(string text, Action a) { var i = new MenuItem { Header = text }; i.Click += (_, _) => a(); return i; }
-        m.Items.Add(Item("Open config file", app.OpenConfig));
-        m.Items.Add(Item("Reload config", app.Reload));
+        MenuItem Check(string text, bool on, Action<bool> set) {
+            var i = new MenuItem { Header = text, IsCheckable = true, IsChecked = on };
+            i.Click += (_, _) => set(i.IsChecked);
+            return i;
+        }
+        m.Items.Add(Item(Theme.Dark ? "Switch to light mode" : "Switch to dark mode", app.ToggleDark));
+        var look = Check("Light or dark mode from daylight", Settings.AutoLook, app.SetLook);
+        look.IsEnabled = app.Source != Source.Off;
+        m.Items.Add(look);
+        if (Win.HasBattery) m.Items.Add(Check("Pause on battery", app.PauseOnBattery, app.SetPause));
+        m.Items.Add(Check("Open at sign-in", Win.StartsWithWindows, on => Win.StartsWithWindows = on));
+        m.Items.Add(new Separator());
         m.Items.Add(Item("Keyboard shortcuts…", app.EditShortcuts));
         if (app.Source == Source.HomeAssistant) m.Items.Add(Item("Home Assistant token…", app.AskToken));
+        m.Items.Add(Item("Open config file", app.OpenConfig));
+        m.Items.Add(Item("Reload config", app.Reload));
+        m.Items.Add(new Separator());
+        m.Items.Add(Item("Quit Daylit", app.Quit));
         m.IsOpen = true;
+    }
+
+    /// The round link button that sits between the first two monitor cards.
+    Button LinkButton() {
+        var b = new Button {
+            Width = 26, Height = 26, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, -9, 0, -9),
+            Content = new TextBlock { Text = "", FontFamily = Palette.Icons, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+        };
+        b.Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse("""
+            <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
+              <Border CornerRadius="13" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+            </ControlTemplate>
+            """);
+        b.Cursor = WI.Cursors.Hand;
+        b.Click += (_, _) => app.SetSync(!Settings.SyncMonitors);
+        System.Windows.Automation.AutomationProperties.SetName(b, "Sync monitors");
+        return b;
+    }
+
+    void StyleLink() {
+        if (link == null) return;
+        bool on = Settings.SyncMonitors;
+        link.Background = on ? Palette.Accent : Palette.Solid;
+        link.BorderBrush = on ? Palette.Accent : Palette.CardBorder;
+        link.Foreground = on ? Brushes.White : Palette.Secondary;
+        link.ToolTip = on ? "Monitors linked: brightness changes apply to every monitor. Click to unlink."
+                          : "Link monitors: brightness changes apply to every monitor, keeping how much brighter each one is.";
+        System.Windows.Automation.AutomationProperties.SetHelpText(link, on ? "On" : "Off");
+        foreach (var r in rowViews) r.card.BorderBrush = on ? Palette.Accent : Palette.CardBorder;
+    }
+
+    string KeysHint {
+        get {
+            string keys = Shortcut.Pair(Settings.Up, Settings.Down);
+            return app.HotkeysOk ? $"{keys}: the screen with the active window. Add Shift for fine steps."
+                                 : $"{keys} are taken by another app. Change them in the gear menu.";
+        }
     }
 
     /// One card per detected monitor; called when the monitor list or the config changes.
     public void Rebuild() {
         foreach (var r in rowViews) cards.Remove(r.card);
-        rows.Children.Clear(); rowViews.Clear();
+        rows.Children.Clear(); rowViews.Clear(); link = null;
         if (app.Mons.Count == 0) {
             var none = Small("No external monitors. Plug one in and Daylit takes over; the built-in screen stays with Windows.");
-            none.Margin = new Thickness(2, 0, 2, 10);
+            none.Margin = new Thickness(2, 0, 2, 4);
             rows.Children.Add(none);
         }
-        foreach (var m in app.Mons) {
+        for (int i = 0; i < app.Mons.Count; i++) {
+            var m = app.Mons[i];
             var top = new Grid { Margin = new Thickness(0, 0, 0, 4) };
             top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             top.ColumnDefinitions.Add(new ColumnDefinition());
@@ -183,6 +263,8 @@ sealed class Flyout : Window {
             var s = new Slider { Minimum = 0, Maximum = 100, SmallChange = 1, LargeChange = 6, TickFrequency = 1, IsSnapToTickEnabled = true,
                                  IsMoveToPointEnabled = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0) };
             System.Windows.Automation.AutomationProperties.SetName(s, $"{m.Label} brightness");   // screen readers and agents
+            s.ToolTipOpening += (_, _) => s.ToolTip = KeysHint;
+            s.ToolTip = KeysHint;
             s.ValueChanged += (_, e) => {
                 if (syncing) return;
                 int v = (int)Math.Round(e.NewValue);
@@ -193,9 +275,14 @@ sealed class Flyout : Window {
             bottom.Children.Add(low); bottom.Children.Add(s); bottom.Children.Add(high);
 
             var card = Card(new StackPanel { Children = { top, bottom } });
-            card.Margin = new Thickness(0, 0, 0, 8);
             rows.Children.Add(card);
             rowViews.Add((m, s, pct, note, card));
+            if (i < app.Mons.Count - 1) {
+                // The gap between cards; between the first two it holds the link button, drawn over both cards.
+                var gap = new Grid { Height = 10 };
+                if (i == 0) { link = LinkButton(); gap.Children.Add(link); Panel.SetZIndex(gap, 1); }
+                rows.Children.Add(gap);
+            }
         }
         Sync();
     }
@@ -209,7 +296,7 @@ sealed class Flyout : Window {
                 s.IsEnabled = m.Usable;
                 card.Opacity = m.Usable ? 1 : 0.55;
                 note.Text = m.Untried ? "level not reported" : m.Reads == ReadState.Silent ? "refused (DDC/CI off?)"
-                          : !m.On ? "no brightness control" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
+                          : !m.On ? "no control: turn on HDR, or DDC/CI in its menu" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
                           : m.Reads == ReadState.WriteOnly ? "no readback" : "";
                 if (m.Cur is int c) {
                     bool held = s.IsMouseCaptureWithin || (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;
@@ -217,25 +304,17 @@ sealed class Flyout : Window {
                     pct.Text = (held ? (int)Math.Round(s.Value) : c) + "%";
                 } else { pct.Text = "–"; if (m.Untried && !s.IsMouseCaptureWithin) s.Value = 50; }
             }
+            StyleLink();
             bool automatic = app.Source != Source.Off;
             offHint.Visibility = automatic ? Visibility.Collapsed : Visibility.Visible;
-            autoCard.Visibility = automatic ? Visibility.Visible : Visibility.Collapsed;
+            autoRow.Visibility = automatic ? Visibility.Visible : Visibility.Collapsed;
             auto.IsChecked = app.AutoOn;
+            PaintSwitch(auto);
             autoSub.Text = app.Subtitle;
+            autoSub.ToolTip = app.Subtitle == "" ? null : app.Subtitle;
             autoSub.Visibility = app.Subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
-            look.IsChecked = Settings.AutoLook;
-            pause.IsChecked = app.PauseOnBattery;
-            pause.Visibility = Win.HasBattery ? Visibility.Visible : Visibility.Collapsed;
-            modeBtn.Content = Theme.Dark ? "Switch to light mode" : "Switch to dark mode";
-            bool any = app.Mons.Any(m => m.On);
-            string keysText = Shortcut.Pair(Settings.Up, Settings.Down);
-            hint.Text = !any ? $"{keysText} change brightness once a monitor with brightness control is connected."
-                      : app.HotkeysOk ? $"{keysText}: the screen with the active window. Add Shift for fine steps."
-                      : $"{keysText} are taken by another app. Change them in the gear menu.";
-            hint.Visibility = app.Mons.Count == 0 ? Visibility.Collapsed : Visibility.Visible;   // the empty state says it
             error.Text = app.Error ?? "";
             error.Visibility = app.Error == null ? Visibility.Collapsed : Visibility.Visible;
-            login.IsChecked = Win.StartsWithWindows;
         } finally { syncing = false; }
     }
 
@@ -243,6 +322,8 @@ sealed class Flyout : Window {
     public void ApplyTheme() {
         Foreground = Palette.Text;
         foreach (var c in cards) { c.Background = Palette.Card; c.BorderBrush = Palette.CardBorder; }
+        StyleLink();
+        PaintSwitch(auto);
         foreach (var t in FindSecondary(this)) t.Foreground = t == error ? Palette.Error : Palette.Secondary;
         error.Foreground = Palette.Error;
         if (hwnd == IntPtr.Zero) { Background = Win.HasBackdrop ? Brushes.Transparent : Palette.Solid; return; }
@@ -322,17 +403,24 @@ sealed class Osd : Window {
     }
 
     public void Flash(string name, int v, string gdi) {
+        Fill(name, v);
+        BeginAnimation(OpacityProperty, null); Opacity = 1;
+        if (!IsVisible) Show();
+        var b = (WF.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == gdi) ?? WF.Screen.PrimaryScreen!).Bounds;
+        if (hwnd != IntPtr.Zero) Win.Place(hwnd, (w, h) => (b.Left + (b.Width - w) / 2, b.Bottom - (int)(b.Height * 0.12) - h));
+        hideT.Stop(); hideT.Start();
+    }
+
+    /// The indicator's content alone, filled in and detached from the window (snapshots).
+    public FrameworkElement Detach(string name, int v) { Fill(name, v); Content = null; panel.Width = Width; return panel; }
+
+    void Fill(string name, int v) {
         panel.Background = Palette.Osd; panel.BorderBrush = Palette.CardBorder;
         Foreground = Palette.Text; track.Background = Palette.Track; fill.Background = Palette.Accent;
         label.Text = name; pct.Text = v + "%";
         bar.ColumnDefinitions[0].Width = new GridLength(Math.Max(v, 0.0001), GridUnitType.Star);
         bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(100 - v, 0.0001), GridUnitType.Star);
         fill.Visibility = v > 0 ? Visibility.Visible : Visibility.Hidden;
-        BeginAnimation(OpacityProperty, null); Opacity = 1;
-        if (!IsVisible) Show();
-        var b = (WF.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == gdi) ?? WF.Screen.PrimaryScreen!).Bounds;
-        if (hwnd != IntPtr.Zero) Win.Place(hwnd, (w, h) => (b.Left + (b.Width - w) / 2, b.Bottom - (int)(b.Height * 0.12) - h));
-        hideT.Stop(); hideT.Start();
     }
 }
 

@@ -346,3 +346,88 @@ final class WriteOnlyTests: XCTestCase {
         XCTAssertTrue(held.manual)
     }
 }
+
+final class SyncTests: XCTestCase {
+    func testCaptureKeepsOffsetsFromTheFirstMonitor() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40), (key: "c", level: 75)])
+        XCTAssertEqual(s.offsets, ["a": 0, "b": -20, "c": 15])
+    }
+
+    func testMovingOneMovesTheOthersBySameAmount() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        XCTAssertEqual(s.follow(key: "a", level: 70, keys: ["a", "b"]), ["b": 50])
+        XCTAssertEqual(s.follow(key: "b", level: 10, keys: ["a", "b"]), ["a": 30])
+    }
+
+    func testClampingDoesNotLoseTheOffset() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        XCTAssertEqual(s.follow(key: "a", level: 10, keys: ["a", "b"]), ["b": 0])     // clamped at 0
+        XCTAssertEqual(s.follow(key: "a", level: 50, keys: ["a", "b"]), ["b": 30])    // back in line
+        XCTAssertEqual(s.follow(key: "b", level: 100, keys: ["a", "b"]), ["a": 100])  // 120 clamped
+    }
+
+    func testAutomaticTargetFromTheLeader() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 45)])
+        XCTAssertEqual(s.targets(leader: "a", leaderTarget: 80, keys: ["a", "b"]), ["a": 80, "b": 65])
+        // The second monitor can lead too (the first one is unplugged): same group, same offsets.
+        XCTAssertEqual(s.targets(leader: "b", leaderTarget: 20, keys: ["b"]), ["b": 20])
+    }
+
+    func testNewMonitorJoinsAtItsCurrentOffset() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        s.adopt([(key: "a", level: 70), (key: "c", level: 50)])
+        XCTAssertEqual(s.offsets["c"], -20)   // base is 70 now
+        XCTAssertEqual(s.offsets["b"], -20)   // unplugged monitor keeps its offset
+    }
+
+    func testGroupStartsAgainWhenNoKnownMonitorIsConnected() {
+        var s = SyncOffsets(levels: [(key: "a", level: 60), (key: "b", level: 40)])
+        s.adopt([(key: "x", level: 30), (key: "y", level: 50)])
+        XCTAssertEqual(s.offsets, ["x": 0, "y": 20])
+    }
+
+    func testUnknownMonitorIsIndependent() {
+        let s = SyncOffsets(levels: [(key: "a", level: 60)])
+        XCTAssertEqual(s.follow(key: "z", level: 30, keys: ["a", "z"]), [:])
+        XCTAssertEqual(s.follow(key: "a", level: 30, keys: ["a", "z"]), [:])
+    }
+
+    // MARK: saved hand-set state
+
+    func testSavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
+        var saved = SavedHolds()
+        saved.record(key: "A", state: HoldState(lastSet: 70, lastTarget: 70), now: 1000)
+        let back = try! JSONDecoder().decode(SavedHolds.self, from: try! JSONEncoder().encode(saved))
+        let st = back.restore(key: "A", now: 1000 + 3600)
+        XCTAssertEqual(st, HoldState(lastSet: 70, lastTarget: 70))
+        // The monitor is at 40 (set by hand before the restart) and the target barely moved: kept.
+        let s = decide(current: 40, want: 72, remote: nil, state: st!, here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertNil(s.write)
+        XCTAssertTrue(s.manual)
+    }
+
+    func testWithoutSavedHoldARestartAppliesTheTarget() {
+        let s = decide(current: 40, want: 72, remote: nil, state: HoldState(), here: true, auto: true, dragging: false, hold: 5)
+        XCTAssertEqual(s.write, 72)
+    }
+
+    func testSavedHoldExpiresAndEmptyStateIsDropped() {
+        var saved = SavedHolds()
+        saved.record(key: "A", state: HoldState(lastSet: 70, lastTarget: 70), now: 0)
+        XCTAssertNil(saved.restore(key: "A", now: SavedHolds.maxAge + 1))
+        XCTAssertNil(saved.restore(key: "B", now: 10))
+        saved.record(key: "A", state: HoldState(), now: 5)
+        XCTAssertTrue(saved.entries.isEmpty)
+    }
+
+    func testHAErrorTransientStaysQuietForAMinute() {
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: nil, now: 100))
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 100))
+        XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 159))
+        XCTAssertTrue(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 160))
+    }
+    func testHAErrorTokenProblemsShowAtOnce() {
+        XCTAssertTrue(HAErrorRule.shouldShow(transient: false, downSince: nil, now: 0))
+        XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
+    }
+}

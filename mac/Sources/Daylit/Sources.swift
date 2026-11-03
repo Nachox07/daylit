@@ -29,6 +29,8 @@ enum HAClient {
     }
 
     enum Failure: Error { case noToken, rejected, unreachable, badAnswer }
+    /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
+    nonisolated(unsafe) static var lastCause: String?
 
     static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]) async -> Result<Data, Failure> {
         let name = ha.tokenName ?? "daylit-home-assistant"
@@ -41,10 +43,18 @@ enum HAClient {
         r.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        guard let (d, resp) = try? await URLSession.shared.data(for: r) else { return .failure(.unreachable) }
+        let d: Data, resp: URLResponse
+        do { (d, resp) = try await URLSession.shared.data(for: r) }
+        catch {
+            let e = error as NSError
+            lastCause = "\(e.domain) \(e.code): \(e.localizedDescription)"
+            return .failure(.unreachable)
+        }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 401 { tokenCache[name] = nil; return .failure(.rejected) }
-        return code < 300 ? .success(d) : .failure(.unreachable)
+        if code == 401 { tokenCache[name] = nil; lastCause = "HTTP 401"; return .failure(.rejected) }
+        if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.unreachable) }
+        lastCause = nil
+        return .success(d)
     }
     static func state(_ ha: HAConfig, _ mons: [Mon]) async -> Result<HAState, Failure> {
         switch await call(ha, "/api/template", ["template": HATemplate.build(ha, mons.map { ($0.uuid, $0.ha) })]) {

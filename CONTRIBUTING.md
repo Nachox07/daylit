@@ -49,6 +49,33 @@ dotnet test windows/tests/Daylit.Tests.csproj        # Rules.cs + Config.cs, xUn
 CI runs both before building. Put new logic where it can be tested (`DaylitCore` / `Rules.cs`) and
 keep the app files for the parts that touch the OS: displays, keys, windows, network.
 
+### UI snapshots (visual regression)
+
+Each app can draw its panel and on-screen indicator offscreen from fixed, made-up state (two
+monitors, linked, one set by hand, none; no hardware and no Home Assistant), in light and dark at
+2x. The baselines are committed in `mac/Tests/Snapshots/` and `windows/tests/Snapshots/`, so a
+pull request that changes the UI shows the before and after in GitHub's image diff (side by side,
+swipe, onion skin).
+
+CI renders them on every push and compares with the baselines: an image fails when more than 0.5%
+of its pixels change (anti-aliasing noise stays well below). The `snapshots-mac` /
+`snapshots-windows` artifacts of the run hold the new renders and, for a failure, `diff-*.png`
+with the changed pixels in red.
+
+When the change is intended, re-record the baselines on CI's machines (fonts and rendering differ
+slightly between OS versions, so baselines made on your own computer would not match):
+
+```sh
+gh workflow run build.yml --ref <your-branch> -f record=true
+gh run download <run-id> -n snapshots-mac -D mac/Tests/Snapshots
+gh run download <run-id> -n snapshots-windows -D windows/tests/Snapshots
+git add mac/Tests/Snapshots windows/tests/Snapshots && git commit -m "UI snapshots: <what changed>"
+```
+
+Locally: `Daylit --render-snapshots <dir>` and `Daylit --compare-snapshots <baseline> <dir>`
+(Windows: pipe to `Out-String`). The Mac's Liquid Glass is not part of the snapshots: they draw a
+plain background so they look the same on every macOS version.
+
 ## Rules for every change
 
 - **Tests pass and 0 errors before you push**, and on macOS 0 warnings too. CI tests and builds both apps on every push
@@ -87,6 +114,7 @@ macOS environment variables:
 | `DAYLIT_NO_KEYS=1` | skip the Accessibility prompt and the brightness-key tap |
 | `DAYLIT_DEBUG_NO_DISPLAYS=1` | act as if no external monitor were connected (the empty state) |
 | `DAYLIT_SHOW=panel` | open the panel right after start and keep it open (screenshots, recordings) |
+| `DAYLIT_DEMO=1` | scripted demo on made-up monitors for the GIF and videos; touches nothing real (`DAYLIT_DEMO_SCREEN` picks the screen) |
 | `DAYLIT_APPEARANCE=light` / `dark` | force the app's appearance (screenshots) |
 
 Run the binary directly to use them:
@@ -98,53 +126,35 @@ publishes, idle/back, battery pause, theme switches, Home Assistant errors).
 
 ## Screenshots
 
-Files: `docs/screenshots/{mac,windows}-panel-{light,dark}.png`, plus the optional on-screen
-indicator stills `mac-hud-{light,dark}.png` (committed) and `windows-osd-{light,dark}.png` (not
-committed: Windows' translucent indicator shows the desktop behind it, so only add them over a
-plain background). Capture the window only, with no shadow, desktop, other
-apps or personal names on screen. Use generic monitor labels (the system names are fine) and a
-config without your own Home Assistant address showing in the panel.
+The README's panel pictures are the UI snapshot baselines (`mac/Tests/Snapshots/panel-two-linked-*.png`,
+`windows/tests/Snapshots/panel-two-linked-*.png`): drawn from made-up monitors, so they are always
+current and never show anyone's setup. Re-recording the snapshots (*Tests → UI snapshots* above)
+updates them. To change what they show, edit the scenes in `mac/Sources/Daylit/Snapshots.swift` and
+`windows/Snapshots.cs` (generic monitor names, round levels), then re-record.
 
-**macOS:**
+### Demo GIF and video (macOS)
 
-```sh
-pkill -x Daylit
-DAYLIT_APPEARANCE=light DAYLIT_SHOW=panel ~/Applications/Daylit.app/Contents/MacOS/Daylit &
-sleep 3
-# the panel's window number
-swift -e 'import CoreGraphics
-for w in CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
-where (w["kCGWindowOwnerName"] as? String) == "Daylit" { print(w["kCGWindowNumber"]!, w["kCGWindowBounds"]!) }'
-screencapture -o -l <number> docs/screenshots/mac-panel-light.png
-```
-
-Repeat with `DAYLIT_APPEARANCE=dark`. For the indicator, press `⌃⌥⌘↑` and capture its window
-within a second (it fades out), or use `screencapture -o -w` and click it.
-
-**Windows:** open the panel from the tray and use Snipping Tool (`Win+Shift+S`) in *Window* mode.
-For the indicator, press `Ctrl+Alt+PgUp` first, then snip within a second; it is translucent, so put
-a plain, empty window behind it first. Switch light/dark in Settings → Personalization → Colors (or
-the panel's *Switch to dark mode* button) and capture again.
-
-Check each image before committing: nothing personal, nothing cut off, same size as the one it
-replaces where possible. The README shows the two `panel` pairs; the indicator stills are optional.
-
-### Demo GIF (macOS)
-
-`docs/demo-{light,dark}.gif` is the panel while a slider is dragged. With `DAYLIT_SHOW=panel` the
-panel stays open while you work in another app, so you can record it:
+`docs/demo-{light,dark}.gif` (and the social videos) come from a scripted demo: `DAYLIT_DEMO=1`
+opens a colourful backdrop with the panel on top and plays a 15 s storyboard on made-up monitors:
+the second monitor slides down alone, the link turns on and both move together keeping their
+offset, the link turns off and the second slides back up alone. It's pure UI: it never touches
+real brightness, Home Assistant or saved settings, and it runs alongside your normal Daylit.
+On macOS 26+ it shows the real Liquid Glass. Use a 2x (Retina) screen so the capture is crisp.
 
 ```sh
-pkill -x Daylit
-DAYLIT_APPEARANCE=light DAYLIT_SHOW=panel ~/Applications/Daylit.app/Contents/MacOS/Daylit &
-sleep 3
-# X,Y,W,H from the window bounds printed by the snippet above
-screencapture -x -v -V 8 -R X,Y,W,H /tmp/demo.mov   # drag a slider during these 8 s
-ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -vf "fps=12,palettegen=max_colors=96:stats_mode=diff" /tmp/pal.png
-ffmpeg -ss 1 -t 6 -i /tmp/demo.mov -i /tmp/pal.png \
-  -lavfi "fps=12[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
-  -loop 0 docs/demo-light.gif
+mac/build.sh /tmp/demo-build
+for m in light dark; do
+  DAYLIT_DEMO=1 DAYLIT_APPEARANCE=$m DAYLIT_DEMO_SCREEN="part of a 2x screen's name" \
+    /tmp/demo-build/Daylit.app/Contents/MacOS/Daylit > /tmp/demo.txt &
+  sleep 1; R=$(grep -o -- '-R[0-9,-]*' /tmp/demo.txt)    # it prints the area to capture
+  screencapture -x -v -V 14 $R /tmp/demo-$m.mov
+  pkill -f demo-build/Daylit.app
+  ffmpeg -i /tmp/demo-$m.mov -vf "crop=800:520:320:145,fps=12,palettegen=max_colors=128:stats_mode=diff" /tmp/pal.png
+  ffmpeg -i /tmp/demo-$m.mov -i /tmp/pal.png \
+    -lavfi "crop=800:520:320:145,fps=12[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
+    -loop 0 docs/demo-$m.gif
+done
 ```
 
-Repeat with `DAYLIT_APPEARANCE=dark`. Keep each GIF under 1 MB (lower `fps` or `max_colors` if not),
-put the slider back where it was, and check a few frames: nothing outside the panel.
+Keep each GIF under 1.5 MB and check a few frames. To change the story, edit `step()` in
+`mac/Sources/Daylit/Demo.swift`.

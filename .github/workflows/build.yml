@@ -1,5 +1,13 @@
 name: build
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: "Record new UI snapshot baselines (uploaded as the snapshots-* artifacts; commit them, see CONTRIBUTING.md)"
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -12,6 +20,20 @@ jobs:
         working-directory: mac
       - name: Build Daylit.app
         run: DAYLIT_UNIVERSAL=1 mac/build.sh "$RUNNER_TEMP"
+      - name: UI snapshots
+        env:
+          RECORD: ${{ inputs.record }}
+        run: |
+          app="$RUNNER_TEMP/Daylit.app/Contents/MacOS/Daylit"
+          "$app" --render-snapshots "$RUNNER_TEMP/snapshots"
+          if [ "$RECORD" != "true" ]; then "$app" --compare-snapshots mac/Tests/Snapshots "$RUNNER_TEMP/snapshots"; fi
+      - name: Upload UI snapshots (renders, and diff-*.png when they differ)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshots-mac
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
       - name: Zip (ditto keeps the signature)
         run: ditto -c -k --keepParent "$RUNNER_TEMP/Daylit.app" "$RUNNER_TEMP/Daylit-mac.zip"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -29,6 +51,25 @@ jobs:
         run: dotnet test windows/tests/Daylit.Tests.csproj --nologo
       - name: Build Daylit.exe
         run: dotnet publish windows/Daylit.csproj -c Release -o out --nologo -p:DebugType=none
+      - name: UI snapshots
+        shell: pwsh
+        env:
+          RECORD: ${{ inputs.record }}
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'snapshots'
+          ./out/Daylit.exe --render-snapshots $out | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:RECORD -ne 'true') {
+            ./out/Daylit.exe --compare-snapshots windows/tests/Snapshots $out | Out-String
+            exit $LASTEXITCODE
+          }
+      - name: Upload UI snapshots (renders, and diff-*.png when they differ)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshots-windows
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Daylit-windows

@@ -148,3 +148,94 @@ public enum ReadState: Equatable {
     /// Whether the slider and keys may act on it.
     public var usable: Bool { self != .silent }
 }
+
+/// "Sync monitors": every external monitor keeps the offset it had when sync was switched on, so
+/// moving one moves the others by the same amount. Offsets are relative to a shared base level;
+/// any monitor in the group can set the base, so the group survives one monitor being unplugged.
+public struct SyncOffsets: Equatable, Codable {
+    public var offsets: [String: Int]
+    public init(offsets: [String: Int] = [:]) { self.offsets = offsets }
+
+    /// Captures the current levels; the first monitor's level is the base (its offset is 0).
+    public init(levels: [(key: String, level: Int)]) {
+        offsets = [:]
+        guard let first = levels.first else { return }
+        for l in levels { offsets[l.key] = l.level - first.level }
+    }
+
+    /// The base level implied by one monitor being at `level`.
+    public func base(key: String, level: Int) -> Int? { offsets[key].map { level - $0 } }
+
+    /// Where a monitor goes for a base level, clamped to 0...100. The stored offset is not changed
+    /// by clamping, so the monitors line up again once the base moves back.
+    public func level(key: String, base: Int) -> Int? { offsets[key].map { min(max(base + $0, 0), 100) } }
+
+    /// Adds monitors that joined after sync was switched on, at their current offset from the group.
+    /// `levels` are the connected monitors' current levels. If none of them is in the group (all the
+    /// old ones are unplugged), the group starts again from these levels.
+    public mutating func adopt(_ levels: [(key: String, level: Int)]) {
+        guard let ref = levels.first(where: { offsets[$0.key] != nil }), let b = base(key: ref.key, level: ref.level) else {
+            self = SyncOffsets(levels: levels)
+            return
+        }
+        for l in levels where offsets[l.key] == nil { offsets[l.key] = l.level - b }
+    }
+
+    /// One monitor was moved by hand to `level`: the levels for the other monitors in `keys`.
+    public func follow(key: String, level: Int, keys: [String]) -> [String: Int] {
+        guard let b = base(key: key, level: level) else { return [:] }
+        var r: [String: Int] = [:]
+        for k in keys where k != key { if let v = self.level(key: k, base: b) { r[k] = v } }
+        return r
+    }
+
+    /// Automatic mode: the first connected monitor's target drives the group. Returns the target for
+    /// each monitor in `keys` (the leader keeps its own target).
+    public func targets(leader: String, leaderTarget: Int, keys: [String]) -> [String: Int] {
+        guard let b = base(key: leader, level: leaderTarget) else { return [:] }
+        var r: [String: Int] = [leader: leaderTarget]
+        for k in keys where k != leader { if let v = level(key: k, base: b) { r[k] = v } }
+        return r
+    }
+}
+
+/// Hand-set state kept across restarts, so quitting or rebooting does not jump every monitor back to
+/// the automatic target. Saved per monitor (keyed by its display identity) with the time it was saved;
+/// an entry older than `maxAge` is forgotten, since the target has moved on by then anyway.
+public struct SavedHolds: Equatable, Codable {
+    public struct Entry: Equatable, Codable {
+        public var lastSet: Int?
+        public var lastTarget: Int?
+        public var saved: Double     // Unix seconds
+        public init(lastSet: Int?, lastTarget: Int?, saved: Double) { self.lastSet = lastSet; self.lastTarget = lastTarget; self.saved = saved }
+    }
+    public static let maxAge: Double = 12 * 3600
+    public var entries: [String: Entry]
+    public init(entries: [String: Entry] = [:]) { self.entries = entries }
+
+    /// Records a monitor's state; one with nothing to remember is removed.
+    public mutating func record(key: String, state: HoldState, now: Double) {
+        if state.lastSet == nil && state.lastTarget == nil { entries[key] = nil; return }
+        entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, saved: now)
+    }
+    /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
+    public func restore(key: String, now: Double) -> HoldState? {
+        guard let e = entries[key], now - e.saved <= Self.maxAge, now >= e.saved else { return nil }
+        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget)
+    }
+}
+
+/// Home Assistant errors. A connection that fails right after launch, wake or docking (macOS checks the
+/// local-network permission, or the network is still switching) usually works a few seconds later, so
+/// it is retried quickly and only shown once Home Assistant has been unreachable for a while. A
+/// rejected or missing token will not fix itself and shows at once.
+public enum HAErrorRule {
+    public static let retryDelays: [Double] = [2, 5]
+    public static let showAfter: Double = 60
+    /// Whether the panel should show the error: `downSince` is when the current outage started.
+    public static func shouldShow(transient: Bool, downSince: Double?, now: Double) -> Bool {
+        if !transient { return true }
+        guard let since = downSince else { return false }
+        return now - since >= showAfter
+    }
+}

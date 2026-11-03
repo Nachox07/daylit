@@ -18,8 +18,10 @@ static class Cli {
     /// Null when the arguments are not a CLI command (start the tray app as usual).
     public static int? Run(string[] args) {
         var cmd = args.FirstOrDefault()?.ToLowerInvariant();
-        if (cmd is not ("--list-monitors" or "--check-config" or "--help" or "-h" or "/?")) return null;
+        if (cmd is not ("--list-monitors" or "--check-config" or "--render-snapshots" or "--compare-snapshots" or "--help" or "-h" or "/?")) return null;
         AttachConsole(-1);   // so the output shows when run from a terminal without a pipe
+        if (cmd == "--render-snapshots") return args.Length >= 2 ? Snapshots.Render(args[1]) : Usage();
+        if (cmd == "--compare-snapshots") return args.Length >= 3 ? Snapshots.Compare(args[1], args[2]) : Usage();
         var (json, code) = cmd switch {
             "--list-monitors" => ListMonitors(),
             "--check-config" => CheckConfig(),
@@ -30,11 +32,15 @@ static class Cli {
         return code;
     }
 
+    static int Usage() { Console.Out.WriteLine(Help); Console.Out.Flush(); return 2; }
+
     const string Help = """
         Daylit — monitor brightness from the sun or Home Assistant.
           Daylit.exe                  start the tray app
           Daylit.exe --list-monitors  connected monitors as JSON (use "match" in config.json)
           Daylit.exe --check-config   validate %APPDATA%\Daylit\config.json
+          Daylit.exe --render-snapshots <dir>               UI snapshots for the visual tests
+          Daylit.exe --compare-snapshots <baseline> <dir>   compare them; exit 1 on a change
         Pipe the output to wait for it, e.g.  Daylit.exe --list-monitors | Out-String
         """;
 

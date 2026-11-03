@@ -13,7 +13,7 @@ bright when daylight floods in, dimmer with the blind down, low at night.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.gif">
-    <img src="docs/demo-light.gif" width="320" alt="Daylit's macOS panel: dragging a monitor's brightness slider, with Automatic on and the status line showing Home Assistant, sun and blind">
+    <img src="docs/demo-light.gif" width="400" alt="Daylit's macOS panel: one monitor's slider moves alone, then the link button joins both monitors and they move together keeping their offset, then the link is turned off">
   </picture>
 </p>
 
@@ -32,13 +32,13 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mac-panel-dark.png">
-    <img src="docs/screenshots/mac-panel-light.png" width="300" alt="Daylit panel on macOS">
+    <source media="(prefers-color-scheme: dark)" srcset="mac/Tests/Snapshots/panel-two-linked-dark.png">
+    <img src="mac/Tests/Snapshots/panel-two-linked-light.png" width="300" alt="Daylit panel on macOS">
   </picture>
   &nbsp;
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/windows-panel-dark.png">
-    <img src="docs/screenshots/windows-panel-light.png" width="300" alt="Daylit panel on Windows">
+    <source media="(prefers-color-scheme: dark)" srcset="windows/tests/Snapshots/panel-two-linked-dark.png">
+    <img src="windows/tests/Snapshots/panel-two-linked-light.png" width="300" alt="Daylit panel on Windows">
   </picture>
 </p>
 
@@ -100,7 +100,12 @@ sun's position is computed locally; the tests check it against NOAA reference va
 
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.
-- **Battery.** A laptop on battery pauses all automatic work (a switch in the panel).
+- **Battery.** A laptop on battery pauses all automatic work (gear menu → *Pause on battery*).
+- **Sync monitors.** With two or more monitors, the link button between them makes them move together: each keeps
+  how much brighter or darker it was when you switched it on ([details](docs/setup.md#sync-monitors)).
+- **A short panel.** It holds what you touch every day: a slider per monitor and *Automatic*.
+  Everything set once (light/dark from daylight, pause on battery, open at login, shortcuts, token,
+  config) is in the gear menu. Levels you set by hand survive a restart.
 - **The built-in screen is left to the system**, whose light sensor does a better job than any
   schedule. On a Mac with the lid open, the panel still shows its slider for quick manual changes
   (on Windows, the quick-settings slider covers it).

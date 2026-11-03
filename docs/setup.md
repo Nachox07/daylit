@@ -19,7 +19,7 @@ in the same menu.
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights`, each optional. |
 | `manualHold` | A level you set by hand stays until the automatic target moves this many points (default 5). |
-| `pauseOnBattery` | Starting value of the panel's *Pause on battery* switch (default `true`); the switch remembers your choice. |
+| `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
@@ -96,6 +96,22 @@ reported as a config problem and Home Assistant is not contacted until it is fix
 - Windows: `Ctrl+Alt+PgUp/PgDn`, plus `Shift` for steps of 1.
 - Both: gear menu → *Keyboard shortcuts…* to change them.
 
+## Sync monitors
+
+With two or more external monitors connected, a round link button sits between the first two monitor
+cards (click it again to unlink; while linked it is filled with the accent colour).
+When you turn it on, Daylit remembers how far apart they are (say the Dell at 40 % and the other at
+60 %: an offset of −20). From then on:
+
+- Moving one monitor's slider, or using the keys on it, moves the others by the same amount. A
+  monitor that hits 0 or 100 % stops there and lines up again when you come back.
+- In automatic mode the first monitor's own target drives the group, and the others follow with
+  their offsets. Their own day / blind closed / night levels are not used while sync is on.
+- A monitor plugged in later joins at its current offset. A Home Assistant `set` helper still
+  applies to its own monitor only. The built-in Mac screen is never part of the group.
+
+Turn the switch off and on again to capture new offsets.
+
 ## Light and dark mode
 
 Optional, with the sun or Home Assistant source: on by default on Windows, off by default on macOS.
@@ -107,7 +123,10 @@ and forth, and a manual switch stays until the automatic decision next changes.
 - Windows: if the wallpaper is one of Windows 11's stock light/dark pair, it is swapped too; a
   custom wallpaper is never touched.
 - macOS: it switches the system appearance through System Events, so the first switch asks for the
-  Automation permission. The gear menu also has a manual *Switch to Light/Dark Mode*.
+  Automation permission.
+
+Both apps: turn it on in the gear menu → *Light or dark mode from daylight*; the same menu has a
+manual *Switch to light/dark mode*.
 
 An idle computer, or one paused on battery, leaves the appearance alone.
 

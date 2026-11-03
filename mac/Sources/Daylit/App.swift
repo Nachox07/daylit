@@ -39,11 +39,10 @@ import AppKit
             self?.item.button?.highlight(false); PanelOpener.visible = false; self?.closedAt = Date()
         }
         panel.setAccessibilityLabel("Daylit")
-        let host = NSHostingController(rootView: Panel(m: model)
-            .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)))
+        let host = NSHostingController(rootView: Panel(m: model).panelSurface(cornerRadius: 16))
         host.sizingOptions = [.preferredContentSize]
         panel.contentViewController = host
+        roundCorners(host.view, 16)
         if let b = item.button {
             b.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Daylit")
             b.setAccessibilityLabel("Daylit")
@@ -62,6 +61,7 @@ import AppKit
         place()
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { self.panel.invalidateShadow() }   // shadow from the drawn, rounded content
         item.button?.highlight(true)
         PanelOpener.visible = true
     }
@@ -84,18 +84,65 @@ import AppKit
     func windowDidResize(_ n: Notification) { if panel.isVisible { place() } }   // content grew: keep the top under the item
 }
 
-/// Control Center-style background: the menu material, tinted with the window colour so text behind
-/// the panel does not show through.
+/// Clips a window's content to its rounded shape, so the window shadow follows the corners instead
+/// of drawing a faint dark square behind them (call invalidateShadow after the first draw).
+@MainActor func roundCorners(_ v: NSView, _ radius: CGFloat) {
+    v.wantsLayer = true
+    v.layer?.cornerRadius = radius
+    v.layer?.cornerCurve = .continuous
+    v.layer?.masksToBounds = true
+}
+
+/// The panel and indicator surface. macOS 26 and later: the system's Liquid Glass, the same material
+/// Control Center uses (it blurs and lenses what is behind, and follows Reduce Transparency by
+/// itself). Earlier versions: the menu material under an opaque-enough tint.
+extension View {
+    @ViewBuilder func panelSurface(cornerRadius: CGFloat) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26, *), !PanelBackground.plain {
+            self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self.background(PanelBackground(cornerRadius: cornerRadius))
+        }
+        #else
+        self.background(PanelBackground(cornerRadius: cornerRadius))
+        #endif
+    }
+}
+
+/// The surface where Liquid Glass is not available (and in snapshots, which draw a plain window
+/// colour so they are the same on every machine).
+struct PanelBackground: View {
+    nonisolated(unsafe) static var plain = false
+    var cornerRadius: CGFloat
+    var body: some View {
+        if Self.plain {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+        } else {
+            VisualEffect()
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+        }
+    }
+}
+
+/// Menu material under the window colour: opaque enough that text behind never shows through.
 struct VisualEffect: View {
     var body: some View {
         ZStack {
             Blur()
-            Color(nsColor: .windowBackgroundColor).opacity(0.72)
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.9)
         }
     }
     struct Blur: NSViewRepresentable {
         func makeNSView(context: Context) -> NSVisualEffectView {
-            let v = NSVisualEffectView(); v.material = .menu; v.blendingMode = .behindWindow; v.state = .active; return v
+            let v = NSVisualEffectView(); v.material = .menu; v.blendingMode = .behindWindow; v.state = .active
+            v.isEmphasized = true
+            return v
         }
         func updateNSView(_ v: NSVisualEffectView, context: Context) {}
     }
@@ -111,8 +158,12 @@ struct VisualEffect: View {
     var model: Daylit?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        if !DemoController.enabled { Log.write("start: Daylit \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")") }
         if let a = ProcessInfo.processInfo.environment["DAYLIT_APPEARANCE"] {   // screenshots: force light or dark
             NSApp.appearance = NSAppearance(named: a == "dark" ? .darkAqua : .aqua)
+        }
+        if DemoController.enabled {                 // scripted demo for recordings: no real model at all
+            let d = DemoController(); DemoController.shared = d; d.run(); return
         }
         let m = Daylit()
         model = m
@@ -137,7 +188,7 @@ struct VisualEffect: View {
     static func main() {
         if let code = CLI.run(Array(CommandLine.arguments.dropFirst())) { exit(code) }
         let me = ProcessInfo.processInfo.processIdentifier
-        if let id = Bundle.main.bundleIdentifier,
+        if !DemoController.enabled, let id = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != me }) {
             DistributedNotificationCenter.default().postNotificationName(AppDelegate.showNote, object: nil, userInfo: nil, deliverImmediately: true)
             exit(0)

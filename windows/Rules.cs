@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace Daylit;
 
-/// Solar elevation from latitude/longitude and the clock (low-precision almanac; matches HA's sun.sun to ~0.01°).
+/// Solar elevation from latitude/longitude and the clock (low-precision almanac; within 0.05° of NOAA's reference values in the tests).
 static class Sun {
     static double Rad(double d) => d * Math.PI / 180;
     static double Deg(double r) => r * 180 / Math.PI;
@@ -156,4 +156,92 @@ static class ReadRules {
     public static int? Current(this ReadState s, int? reading, int slider) =>
         reading ?? (s == ReadState.WriteOnly ? slider : null);
     public static bool Usable(this ReadState s) => s != ReadState.Silent;
+}
+
+/// "Sync monitors": every external monitor keeps the offset it had when sync was switched on, so
+/// moving one moves the others by the same amount. Offsets are relative to a shared base level; any
+/// monitor in the group can set the base, so the group survives one monitor being unplugged.
+sealed class SyncOffsets {
+    public Dictionary<string, int> Offsets { get; set; } = new();
+    public SyncOffsets() { }
+
+    /// Captures the current levels; the first monitor's level is the base (its offset is 0).
+    public static SyncOffsets Capture(IEnumerable<(string Key, int Level)> levels) {
+        var s = new SyncOffsets(); int? first = null;
+        foreach (var (k, l) in levels) { first ??= l; s.Offsets[k] = l - first.Value; }
+        return s;
+    }
+
+    public int? Base(string key, int level) => Offsets.TryGetValue(key, out var o) ? level - o : null;
+    /// Clamped to 0..100; the stored offset is kept, so the monitors line up again when the base moves back.
+    public int? Level(string key, int b) => Offsets.TryGetValue(key, out var o) ? Math.Clamp(b + o, 0, 100) : null;
+
+    /// Adds monitors that joined after sync was switched on, at their current offset from the group.
+    /// If none of the connected monitors is in the group, the group starts again from these levels.
+    /// Returns whether anything changed.
+    public bool Adopt(IReadOnlyList<(string Key, int Level)> levels) {
+        var known = levels.FirstOrDefault(l => Offsets.ContainsKey(l.Key));
+        if (known.Key == null) {
+            var fresh = Capture(levels);
+            bool changed = !fresh.Offsets.OrderBy(p => p.Key).SequenceEqual(Offsets.OrderBy(p => p.Key));
+            Offsets = fresh.Offsets;
+            return changed;
+        }
+        int b = Base(known.Key, known.Level)!.Value; bool any = false;
+        foreach (var (k, l) in levels) if (!Offsets.ContainsKey(k)) { Offsets[k] = l - b; any = true; }
+        return any;
+    }
+
+    /// One monitor was moved by hand to `level`: the levels for the other monitors in `keys`.
+    public Dictionary<string, int> Follow(string key, int level, IEnumerable<string> keys) {
+        var r = new Dictionary<string, int>();
+        if (Base(key, level) is not int b) return r;
+        foreach (var k in keys) if (k != key && Level(k, b) is int v) r[k] = v;
+        return r;
+    }
+
+    /// Automatic mode: the first connected monitor's target drives the group (the leader keeps its own).
+    public Dictionary<string, int> Targets(string leader, int leaderTarget, IEnumerable<string> keys) {
+        var r = new Dictionary<string, int>();
+        if (Base(leader, leaderTarget) is not int b) return r;
+        r[leader] = leaderTarget;
+        foreach (var k in keys) if (k != leader && Level(k, b) is int v) r[k] = v;
+        return r;
+    }
+}
+
+/// Hand-set state kept across restarts, so quitting or rebooting does not jump every monitor back to
+/// the automatic target. Saved per monitor (its stable key) with the time it was saved; an entry older
+/// than MaxAge is forgotten, since the target has moved on by then anyway.
+sealed class SavedHolds {
+    public sealed record Entry(int? LastSet, int? LastTarget, double Saved);
+    public static readonly double MaxAge = 12 * 3600;
+    public Dictionary<string, Entry> Entries { get; set; } = new();
+
+    /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
+    public bool Record(string key, int? lastSet, int? lastTarget, double now) {
+        if (lastSet == null && lastTarget == null) return Entries.Remove(key);
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == lastSet && e.LastTarget == lastTarget) return false;   // keep "last decided" time
+        Entries[key] = new Entry(lastSet, lastTarget, now);
+        return true;
+    }
+    /// The state to start a monitor with after a restart, or null when there is none or it is too old.
+    public (int? LastSet, int? LastTarget)? Restore(string key, double now) =>
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= MaxAge ? (e.LastSet, e.LastTarget) : null;
+
+    public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
+    public static SavedHolds FromJson(string? json) {
+        try { return new SavedHolds { Entries = json == null ? new() : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, Entry>>(json) ?? new() }; }
+        catch { return new SavedHolds(); }
+    }
+}
+
+/// Home Assistant errors. A connection that fails right after start, wake or a network switch usually
+/// works a few seconds later, so it is retried quickly and only shown once Home Assistant has been
+/// unreachable for a while. A rejected or missing token will not fix itself and shows at once.
+public static class HaErrorRule {
+    public static readonly double[] RetryDelays = { 2, 5 };
+    public const double ShowAfter = 60;
+    public static bool ShouldShow(bool transient, double? downSince, double now) =>
+        !transient || (downSince is double since && now - since >= ShowAfter);
 }

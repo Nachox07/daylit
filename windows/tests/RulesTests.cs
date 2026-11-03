@@ -288,3 +288,103 @@ public class WriteOnlyTests {
         Assert.True(held.Manual);
     }
 }
+
+public class SyncTests {
+    static SyncOffsets Two(int a, int b) => SyncOffsets.Capture(new[] { ("a", a), ("b", b) });
+
+    [Fact]
+    public void CaptureKeepsOffsetsFromTheFirstMonitor() {
+        var s = SyncOffsets.Capture(new[] { ("a", 60), ("b", 40), ("c", 75) });
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 0, ["b"] = -20, ["c"] = 15 }, s.Offsets);
+    }
+
+    [Fact]
+    public void MovingOneMovesTheOthersBySameAmount() {
+        var s = Two(60, 40);
+        Assert.Equal(new Dictionary<string, int> { ["b"] = 50 }, s.Follow("a", 70, new[] { "a", "b" }));
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 30 }, s.Follow("b", 10, new[] { "a", "b" }));
+    }
+
+    [Fact]
+    public void ClampingDoesNotLoseTheOffset() {
+        var s = Two(60, 40);
+        Assert.Equal(0, s.Follow("a", 10, new[] { "a", "b" })["b"]);
+        Assert.Equal(30, s.Follow("a", 50, new[] { "a", "b" })["b"]);
+        Assert.Equal(100, s.Follow("b", 100, new[] { "a", "b" })["a"]);
+    }
+
+    [Fact]
+    public void AutomaticTargetFromTheLeader() {
+        var s = Two(60, 45);
+        Assert.Equal(new Dictionary<string, int> { ["a"] = 80, ["b"] = 65 }, s.Targets("a", 80, new[] { "a", "b" }));
+        Assert.Equal(new Dictionary<string, int> { ["b"] = 20 }, s.Targets("b", 20, new[] { "b" }));
+    }
+
+    [Fact]
+    public void NewMonitorJoinsAtItsCurrentOffset() {
+        var s = Two(60, 40);
+        Assert.True(s.Adopt(new[] { ("a", 70), ("c", 50) }));
+        Assert.Equal(-20, s.Offsets["c"]);
+        Assert.Equal(-20, s.Offsets["b"]);
+        Assert.False(s.Adopt(new[] { ("a", 70), ("c", 50) }));   // nothing new
+    }
+
+    [Fact]
+    public void GroupStartsAgainWhenNoKnownMonitorIsConnected() {
+        var s = Two(60, 40);
+        Assert.True(s.Adopt(new[] { ("x", 30), ("y", 50) }));
+        Assert.Equal(new Dictionary<string, int> { ["x"] = 0, ["y"] = 20 }, s.Offsets);
+    }
+
+    [Fact]
+    public void UnknownMonitorIsIndependent() {
+        var s = SyncOffsets.Capture(new[] { ("a", 60) });
+        Assert.Empty(s.Follow("z", 30, new[] { "a", "z" }));
+        Assert.Empty(s.Follow("a", 30, new[] { "a", "z" }));
+    }
+
+    // Saved hand-set state
+
+    [Fact]
+    public void SavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
+        var saved = new SavedHolds();
+        Assert.True(saved.Record("A", 70, 70, 1000));
+        var back = SavedHolds.FromJson(saved.ToJson());
+        var r = back.Restore("A", 1000 + 3600);
+        Assert.Equal((70, 70), (r!.Value.LastSet, r.Value.LastTarget));
+        // At 40 (set by hand before the restart), target barely moved: kept, nothing written.
+        var step = Rules.Decide(40, 72, null, new Hold(null, r.Value.LastSet, r.Value.LastTarget), true, true, 5);
+        Assert.Null(step.Write);
+        Assert.True(step.Manual);
+    }
+
+    [Fact]
+    public void WithoutSavedHoldARestartAppliesTheTarget() {
+        var step = Rules.Decide(40, 72, null, new Hold(null, null, null), true, true, 5);
+        Assert.Equal(72, step.Write);
+    }
+
+    [Fact]
+    public void SavedHoldExpiresAndEmptyStateIsDropped() {
+        var saved = new SavedHolds();
+        saved.Record("A", 70, 70, 0);
+        Assert.Null(saved.Restore("A", SavedHolds.MaxAge + 1));
+        Assert.Null(saved.Restore("B", 10));
+        Assert.False(saved.Record("A", 70, 70, 50));   // unchanged: keeps the original time
+        Assert.True(saved.Record("A", null, null, 60));
+        Assert.Empty(saved.Entries);
+        Assert.NotNull(SavedHolds.FromJson("not json"));
+    }
+}
+
+public class HaErrorRuleTests {
+    [Fact] public void TransientStaysQuietForAMinute() {
+        Assert.False(HaErrorRule.ShouldShow(true, null, 100));
+        Assert.False(HaErrorRule.ShouldShow(true, 100, 159));
+        Assert.True(HaErrorRule.ShouldShow(true, 100, 160));
+    }
+    [Fact] public void TokenProblemsShowAtOnce() {
+        Assert.True(HaErrorRule.ShouldShow(false, null, 0));
+        Assert.Equal(new double[] { 2, 5 }, HaErrorRule.RetryDelays);
+    }
+}

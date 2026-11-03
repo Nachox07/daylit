@@ -20,6 +20,17 @@ import DaylitCore
     @Published var onBattery = Power.onBattery
     @Published var lookOn = UserDefaults.standard.bool(forKey: "autoLook")   // off by default on the Mac
     @Published var dark = false
+    /// "Sync monitors": moving one external monitor moves the others, keeping their offsets.
+    @Published var sync = UserDefaults.standard.bool(forKey: "syncMonitors")
+    var syncOffsets: SyncOffsets = {
+        guard let d = UserDefaults.standard.data(forKey: "syncOffsets"), let o = try? JSONDecoder().decode(SyncOffsets.self, from: d) else { return SyncOffsets() }
+        return o
+    }()
+    /// Hand-set state kept across restarts (DaylitCore.SavedHolds), so a restart doesn't jump the monitors.
+    var holds: SavedHolds = {
+        guard let d = UserDefaults.standard.data(forKey: "holds"), let h = try? JSONDecoder().decode(SavedHolds.self, from: d) else { return SavedHolds() }
+        return h
+    }()
     var lookDark: Bool?
     var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
     /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
@@ -34,6 +45,9 @@ import DaylitCore
     var lastTick = Date.distantPast
     var timer: Timer?
     var screenDebounce: DispatchWorkItem?
+
+    /// A model with fixed state and no side effects (no displays, keys, timers or network): snapshots.
+    init(preview: Void) {}
 
     init() {
         reload()
@@ -83,14 +97,20 @@ import DaylitCore
         mons = externalScreens().map { s in
             let cfg = config.monitors?.first { s.name.localizedCaseInsensitiveContains($0.match) }
             let control: Control
+            let nativeOK = Native.usable(s.id)
             switch cfg?.control {
             case "native": control = .native
             case "ddc": control = .ddc
-            default: control = Native.get(s.id) != nil ? .native : DDC.available ? .ddc : .none
+            default: control = nativeOK ? .native : DDC.available ? .ddc : .none
             }
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
             if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
+            if control == .native && !nativeOK {
+                m.noControl = "No brightness control right now. Turn on HDR for this display, or DDC/CI in its menu."
+            } else if control == .none {
+                m.noControl = "No brightness control. Turn on HDR for this display, or DDC/CI in its menu (\(DDC.hint))."
+            }
             if let o = old[s.uuid] {
                 m.level = o.level; m.remoteSeen = o.remoteSeen
                 if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published; m.readState = o.readState }
@@ -99,8 +119,14 @@ import DaylitCore
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
                 }
             }
+            else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970) {
+                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
+            }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
-            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)") }
+            if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)" + (m.noControl != nil ? ", no brightness control right now" : "")) }
+            else if old[s.uuid]?.noControl != m.noControl {
+                Log.write("control: \(m.label) " + (m.noControl == nil ? "brightness control is back (\(control.rawValue))" : "has no brightness control right now"))
+            }
             log("display \"\(s.name)\" id=\(s.id) uuid=\(s.uuid) control=\(control.rawValue)\(cfg != nil ? " (config \"\(cfg!.match)\")" : "")")
             return m
         }
@@ -119,6 +145,10 @@ import DaylitCore
 
     func check() {
         if Appearance.isDark != dark { dark = Appearance.isDark }
+        // Switching HDR on or off changes whether macOS can set an external display's brightness, and it
+        // does not always post a screen-change notification: re-probe cheaply and re-detect on a change.
+        let probe = externalScreens().map { "\($0.uuid)=\(Native.usable($0.id))" }.joined(separator: ",")
+        if probe != lastProbe { let first = lastProbe == nil; lastProbe = probe; if !first { redetect(); return } }
         let battery = Power.onBattery
         if battery != onBattery {
             onBattery = battery
@@ -142,6 +172,43 @@ import DaylitCore
         guard source != .off else { return }
         let interval: Double = Power.onBattery ? 120 : 30
         if Date().timeIntervalSince(lastTick) >= interval { refresh() }
+    }
+
+    /// A level set by hand (slider or keys). With sync on, the other monitors follow with their offsets.
+    func userSet(_ i: Int, _ v: Double) {
+        guard mons.indices.contains(i) else { return }
+        setLevel(i, v)
+        guard sync, mons.count > 1 else { return }
+        adoptSync()
+        let follow = syncOffsets.follow(key: mons[i].uuid, level: Int(v), keys: mons.map(\.uuid))
+        for (j, m) in mons.enumerated() where j != i && m.control != .none && m.readState.usable {
+            if let lv = follow[m.uuid], Int(m.level) != lv { setLevel(j, Double(lv)) }
+        }
+    }
+
+    /// Brings newly connected monitors into the sync group at their current offset.
+    func adoptSync() {
+        let before = syncOffsets
+        syncOffsets.adopt(mons.filter { $0.control != .none }.map { (key: $0.uuid, level: Int($0.level)) })
+        if syncOffsets != before { saveSync() }
+    }
+
+    func saveSync() {
+        if let d = try? JSONEncoder().encode(syncOffsets) { UserDefaults.standard.set(d, forKey: "syncOffsets") }
+    }
+
+    func setSync(_ on: Bool) {
+        sync = on
+        UserDefaults.standard.set(on, forKey: "syncMonitors")
+        if on {
+            // Capture the offsets as they are now: each monitor keeps how much brighter or darker it is.
+            syncOffsets = SyncOffsets(levels: mons.filter { $0.control != .none }.map { (key: $0.uuid, level: Int($0.level)) })
+            saveSync()
+            Log.write("sync: on " + mons.map { "\($0.label) \(syncOffsets.offsets[$0.uuid].map { $0 >= 0 ? "+\($0)" : "\($0)" } ?? "-")" }.joined(separator: ", "))
+        } else {
+            Log.write("sync: off")
+        }
+        refresh()
     }
 
     func setLevel(_ i: Int, _ v: Double) {
@@ -187,7 +254,7 @@ import DaylitCore
     func key(up: Bool, fine: Bool, on id: CGDirectDisplayID) {
         guard let i = mons.firstIndex(where: { $0.id == id }), mons[i].control != .none, mons[i].readState.usable else { return }
         let step = Double(fine ? 1 : 6)
-        setLevel(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
+        userSet(i, min(max(mons[i].level + (up ? step : -step), 0), 100))
         HUD.show(mons[i].label, mons[i].level, on: id)
     }
 
@@ -280,6 +347,7 @@ import DaylitCore
     /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     /// network at login or after wake does not jump the monitors to the fallback levels.
     var haDownSince: Date?
+    var lastProbe: String?
 
     func tick() async {
         if busy { again = true; return }
@@ -323,11 +391,20 @@ import DaylitCore
         let sun = daylightFraction(elevation: inp.elev)
         let here = idleSeconds() < Self.idleLimit
         let hold = config.manualHold ?? 5
+        func ownTarget(_ m: Mon) -> Int {
+            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+        }
+        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        var synced: [String: Int] = [:]
+        if sync, mons.count > 1, let li = mons.indices.first(where: { cur[$0] != nil }) {
+            adoptSync()
+            synced = syncOffsets.targets(leader: mons[li].uuid, leaderTarget: ownTarget(mons[li]), keys: mons.map(\.uuid))
+        }
         for i in mons.indices {
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
-            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
-            let want = target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+            let want = synced[m.uuid] ?? ownTarget(m)
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
                               state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen),
                               here: here, auto: auto, dragging: dragging.contains(m.id), hold: hold)
@@ -353,9 +430,22 @@ import DaylitCore
                 }
             }
         }
+        saveHolds()
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
+    }
+
+    func saveHolds() {
+        let before = holds, now = Date().timeIntervalSince1970
+        for m in mons {
+            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget)
+            // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
+            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget }) != true {
+                holds.record(key: m.uuid, state: st, now: now)
+            }
+        }
+        if holds != before, let d = try? JSONEncoder().encode(holds) { UserDefaults.standard.set(d, forKey: "holds") }
     }
 
     func write(_ m: Mon, _ v: Int) {
@@ -379,7 +469,14 @@ import DaylitCore
             return fromSun(nil)
         case .homeAssistant:
             guard let ha = config.homeAssistant else { return nil }
-            switch await HAClient.state(ha, mons) {
+            var result = await HAClient.state(ha, mons)
+            for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
+                guard case .failure(.unreachable) = result else { break }
+                Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))")
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                result = await HAClient.state(ha, mons)
+            }
+            switch result {
             case .success(let s):
                 problem = configProblem
                 haDownSince = nil
@@ -392,15 +489,20 @@ import DaylitCore
                 return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                               hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
             case .failure(let f):
-                problem = HAClient.describe(f, ha)
-                if lastHAError != problem { Log.write("home assistant: \(problem ?? "")"); lastHAError = problem }
-                if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
+                let message = HAClient.describe(f, ha)
+                Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? ""))
+                lastHAError = message
                 if haDownSince == nil { haDownSince = Date() }
+                let transient = f == .unreachable
+                let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
+                                                  now: Date().timeIntervalSince1970)
+                problem = show ? message : configProblem
+                if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
                     return fromSun("Home Assistant unreachable — using the sun")
                 }
-                detail = "Home Assistant · not connected"
+                if show { detail = "Home Assistant · not connected" }
                 return nil
             }
         }

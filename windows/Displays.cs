@@ -7,11 +7,13 @@ namespace Daylit;
 
 /// One active display path, as Windows sees it (DisplayConfig API).
 sealed class Display {
-    public string Friendly = "", Gdi = "";
+    public string Friendly = "", Gdi = "", DevicePath = "";
     public bool Hdr, Internal;
     internal Native.LUID Adapter;
     internal uint TargetId;
-    public string Key => $"{Adapter.Hi}:{Adapter.Lo}:{TargetId}";
+    /// Stable across reboots: the monitor's device path (adapter LUIDs change at every boot), so saved
+    /// sync offsets and hand-set levels find the same monitor again.
+    public string Key => DevicePath != "" ? DevicePath : $"{Adapter.Hi}:{Adapter.Lo}:{TargetId}";
 }
 
 static class Native {
@@ -56,7 +58,7 @@ static class Native {
             var sn = new SourceName { H = H<SourceName>(GET_SOURCE_NAME, p.Src.Adapter, p.Src.Id) };
             var ci = new ColorInfo { H = H<ColorInfo>(GET_ADVANCED_COLOR, p.Tgt.Adapter, p.Tgt.Id) };
             if (Get(ref tn) != 0 || Get(ref sn) != 0) continue;
-            list.Add(new Display { Friendly = tn.Friendly ?? "", Gdi = sn.Gdi ?? "", Adapter = p.Tgt.Adapter, TargetId = p.Tgt.Id,
+            list.Add(new Display { Friendly = tn.Friendly ?? "", Gdi = sn.Gdi ?? "", DevicePath = tn.Path ?? "", Adapter = p.Tgt.Adapter, TargetId = p.Tgt.Id,
                                    Internal = IsInternal(p.Tgt.Tech) || IsInternal(tn.Tech),
                                    Hdr = Get(ref ci) == 0 && (ci.Value & 2) != 0 });
         }

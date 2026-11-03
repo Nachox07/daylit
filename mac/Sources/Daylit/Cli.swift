@@ -10,16 +10,24 @@ import DaylitCore
           Daylit                  start the menu-bar app
           Daylit --list-monitors  connected monitors as JSON (use "match" in config.json)
           Daylit --check-config   validate \(Config.path.path)
+          Daylit --render-snapshots <dir>               UI snapshots for the visual tests
+          Daylit --compare-snapshots <baseline> <dir>   compare them; exit 1 on a change
         Run it from the app bundle: ~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors
         """
 
     static func run(_ args: [String]) -> Int32? {
         // Launch Services may pass -psn_… or -NSDocumentRevisionsDebugMode; only our flags count.
-        guard let cmd = args.first?.lowercased(), ["--list-monitors", "--check-config", "--help", "-h"].contains(cmd) else { return nil }
+        guard let cmd = args.first?.lowercased(), ["--list-monitors", "--check-config", "--render-snapshots", "--compare-snapshots", "--help", "-h"].contains(cmd) else { return nil }
         _ = NSApplication.shared   // NSScreen needs the app object
         switch cmd {
         case "--list-monitors": return emit(listMonitors(), 0)
         case "--check-config": let (j, ok) = checkConfig(); return emit(j, ok ? 0 : 1)
+        case "--render-snapshots":
+            guard args.count >= 2 else { print(help); return 2 }
+            return Snapshots.render(to: URL(fileURLWithPath: args[1]))
+        case "--compare-snapshots":
+            guard args.count >= 3 else { print(help); return 2 }
+            return Snapshots.compare(baseline: URL(fileURLWithPath: args[1]), current: URL(fileURLWithPath: args[2]))
         default: print(help); return 0
         }
     }

@@ -28,6 +28,7 @@ static class Program {
         app.DispatcherUnhandledException += (_, e) => { Log.Write("error: " + e.Exception); e.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write("fatal: " + e.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, e) => { Log.Write("task: " + e.Exception); e.SetObserved(); };
+        Log.Write($"start: Daylit {typeof(Controller).Assembly.GetName().Version?.ToString(3) ?? "dev"}");
         _ = new Controller(app);
         app.Run();
         return 0;
@@ -63,6 +64,13 @@ sealed class Controller {
     // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
+
+    /// Fixed state and nothing else: no tray, hotkeys, timers, monitors or network (UI snapshots).
+    public Controller(Config cfg, List<Mon> mons, string subtitle) {
+        app = Application.Current; ui = app.Dispatcher;
+        Cfg = cfg; Mons = mons; AutoOn = true; Subtitle = subtitle; HotkeysOk = true;
+        tray = null!; panel = null!; keys = null!;
+    }
 
     public Controller(Application app) {
         this.app = app;
@@ -227,7 +235,36 @@ sealed class Controller {
         RegisterShortcuts();
     }
 
-    public void UserSet(Mon m, int v) { m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v); }
+    public void UserSet(Mon m, int v) {
+        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v);
+        if (!Settings.SyncMonitors || Mons.Count < 2) return;
+        // Sync: the other monitors follow with the offsets captured when sync was switched on.
+        AdoptSync();
+        var follow = syncOffsets.Follow(m.Key, v, Mons.Select(x => x.Key));
+        foreach (var o in Mons)
+            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.WriteSoon(lv); }
+        panel.Sync();
+    }
+
+    SyncOffsets syncOffsets = Settings.SyncOffsets;
+    /// Hand-set state kept across restarts, so a restart doesn't jump the monitors to the automatic target.
+    readonly SavedHolds holds = Settings.Holds;
+    static double Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+    static int LevelOf(Mon m) => m.Cur ?? 50;
+    void AdoptSync() {
+        if (syncOffsets.Adopt(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))).ToList())) Settings.SyncOffsets = syncOffsets;
+    }
+
+    public void SetSync(bool on) {
+        Settings.SyncMonitors = on;
+        if (on) {
+            // Capture the offsets as they are now: each monitor keeps how much brighter or darker it is.
+            syncOffsets = SyncOffsets.Capture(Mons.Where(x => x.Usable).Select(x => (x.Key, LevelOf(x))));
+            Settings.SyncOffsets = syncOffsets;
+            Log.Write("sync: on " + string.Join(", ", Mons.Select(x => $"{x.Label} {(syncOffsets.Offsets.TryGetValue(x.Key, out var o) ? (o >= 0 ? "+" : "") + o : "-")}")));
+        } else Log.Write("sync: off");
+        _ = Tick("sync");
+    }
 
     public async void SetAuto(bool on) {
         try {
@@ -272,7 +309,11 @@ sealed class Controller {
         var ext = found.Where(d => !d.Internal).ToList();
         var next = ext.Select(d => {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
-            if (m == null) return new Mon(d, Mon.Match(d, Cfg.Monitors));
+            if (m == null) {
+                var fresh = new Mon(d, Mon.Match(d, Cfg.Monitors));
+                if (holds.Restore(d.Key, Now) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
+                return fresh;
+            }
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
                 Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
@@ -316,12 +357,20 @@ sealed class Controller {
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {
             s = await HAClient.State(Cfg, mons);
+            foreach (var delay in HaErrorRule.RetryDelays) {   // a first failure after start, wake or a network switch is usually brief
+                if (s != null || !HAClient.Transient) break;
+                Log.Write($"home assistant: retrying in {delay} s ({HAClient.LastCause ?? "no answer"})");
+                await Task.Delay(TimeSpan.FromSeconds(delay));
+                s = await HAClient.State(Cfg, mons);
+            }
             if (s == null) {
                 haDown = true;
-                if (lastHaError != HAClient.LastError) Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable"));
+                Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable") + (HAClient.LastCause is { } cause ? $" ({cause})" : ""));
                 lastHaError = HAClient.LastError;
-                Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
                 haDownSince ??= DateTime.UtcNow;
+                if (HaErrorRule.ShouldShow(HAClient.Transient, (haDownSince.Value - DateTime.UnixEpoch).TotalSeconds,
+                                           (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds))
+                    Error ??= HAClient.LastError ?? "Cannot reach Home Assistant";
                 if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= 60) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
@@ -339,13 +388,21 @@ sealed class Controller {
         wasHere = here;
         if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
 
+        // Sync: the first monitor that is reporting drives the group; the others keep their offsets.
+        var synced = new Dictionary<string, int>();
+        if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null) is int li && li >= 0) {
+            AdoptSync();
+            synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun), mons.Select(x => x.Key));
+        }
+        bool holdsChanged = false;
         for (int i = 0; i < mons.Length; i++) {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
+            int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
             (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
+            if (holds.Record(m.Key, m.LastSet, m.LastTarget, Now)) holdsChanged = true;
             bool remote = step.Remote != null;
             if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
             else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");
@@ -360,6 +417,8 @@ sealed class Controller {
                 }
             }
         }
+
+        if (holdsChanged) Settings.Holds = holds;
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
         Subtitle = !AutoOn ? "Off — sliders and hotkeys only"
