@@ -49,6 +49,33 @@ dotnet test windows/tests/Daylit.Tests.csproj        # Rules.cs + Config.cs, xUn
 CI runs both before building. Put new logic where it can be tested (`DaylitCore` / `Rules.cs`) and
 keep the app files for the parts that touch the OS: displays, keys, windows, network.
 
+### UI snapshots (visual regression)
+
+Each app can draw its panel and on-screen indicator offscreen from fixed, made-up state (two
+monitors, linked, one set by hand, none; no hardware and no Home Assistant), in light and dark at
+2x. The baselines are committed in `mac/Tests/Snapshots/` and `windows/tests/Snapshots/`, so a
+pull request that changes the UI shows the before and after in GitHub's image diff (side by side,
+swipe, onion skin).
+
+CI renders them on every push and compares with the baselines: an image fails when more than 0.5%
+of its pixels change (anti-aliasing noise stays well below). The `snapshots-mac` /
+`snapshots-windows` artifacts of the run hold the new renders and, for a failure, `diff-*.png`
+with the changed pixels in red.
+
+When the change is intended, re-record the baselines on CI's machines (fonts and rendering differ
+slightly between OS versions, so baselines made on your own computer would not match):
+
+```sh
+gh workflow run build.yml --ref <your-branch> -f record=true
+gh run download <run-id> -n snapshots-mac -D mac/Tests/Snapshots
+gh run download <run-id> -n snapshots-windows -D windows/tests/Snapshots
+git add mac/Tests/Snapshots windows/tests/Snapshots && git commit -m "UI snapshots: <what changed>"
+```
+
+Locally: `Daylit --render-snapshots <dir>` and `Daylit --compare-snapshots <baseline> <dir>`
+(Windows: pipe to `Out-String`). The Mac's Liquid Glass is not part of the snapshots: they draw a
+plain background so they look the same on every macOS version.
+
 ## Rules for every change
 
 - **Tests pass and 0 errors before you push**, and on macOS 0 warnings too. CI tests and builds both apps on every push
