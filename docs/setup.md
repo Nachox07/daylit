@@ -45,8 +45,9 @@ into another computer right now) and which config entry matched which monitor.
    is a ready package. The blind and the lights are optional.
 2. Create a long-lived access token: your Home Assistant profile → Security.
 3. Store the token (it never goes in the config file):
-   - macOS: `security add-generic-password -s daylit-home-assistant -a homeassistant -w`, which
-     prompts for it and saves it in the keychain.
+   - macOS: the app asks on first start and saves it in the keychain. Gear menu → *Home Assistant
+     token…* changes it. From Terminal instead:
+     `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
    - Windows: the app asks on first start and saves it in Credential Manager. Right-click the tray
      icon → *Home Assistant token…* to change it.
 4. In the config, set `homeAssistant.url` and, per monitor, a `homeAssistant` block:
@@ -77,9 +78,10 @@ reported as a config problem and Home Assistant is not contacted until it is fix
 
 ### Security notes
 
-- **macOS keychain.** Daylit reads the token through `/usr/bin/security`, so the keychain prompt
-  names `security`. Answering *Always Allow* lets any process running as you read that one item
-  with the same tool. Daylit doesn't read the keychain in-process because the downloadable build is
+- **macOS keychain.** Daylit reads the token through `/usr/bin/security`. A token saved from
+  Daylit's dialog trusts Daylit and that tool, so reading it never prompts; a token added from
+  Terminal prompts once, naming `security`. Either way, any process running as you can read that
+  one item with the same tool. Daylit doesn't read the keychain in-process because the downloadable build is
   not signed with a stable Developer ID: the keychain would ask again after every update. If that
   trade-off doesn't suit you, answer *Allow* instead (it asks again on each start).
 - **The config file is trusted.** Whoever can edit `config.json` already runs code as you, so

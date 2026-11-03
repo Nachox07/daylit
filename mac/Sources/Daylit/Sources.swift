@@ -56,7 +56,7 @@ enum HAClient {
     }
     static func describe(_ f: Failure, _ ha: HAConfig) -> String {
         switch f {
-        case .noToken: return "No Home Assistant token in the keychain (\"\(ha.tokenName ?? "daylit-home-assistant")\", see README)"
+        case .noToken: return "No Home Assistant token in the keychain (\"\(ha.tokenName ?? "daylit-home-assistant")\", gear menu → Home Assistant Token…)"
         case .rejected: return "Home Assistant rejected the token"
         case .unreachable: return "Cannot reach Home Assistant"
         case .badAnswer: return "Unexpected answer from Home Assistant (check the entity ids)"

@@ -7,8 +7,8 @@ a blind and room lights). This file tells an agent how to **set it up for a user
 ## Rules
 
 - **Never handle the Home Assistant token.** Don't ask for it, type it, paste it, read it from the
-  credential store or put it in any file. On Windows the app asks on first start and the user
-  pastes it; on macOS the user stores it with `security add-generic-password` (see step 5).
+  credential store or put it in any file. Both apps ask for it on first start (gear menu →
+  *Home Assistant token…* to change it) and the user pastes it.
   Agents may only check that one *is stored* (`--check-config` reports `tokenStored`).
 - **Don't change Home Assistant** unless the user asks. Creating the helpers is the user's call;
   offer [`homeassistant/daylit_helpers.yaml`](homeassistant/daylit_helpers.yaml).
@@ -124,9 +124,9 @@ computer right now, or no token stored yet) and which config entry matched which
 
 ### 5. Hand over to the user
 
-- Home Assistant: on Windows the app asks for a long-lived token (HA profile → Security) and the user
-  pastes it. On macOS the user stores it in the keychain themselves:
-  `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
+- Home Assistant: the app asks for a long-lived token (HA profile → Security) and the user pastes it.
+  Windows keeps it in Credential Manager, macOS in the keychain. On macOS the user can also store it
+  from Terminal: `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
   Accessibility permission.

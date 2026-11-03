@@ -35,7 +35,7 @@ The full guide is [AGENTS.md](../../../AGENTS.md) → *Set up Daylit for a user*
    - macOS: `~/Applications/Daylit.app/Contents/MacOS/Daylit --check-config`
 6. **Reload**: tell the user to use the gear menu → *Reload config*, or start the app.
 
-Never ask for, type, read or store the Home Assistant token. On Windows the app prompts the user
-for it; on macOS the user stores it with
+Never ask for, type, read or store the Home Assistant token. Both apps prompt the user for it on
+first start (gear menu → *Home Assistant token…* to change it); on macOS the user may instead run
 `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
 `--check-config` reports only whether one is stored.

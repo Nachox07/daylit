@@ -14,6 +14,7 @@ struct Panel: View {
                 Spacer()
                 Menu {
                     Button("Keyboard Shortcuts…") { ShortcutsWindow.show() }
+                    if m.source == .homeAssistant { Button("Home Assistant Token…") { TokenWindow.show(m) } }
                     Divider()
                     Button("Open Config File…") { m.openConfig() }
                     Button("Reload Config") { m.reload() }
