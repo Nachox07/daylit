@@ -105,7 +105,8 @@ sun's position is computed locally and matches Home Assistant's `sun.sun` to abo
   switching, only the one in use changes brightness. The idle one catches up when you come back.
 - **Battery.** A laptop on battery pauses all automatic work (a switch in the panel).
 - **The built-in screen is left to the system**, whose light sensor does a better job than any
-  schedule.
+  schedule. On a Mac with the lid open, the panel still shows its slider for quick manual changes
+  (on Windows, the quick-settings slider covers it).
 - **Light and dark mode** can follow the same daylight and lights ([details](docs/setup.md#light-and-dark-mode)).
 
 ## Contributing

@@ -83,8 +83,10 @@ choice). `controllable: false` means DDC/CI is off in the monitor's menu or the 
 ```
 
 Same JSON, with `control` `native` (macOS's own brightness, works with HDR on) or `ddc` (through
-`m1ddc`), and `uuid` instead of `display`. Built-in screens are listed with `builtIn: true` and left
-to macOS.
+`m1ddc`), and `uuid` instead of `display`. Built-in screens are listed with `builtIn: true` and
+their brightness: the panel shows them as a manual slider only, automatic mode leaves them to macOS.
+`controllable: false` with `brightness: null` on a DDC monitor can also mean it accepts changes but
+never reports its level; the panel handles that once the user moves its slider.
 
 ### 3. Pick a source and write the config
 
@@ -131,7 +133,8 @@ computer right now, or no token stored yet) and which config entry matched which
   battery. "Light or dark mode from daylight" (on by default on Windows, off on macOS; on macOS the
   first switch asks for the Automation permission for System Events).
 - With no external monitor plugged in, the panel shows an empty state and nothing is polled. The
-  built-in screen is always left to the OS.
+  built-in screen is never automated (on macOS it gets a manual slider while the lid is open;
+  `"builtIn": false` hides it).
 - Log: `%LOCALAPPDATA%\Daylit\daylit.log` (Windows) or `~/Library/Logs/Daylit/daylit.log` (macOS)
   shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume and Home Assistant errors.
 

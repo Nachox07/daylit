@@ -21,6 +21,7 @@ in the same menu.
 | `manualHold` | A level you set by hand stays until the automatic target moves this many points (default 5). |
 | `pauseOnBattery` | Starting value of the panel's *Pause on battery* switch (default `true`); the switch remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` if it is not in Homebrew's usual place. |
+| `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
 Find the `match` text for your monitors with the built-in commands:
 
@@ -110,6 +111,10 @@ set.
 - **A monitor shows "no brightness control".** Turn on DDC/CI in the monitor's own menu, and try
   another cable or port: some docks and adapters block DDC. On macOS, `brew install m1ddc` if it is
   missing.
+- **A monitor says "doesn't report its brightness".** Some monitors accept DDC changes but never
+  answer reads. Move its slider once: if the monitor reacts, Daylit keeps it as write-only (the
+  slider shows the last level sent, and automatic mode drives it). If it refuses, check DDC/CI in
+  its menu.
 - **Nothing changes automatically.** Check the *Automatic* switch and the status line under it;
   `--check-config` explains config problems. A computer with no input for 5 minutes stops changing
   brightness on purpose (see *Two machines* in the README), and so does a laptop on battery with
