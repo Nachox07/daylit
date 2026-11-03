@@ -83,6 +83,16 @@ Home Assistant's `sun.sun` to about 0.01°.
 only the machine in use (input in the last 5 minutes) changes brightness or publishes to Home
 Assistant. The idle one stays quiet, and catches up as soon as you use it again.
 
+**On battery.** With *Pause on battery* on (the default, shown only on computers with a battery),
+a laptop on battery does no automatic work at all: no updates, no Home Assistant traffic, no
+light/dark changes. Sliders and keys still work, and plugging in resumes at once.
+
+**No external monitor.** With nothing plugged in, the panel says so and Daylit polls nothing until
+a monitor appears.
+
+**The built-in screen is left to the system** on purpose: macOS and Windows already adjust it from
+its own light sensor, which does a better job than any schedule.
+
 With Home Assistant, what was applied is published back as a sensor (`target`, `manual`,
 `daylight`, `blind`, `lights`, `source` attributes), so you can graph it.
 
@@ -144,6 +154,8 @@ Every key is optional; [`config.example.json`](config.example.json) shows them a
   monitor right away, even when the computer is idle (dim it from your phone while away). It then
   counts as a hand-set level: automatic mode keeps it until the target moves `manualHold` points,
   or for good if you switch automatic off.
+- `pauseOnBattery` (default `true`): the starting value of the panel's *Pause on battery* switch;
+  once you change the switch, the app keeps your choice.
 - `manualHold`, and on macOS `ddcTool` (path to `m1ddc` if it is not in Homebrew's usual place).
 
 Use **Reload config** in the panel after editing.
@@ -170,14 +182,20 @@ local addresses only (an IP, `*.local` or a single-word host name).
 
 The name is `tokenName` (default `daylit-home-assistant`).
 
-## Light and dark mode (Windows)
+## Light and dark mode
 
-Optional, switchable in the panel, with the sun or Home Assistant source. Light mode when daylight
+Optional, switchable in the panel, with the sun or Home Assistant source: on by default on Windows,
+off by default on macOS. Light mode when daylight
 comes in (sun above 4°, and with Home Assistant the blind at least 55 % open) or when the room
 lights are bright and white; dark otherwise, including night with dim or orange lights. Each
 condition has a gap between its on and off thresholds so it does not flip back and forth, and a
 manual switch stays until the automatic decision next changes. If the wallpaper is one of
 Windows 11's stock light/dark pair, it is swapped too; a custom wallpaper is never touched.
+
+On macOS it switches the system appearance through System Events, so the first switch asks for the
+Automation permission (System Settings → Privacy & Security → Automation). The gear menu also has a
+manual *Switch to Light/Dark Mode*. An idle computer, or one paused on battery, leaves the
+appearance alone.
 
 ## License
 

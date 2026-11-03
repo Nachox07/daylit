@@ -90,8 +90,13 @@ computer right now, or no token stored yet) and which config entry matched which
   gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
   Accessibility permission.
 - "Open at sign-in" / "Open at login" is a switch in the panel.
+- "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on
+  battery. "Light or dark mode from daylight" (on by default on Windows, off on macOS; on macOS the
+  first switch asks for the Automation permission for System Events).
+- With no external monitor plugged in, the panel shows an empty state and nothing is polled. The
+  built-in screen is always left to the OS.
 - Log: `%LOCALAPPDATA%\Daylit\daylit.log` (Windows) or `~/Library/Logs/Daylit/daylit.log` (macOS)
-  shows automatic changes (`auto:`), publishes, idle/back, theme switches (Windows) and Home Assistant errors.
+  shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume and Home Assistant errors.
 
 ## Work on the code
 
