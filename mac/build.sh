@@ -1,14 +1,19 @@
 #!/bin/sh
 # Builds Daylit.app with Swift Package Manager (needs Xcode or its command-line tools).
 # Output: ~/Applications/Daylit.app, or the folder given as the first argument. Tests: swift test.
+# DAYLIT_VERSION sets the app version (releases pass the tag); DAYLIT_UNIVERSAL=1 builds for both
+# Apple silicon and Intel (release downloads), otherwise only for this Mac's architecture.
 set -e
 cd "$(dirname "$0")"
 OUT="${1:-$HOME/Applications}"
 APP="$OUT/Daylit.app"
 mkdir -p "$APP/Contents/MacOS"
 # Package.swift sets macOS 14 as the minimum, so the binary runs there whatever SDK builds it.
-swift build -c release --product Daylit
-cp "$(swift build -c release --show-bin-path)/Daylit" "$APP/Contents/MacOS/Daylit"
+VERSION="${DAYLIT_VERSION:-2.0.0}"
+ARCHS=""
+[ "${DAYLIT_UNIVERSAL:-0}" = 1 ] && ARCHS="--arch arm64 --arch x86_64"
+swift build -c release --product Daylit $ARCHS
+cp "$(swift build -c release --show-bin-path $ARCHS)/Daylit" "$APP/Contents/MacOS/Daylit"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -17,7 +22,8 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleName</key><string>Daylit</string>
   <key>CFBundleExecutable</key><string>Daylit</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>

@@ -78,7 +78,9 @@ import AppKit
         panel.setFrameOrigin(NSPoint(x: x, y: r.minY - size.height - 6))
     }
 
-    func windowDidResignKey(_ n: Notification) { close() }
+    /// DAYLIT_SHOW=panel (screenshots, recordings): the panel stays open when another app has focus.
+    static let pinned = ProcessInfo.processInfo.environment["DAYLIT_SHOW"] == "panel"
+    func windowDidResignKey(_ n: Notification) { if !Self.pinned { close() } }
     func windowDidResize(_ n: Notification) { if panel.isVisible { place() } }   // content grew: keep the top under the item
 }
 
