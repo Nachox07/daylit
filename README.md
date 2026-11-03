@@ -8,13 +8,22 @@ when daylight floods in, dimmer with the blind down, low at night.
 There are two small native apps with the same behaviour:
 
 - **macOS**: a menu-bar app (Swift, SwiftUI). The keyboard's brightness keys control the monitor
-  holding the focused window; the built-in screen keeps working as usual.
+  holding the focused window (the built-in screen keeps working as usual), and so do `⌃⌥⌘↑/↓`
+  (add `⇧` for fine steps; change them in the gear menu → *Keyboard Shortcuts…*).
 - **Windows**: a tray app (.NET 10, WPF with the Windows 11 Fluent theme). `Ctrl+Alt+PgUp/PgDn`
   (add `Shift` for fine steps; change them in the panel's gear menu → *Keyboard shortcuts…*), plus optional light/dark mode from the same signals.
 
 Both find your external monitors by themselves and show a slider per monitor, a fading on-screen
 indicator when you use the keys, and an "Automatic" switch.
 
+<p>
+  <img src="docs/screenshots/mac-panel-light.png" width="300" alt="Daylit panel on macOS, light mode">
+  <img src="docs/screenshots/mac-panel-dark.png" width="300" alt="Daylit panel on macOS, dark mode">
+</p>
+<p>
+  <img src="docs/screenshots/mac-hud-light.png" width="240" alt="On-screen indicator on macOS, light">
+  <img src="docs/screenshots/mac-hud-dark.png" width="240" alt="On-screen indicator on macOS, dark">
+</p>
 <p>
   <img src="docs/screenshots/windows-panel-light.png" width="300" alt="Daylit panel on Windows, light mode">
   <img src="docs/screenshots/windows-panel-dark.png" width="300" alt="Daylit panel on Windows, dark mode">
@@ -100,8 +109,10 @@ mac/build.sh            # → ~/Applications/Daylit.app
 open ~/Applications/Daylit.app
 ```
 
-The first start asks for Accessibility permission (needed for the brightness keys). The build is
-signed with your Apple Development identity when you have one, so the permission survives rebuilds.
+The first start asks for Accessibility permission (needed for the brightness keys; the `⌃⌥⌘↑/↓`
+shortcuts work without it). The build is signed with your Apple Development identity when you have
+one, so the permission survives rebuilds. Opening the app again shows its panel. Log:
+`~/Library/Logs/Daylit/daylit.log`.
 
 Windows 10/11 with the .NET 10 SDK (the app itself needs the .NET 10 Desktop Runtime):
 
@@ -136,7 +147,9 @@ Every key is optional; [`config.example.json`](config.example.json) shows them a
 
 Use **Reload config** in the panel after editing.
 
-On Windows, `Daylit.exe --list-monitors` prints the connected monitors with the `match` text to use, and `Daylit.exe --check-config` validates the file (pipe both to `Out-String`). Setting it up with an AI agent: see [AGENTS.md](AGENTS.md); Claude Code also picks up the `configure-daylit` skill.
+`--list-monitors` prints the connected monitors with the `match` text to use, and `--check-config`
+validates the file: `Daylit.exe --list-monitors | Out-String` on Windows,
+`~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors` on macOS. Setting it up with an AI agent: see [AGENTS.md](AGENTS.md); Claude Code also picks up the `configure-daylit` skill.
 
 ### Home Assistant
 

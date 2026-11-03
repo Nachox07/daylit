@@ -39,8 +39,15 @@ a blind and room lights). This file tells an agent how to **set it up for a user
 Use `match` in the config (any case-insensitive part of `name`; the model number is the stable
 choice). `controllable: false` means DDC/CI is off in the monitor's menu or the cable/dock blocks it.
 
-**macOS:** no CLI yet. `system_profiler SPDisplaysDataType` lists the names; `m1ddc display list`
-shows which answer DDC.
+**macOS:**
+
+```sh
+~/Applications/Daylit.app/Contents/MacOS/Daylit --list-monitors
+```
+
+Same JSON, with `control` `native` (macOS's own brightness, works with HDR on) or `ddc` (through
+`m1ddc`), and `uuid` instead of `display`. Built-in screens are listed with `builtIn: true` and left
+to macOS.
 
 ### 3. Pick a source and write the config
 
@@ -66,24 +73,34 @@ entities belong to the room. Don't guess entity IDs.
 & "$env:LOCALAPPDATA\Programs\Daylit\Daylit.exe" --check-config | Out-String   # exit 0 = ok
 ```
 
+```sh
+~/Applications/Daylit.app/Contents/MacOS/Daylit --check-config   # macOS; exit 0 = ok
+```
+
 It reports `problems` (must fix), `notes` (e.g. a configured monitor that is plugged into another
 computer right now, or no token stored yet) and which config entry matched which monitor. Then use
 **Reload config** in the panel's gear menu, or start the app.
 
 ### 5. Hand over to the user
 
-- Home Assistant: the app asks for a long-lived token (HA profile → Security); the user pastes it.
-- Hotkeys default to `Ctrl+Alt+PgUp/PgDn` (+Shift for steps of 1); gear menu → *Keyboard shortcuts…*.
-- "Open at sign-in" is a checkbox in the panel.
-- Log: `%LOCALAPPDATA%\Daylit\daylit.log` shows automatic changes (`auto:`), publishes, idle/back,
-  theme switches and Home Assistant errors.
+- Home Assistant: on Windows the app asks for a long-lived token (HA profile → Security) and the user
+  pastes it. On macOS the user stores it in the keychain themselves:
+  `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
+- Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
+  gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
+  Accessibility permission.
+- "Open at sign-in" / "Open at login" is a switch in the panel.
+- Log: `%LOCALAPPDATA%\Daylit\daylit.log` (Windows) or `~/Library/Logs/Daylit/daylit.log` (macOS)
+  shows automatic changes (`auto:`), publishes, idle/back, theme switches (Windows) and Home Assistant errors.
 
 ## Work on the code
 
 - `windows/`: WPF on .NET 10 with the Fluent theme. `App.cs` decisions, `Ui.cs` windows,
   `Displays.cs` monitor IO, `Sources.cs` Home Assistant and sun, `Config.cs`, `Cli.cs`.
   Build: `dotnet build windows/Daylit.csproj -c Release` (0 errors before pushing).
-- `mac/`: one Swift file, `mac/build.sh`.
+- `mac/`: one Swift file, `mac/build.sh` (0 errors and 0 warnings before pushing). `DAYLIT_CONFIG`
+  overrides the config path, `DAYLIT_DEBUG=1` logs to stdout, `DAYLIT_NO_KEYS=1` skips the
+  Accessibility prompt, `DAYLIT_SHOW=panel` and `DAYLIT_APPEARANCE=light|dark` are for screenshots.
 - Keep the two apps behaving the same (README → *How it works*). The HDR rule matters: with HDR on,
   Windows brightness goes through the SDR white level (undocumented `DisplayConfigSetDeviceInfo`
   type `0xFFFFFFEE`), not DDC.
