@@ -10,7 +10,7 @@ There are two small native apps with the same behaviour:
 - **macOS**: a menu-bar app (Swift, SwiftUI). The keyboard's brightness keys control the monitor
   holding the focused window; the built-in screen keeps working as usual.
 - **Windows**: a tray app (.NET 10, WPF with the Windows 11 Fluent theme). `Ctrl+Alt+PgUp/PgDn`
-  (add `Shift` for fine steps), plus optional light/dark mode from the same signals.
+  (add `Shift` for fine steps; change them in the panel's gear menu → *Keyboard shortcuts…*), plus optional light/dark mode from the same signals.
 
 Both find your external monitors by themselves and show a slider per monitor, a fading on-screen
 indicator when you use the keys, and an "Automatic" switch.

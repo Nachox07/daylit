@@ -64,6 +64,7 @@ sealed class Controller {
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Open config file", null, (_, _) => OpenConfig());
         menu.Items.Add("Reload config", null, (_, _) => Reload());
+        menu.Items.Add("Keyboard shortcuts…", null, (_, _) => EditShortcuts());
         menu.Items.Add(token);
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
@@ -72,8 +73,7 @@ sealed class Controller {
         tray.MouseClick += (_, e) => { if (e.Button == WF.MouseButtons.Left) TogglePanel(); };
 
         keys = new HotkeyWindow(Hotkey);
-        HotkeysOk = keys.Ok;
-        if (!HotkeysOk) Log.Write("hotkeys: Ctrl+Alt+PgUp/PgDn are taken by another app");
+        RegisterShortcuts();
 
         timer.Tick += (_, _) => _ = Tick("timer");
         idleWatch.Tick += (_, _) => {
@@ -182,6 +182,23 @@ sealed class Controller {
         UserSet(m, v);
         panel.Sync();
         osd.Flash(m.Label, v, m.D.Gdi);
+    }
+
+    void RegisterShortcuts() {
+        HotkeysOk = keys.Register(Settings.Up, Settings.Down);
+        Log.Write($"hotkeys: {Shortcut.Pair(Settings.Up, Settings.Down)}" + (HotkeysOk ? "" : " are taken by another app"));
+    }
+
+    /// The dialog tries each choice live; Cancel (or a failed try) puts the saved keys back.
+    public void EditShortcuts() {
+        panel.Hide();
+        keys.Unregister();   // so pressing the current keys in the dialog records them instead of firing
+        ShortcutDialog.Edit(Settings.Up, Settings.Down, (up, down) => {
+            if (!keys.Register(up, down)) { keys.Unregister(); return false; }
+            Settings.Up = up; Settings.Down = down;
+            return true;
+        });
+        RegisterShortcuts();
     }
 
     public void UserSet(Mon m, int v) { m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v); }

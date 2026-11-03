@@ -72,6 +72,18 @@ static class Settings {
     public static bool Auto { get => Get("Auto", true); set => Set("Auto", value); }
     /// Light/dark mode from daylight and room lights.
     public static bool AutoLook { get => Get("AutoLook", true); set => Set("AutoLook", value); }
+
+    static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;
+    static void SetInt(string name, int v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v, RegistryValueKind.DWord); }
+    /// Brightness hotkeys, set from the panel (Keyboard shortcuts…). Shift is added for fine steps.
+    public static Shortcut Up {
+        get => new(GetInt("UpMods", Shortcut.DefaultUp.Mods), GetInt("UpKey", Shortcut.DefaultUp.Vk));
+        set { SetInt("UpMods", value.Mods); SetInt("UpKey", value.Vk); }
+    }
+    public static Shortcut Down {
+        get => new(GetInt("DownMods", Shortcut.DefaultDown.Mods), GetInt("DownKey", Shortcut.DefaultDown.Vk));
+        set { SetInt("DownMods", value.Mods); SetInt("DownKey", value.Vk); }
+    }
 }
 
 static class Theme {

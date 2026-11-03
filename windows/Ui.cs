@@ -13,6 +13,7 @@ using System.Windows.Shell;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WF = System.Windows.Forms;
+using WI = System.Windows.Input;
 
 namespace Daylit;
 
@@ -136,6 +137,7 @@ sealed class Flyout : Window {
         MenuItem Item(string text, Action a) { var i = new MenuItem { Header = text }; i.Click += (_, _) => a(); return i; }
         m.Items.Add(Item("Open config file", app.OpenConfig));
         m.Items.Add(Item("Reload config", app.Reload));
+        m.Items.Add(Item("Keyboard shortcuts…", app.EditShortcuts));
         if (app.Source == Source.HomeAssistant) m.Items.Add(Item("Home Assistant token…", app.AskToken));
         m.IsOpen = true;
     }
@@ -212,9 +214,10 @@ sealed class Flyout : Window {
             look.IsChecked = Settings.AutoLook;
             modeBtn.Content = Theme.Dark ? "Switch to light mode" : "Switch to dark mode";
             bool any = app.Mons.Any(m => m.On);
-            hint.Text = !any ? "Ctrl+Alt+PgUp / PgDn change brightness once a monitor with brightness control is connected."
-                      : app.HotkeysOk ? "Ctrl+Alt+PgUp / PgDn: the screen with the active window. Add Shift for fine steps."
-                      : "Ctrl+Alt+PgUp / PgDn are taken by another app.";
+            string keysText = Shortcut.Pair(Settings.Up, Settings.Down);
+            hint.Text = !any ? $"{keysText} change brightness once a monitor with brightness control is connected."
+                      : app.HotkeysOk ? $"{keysText}: the screen with the active window. Add Shift for fine steps."
+                      : $"{keysText} are taken by another app. Change them in the gear menu.";
             error.Text = app.Error ?? "";
             error.Visibility = app.Error == null ? Visibility.Collapsed : Visibility.Visible;
             login.IsChecked = Win.StartsWithWindows;
@@ -347,19 +350,118 @@ static class TokenDialog {
 sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
     [DllImport("user32")] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
     [DllImport("user32")] static extern bool UnregisterHotKey(IntPtr h, int id);
-    const uint ALT = 1, CTRL = 2, SHIFT = 4, PGUP = 0x21, PGDN = 0x22;
     readonly Action<bool, bool> on;
-    public readonly bool Ok;
 
     public HotkeyWindow(Action<bool, bool> on) {
         this.on = on;
         CreateHandle(new WF.CreateParams { Parent = new IntPtr(-3) });   // HWND_MESSAGE
-        Ok = RegisterHotKey(Handle, 1, CTRL | ALT, PGUP) & RegisterHotKey(Handle, 2, CTRL | ALT, PGDN)
-           & RegisterHotKey(Handle, 3, CTRL | ALT | SHIFT, PGUP) & RegisterHotKey(Handle, 4, CTRL | ALT | SHIFT, PGDN);
     }
+    /// Registers up/down and their Shift variants (fine steps). False if any is taken.
+    public bool Register(Shortcut up, Shortcut down) {
+        Unregister();
+        uint S = (uint)Shortcut.Shift;
+        return RegisterHotKey(Handle, 1, (uint)up.Mods, (uint)up.Vk) & RegisterHotKey(Handle, 2, (uint)down.Mods, (uint)down.Vk)
+             & RegisterHotKey(Handle, 3, (uint)up.Mods | S, (uint)up.Vk) & RegisterHotKey(Handle, 4, (uint)down.Mods | S, (uint)down.Vk);
+    }
+    public void Unregister() { for (int i = 1; i <= 4; i++) UnregisterHotKey(Handle, i); }
     protected override void WndProc(ref WF.Message m) {
         if (m.Msg == 0x0312 /* WM_HOTKEY */) { int id = (int)m.WParam; on(id is 1 or 3, id >= 3); }
         base.WndProc(ref m);
     }
-    public void Dispose() { for (int i = 1; i <= 4; i++) UnregisterHotKey(Handle, i); DestroyHandle(); }
+    public void Dispose() { Unregister(); DestroyHandle(); }
+}
+
+/// A key plus modifiers, in RegisterHotKey terms (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8).
+readonly record struct Shortcut(int Mods, int Vk) {
+    public const int Alt = 1, Ctrl = 2, Shift = 4, Win = 8;
+    public static readonly Shortcut DefaultUp = new(Ctrl | Alt, 0x21), DefaultDown = new(Ctrl | Alt, 0x22);   // PgUp, PgDn
+
+    public string ModsText {
+        get {
+            var p = new List<string>();
+            if ((Mods & Win) != 0) p.Add("Win");
+            if ((Mods & Ctrl) != 0) p.Add("Ctrl");
+            if ((Mods & Alt) != 0) p.Add("Alt");
+            if ((Mods & Shift) != 0) p.Add("Shift");
+            return string.Join("+", p);
+        }
+    }
+    public string KeyText => Vk switch {
+        0x21 => "PgUp", 0x22 => "PgDn", 0x25 => "←", 0x26 => "↑", 0x27 => "→", 0x28 => "↓",
+        0xBB => "+", 0xBD => "-", 0x6B => "Num +", 0x6D => "Num -",
+        >= 0x30 and <= 0x39 => ((char)Vk).ToString(), >= 0x41 and <= 0x5A => ((char)Vk).ToString(),
+        _ => WI.KeyInterop.KeyFromVirtualKey(Vk).ToString(),
+    };
+    public override string ToString() => ModsText == "" ? KeyText : $"{ModsText}+{KeyText}";
+    /// "Ctrl+Alt+PgUp / PgDn" when both share modifiers, else both in full.
+    public static string Pair(Shortcut up, Shortcut down) => up.Mods == down.Mods ? $"{up} / {down.KeyText}" : $"{up} / {down}";
+}
+
+/// Pick the brightness hotkeys: click a box, press the combination.
+static class ShortcutDialog {
+    /// tryApply registers the pair and returns false if another app owns it.
+    public static void Edit(Shortcut up, Shortcut down, Func<Shortcut, Shortcut, bool> tryApply) {
+        Shortcut newUp = up, newDown = down;
+        var error = new TextBlock { Foreground = Palette.Error, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
+        void Fail(string? msg) { error.Text = msg ?? ""; error.Visibility = msg == null ? Visibility.Collapsed : Visibility.Visible; }
+
+        TextBox Capture(Func<Shortcut> get, Action<Shortcut> set) {
+            var box = new TextBox { Text = get().ToString(), IsReadOnly = true, IsReadOnlyCaretVisible = false, MinWidth = 220, Cursor = WI.Cursors.Hand };
+            box.PreviewKeyDown += (_, e) => {
+                var k = e.Key == WI.Key.System ? e.SystemKey : e.Key;
+                var km = WI.Keyboard.Modifiers;
+                if (km == WI.ModifierKeys.None && k is WI.Key.Tab or WI.Key.Escape or WI.Key.Enter) return;   // keep dialog navigation
+                e.Handled = true;
+                if (k is WI.Key.LeftCtrl or WI.Key.RightCtrl or WI.Key.LeftAlt or WI.Key.RightAlt or WI.Key.LeftShift or WI.Key.RightShift or WI.Key.LWin or WI.Key.RWin) return;
+                int mods = (km.HasFlag(WI.ModifierKeys.Control) ? Shortcut.Ctrl : 0) | (km.HasFlag(WI.ModifierKeys.Alt) ? Shortcut.Alt : 0) | (km.HasFlag(WI.ModifierKeys.Windows) ? Shortcut.Win : 0);
+                if (km.HasFlag(WI.ModifierKeys.Shift)) { Fail("Leave Shift out: it is added automatically for steps of 1."); return; }
+                if (mods == 0) { Fail("Use Ctrl, Alt or Win with the key, so it does not clash with typing."); return; }
+                var sc = new Shortcut(mods, WI.KeyInterop.VirtualKeyFromKey(k));
+                set(sc); box.Text = sc.ToString(); Fail(null);
+            };
+            box.GotKeyboardFocus += (_, _) => box.SelectAll();
+            return box;
+        }
+        var upBox = Capture(() => newUp, v => newUp = v);
+        var downBox = Capture(() => newDown, v => newDown = v);
+
+        Grid Row(string label, TextBox box) {
+            var g = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            var t = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(box, 1);
+            g.Children.Add(t); g.Children.Add(box);
+            return g;
+        }
+        var reset = new Button { Content = "Reset to defaults", MinWidth = 90 };
+        var save = new Button { Content = "Save", IsDefault = true, MinWidth = 90, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 90 };
+        var buttons = new Grid { Margin = new Thickness(0, 18, 0, 0) };
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition());
+        var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { save, cancel } };
+        Grid.SetColumn(right, 1);
+        buttons.Children.Add(reset); buttons.Children.Add(right);
+
+        var w = new Window {
+            Title = "Daylit — keyboard shortcuts", SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen, Topmost = true, FontFamily = Palette.Ui, FontSize = 14,
+            Content = new StackPanel {
+                Margin = new Thickness(24), MaxWidth = 460,
+                Children = {
+                    new TextBlock { Text = "Click a box and press the new combination.", TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = "They change the screen with the active window. Hold Shift as well for steps of 1.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 8) },
+                    Row("Brighter", upBox), Row("Dimmer", downBox), error, buttons,
+                },
+            },
+        };
+        reset.Click += (_, _) => { newUp = Shortcut.DefaultUp; newDown = Shortcut.DefaultDown; upBox.Text = newUp.ToString(); downBox.Text = newDown.ToString(); Fail(null); };
+        save.Click += (_, _) => {
+            if (newUp == newDown) { Fail("Brighter and Dimmer need different combinations."); return; }
+            if (!tryApply(newUp, newDown)) { Fail($"{Shortcut.Pair(newUp, newDown)} is taken by another app or by Windows. Try another."); return; }
+            w.DialogResult = true;
+        };
+        w.ShowDialog();
+    }
 }
