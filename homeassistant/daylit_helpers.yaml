@@ -28,6 +28,15 @@ input_number:
     max: 100
     step: 1
     unit_of_measurement: "%"
+  # Optional: change it to set the monitor right away, even when the computer is idle
+  # (e.g. dim it from your phone while away). Name it in the monitor's "set" key.
+  daylit_left_set:
+    name: Left monitor, set now
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
   daylit_right_day:
     name: Right monitor, daytime (blind open)
     min: 0

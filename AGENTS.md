@@ -54,8 +54,8 @@ optional; [`config.example.json`](config.example.json) shows them all.
 | `homeAssistant` | `homeAssistant.url` (+ token, pasted by the user) | the user has HA; `location` adds a fallback when HA is down |
 
 Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `night` (0–100), and with
-Home Assistant a `homeAssistant` block naming three `input_number` entities and an optional `sensor`
-to publish. HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`) are all optional.
+Home Assistant a `homeAssistant` block naming three `input_number` entities, an optional `sensor`
+to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`) are all optional.
 
 Ask the user for: latitude/longitude (city level is enough), the HA URL, and which blind / lights
 entities belong to the room. Don't guess entity IDs.

@@ -118,8 +118,11 @@ Every key is optional; [`config.example.json`](config.example.json) shows them a
   as the system shows it. `label`, the three levels `day`, `blindDown`, `night` (0–100), and on
   macOS `control`.
 - `homeAssistant`: `url`, `tokenName`, and the entities `autoSwitch`, `sun`, `cover`, `lights`
-  (each optional). A monitor's own `homeAssistant` block names its three `input_number` levels and
-  the `sensor` to publish.
+  (each optional). A monitor's own `homeAssistant` block names its three `input_number` levels,
+  the `sensor` to publish and, optionally, a `set` helper: changing it in Home Assistant sets that
+  monitor right away, even when the computer is idle (dim it from your phone while away). It then
+  counts as a hand-set level: automatic mode keeps it until the target moves `manualHold` points,
+  or for good if you switch automatic off.
 - `manualHold`, and on macOS `ddcTool` (path to `m1ddc` if it is not in Homebrew's usual place).
 
 Use **Reload config** in the panel after editing.

@@ -308,16 +308,30 @@ sealed class Controller {
             m.Manual = false;
             if (m.Cur is not int c) continue;
             int target = Target(s.Levels[i], s, sun);
+            // Set from Home Assistant: acts once per change of the helper, even when this PC is idle
+            // (e.g. dimming from the phone while away). Then it is a hand-set level like any other.
+            bool remote = false;
+            if (s.Remote.ElementAtOrDefault(i) is { } r) {
+                if (m.RemoteSeen == null) m.RemoteSeen = r.Changed;   // first look: an old value is not a command
+                else if (r.Changed > m.RemoteSeen) {
+                    m.RemoteSeen = r.Changed;
+                    int v = (int)Math.Round(Math.Clamp(r.Value, 0, 100), MidpointRounding.AwayFromZero);
+                    Log.Write($"remote: {m.Label} {c}% → {v}% from Home Assistant");
+                    if (c != v) await Task.Run(() => m.Write(v));
+                    m.Cur = c = v; remote = true;
+                    m.LastTarget = target; m.LastSet = v == target ? null : target;   // held as hand-set until the target moves
+                }
+            }
             int applied = c;
             if (AutoOn) {
                 bool handSet = m.LastSet != null && c != m.LastSet;
-                if (handSet && Math.Abs(target - (m.LastTarget ?? target)) < Cfg.Hold) m.Manual = true;
+                if (remote || (handSet && Math.Abs(target - (m.LastTarget ?? target)) < Cfg.Hold)) m.Manual = true;
                 else if (here) {
                     if (c != target) { Log.Write($"auto: {m.Label} {c}% → {target}%"); await Task.Run(() => m.Write(target)); }
                     applied = target; m.Cur = target; m.LastSet = target; m.LastTarget = target;
                 }
             }
-            if (here && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
+            if ((here || remote) && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
                     m.Published = applied;

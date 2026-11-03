@@ -27,6 +27,7 @@ sealed class MonitorHa {
     public string? Day { get; set; }          // input_number entities; override the local numbers
     public string? BlindDown { get; set; }
     public string? Night { get; set; }
+    public string? Set { get; set; }          // input_number: changing it in HA sets this monitor now, even when the PC is idle
 }
 
 sealed class MonitorConfig {

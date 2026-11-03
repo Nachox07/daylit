@@ -20,7 +20,8 @@
         "sensor": "sensor.daylit_left_monitor",
         "day": "input_number.daylit_left_day",
         "blindDown": "input_number.daylit_left_blind_down",
-        "night": "input_number.daylit_left_night"
+        "night": "input_number.daylit_left_night",
+        "set": "input_number.daylit_left_set"
       }
     },
     {

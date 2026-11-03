@@ -7,7 +7,10 @@ using System.Text.Json;
 namespace Daylit;
 
 /// Inputs of one automatic decision. Levels: per monitor [day, blindDown, night].
-sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sat, double[][] Levels, bool? Auto, bool HasBlind);
+sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sat, double[][] Levels, bool? Auto, bool HasBlind) {
+    /// Per monitor: the HA "set" helper's value and when it last changed (Unix s), or null without one.
+    public (double Value, double Changed)?[] Remote { get; init; } = [];
+}
 
 /// Solar elevation from latitude/longitude and the clock (low-precision almanac; matches HA's sun.sun to ~0.01°).
 static class Sun {
@@ -50,7 +53,9 @@ static class HAClient {
         string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson }}}}" : "null";
         string mons_ = string.Join(", ", mons.Select(m => {
             var e = m.Spec?.HomeAssistant;
-            return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}]";
+            string set = e?.Set is { Length: > 0 } st
+                ? $"{Num(st, -1)}, {{{{ as_timestamp(states.{st}.last_changed) if states.{st} else 0 }}}}" : "-1, 0";   // states.domain.name: None when missing
+            return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {set}]";
         }));
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
@@ -85,13 +90,14 @@ static class HAClient {
         if (s == null) return null;
         try {
             var a = JsonSerializer.Deserialize<Answer>(s);
-            if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 3)) {
+            if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 5)) {
                 LastError = "Unexpected answer from Home Assistant"; return null;
             }
             // Local numbers wherever HA has no value.
             var levels = mons.Select((m, i) => new[] {
                 a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover));
+            var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
+            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote };
         } catch { LastError = "Unexpected answer from Home Assistant"; return null; }
     }
 

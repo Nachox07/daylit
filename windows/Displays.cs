@@ -120,6 +120,7 @@ sealed class Mon {
     public Display D;
     public MonitorConfig? Spec;
     public int? Cur, LastSet, LastTarget, Published;
+    public double? RemoteSeen;                 // last_changed of the HA "set" helper already acted on
     public bool Manual;                        // automatic mode is holding a hand-set value
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
     CancellationTokenSource? pending;
