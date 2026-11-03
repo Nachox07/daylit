@@ -4,24 +4,30 @@ import XCTest
 private func utc(_ s: String) -> Date { ISO8601DateFormatter().date(from: s)! }
 
 final class SunTests: XCTestCase {
-    func testMatchesHomeAssistantAtNight() {
-        // Home Assistant's sun.sun reported -10.0° at this time and place (Greenwich).
-        let e = solarElevation(latitude: 51.4769, longitude: -0.0005, at: utc("2026-01-01T00:00:00Z"))
-        XCTAssertEqual(e, -10.0, accuracy: 0.05)
+    // Expected values: NOAA Solar Calculator algorithm (gml.noaa.gov/grad/solcalc), geometric elevation
+    // without refraction, computed independently of Daylit's formula. Daylit agrees to about 0.005°.
+    private let greenwich = (lat: 51.4769, lon: -0.0005)   // Royal Observatory Greenwich
+
+    func testGreenwichJuneSolsticeNoon() {
+        XCTAssertEqual(solarElevation(latitude: greenwich.lat, longitude: greenwich.lon, at: utc("2024-06-21T12:00:00Z")), 61.958, accuracy: 0.05)
+    }
+
+    func testGreenwichDecemberSolsticeNoonAndMidnight() {
+        XCTAssertEqual(solarElevation(latitude: greenwich.lat, longitude: greenwich.lon, at: utc("2024-12-21T12:00:00Z")), 15.084, accuracy: 0.05)
+        XCTAssertEqual(solarElevation(latitude: greenwich.lat, longitude: greenwich.lon, at: utc("2024-12-21T00:00:00Z")), -61.959, accuracy: 0.05)
+    }
+
+    func testGreenwichEquinoxSunrise() {
+        XCTAssertEqual(solarElevation(latitude: greenwich.lat, longitude: greenwich.lon, at: utc("2024-03-20T06:00:00Z")), -1.109, accuracy: 0.05)
     }
 
     func testEquatorAtEquinoxNoonIsOverhead() {
-        // March equinox 2024 (03:06 UTC): declination ≈ 0, so at the equator the noon sun is near 90°.
-        // Solar noon at longitude 0 is about 12:07 UTC that day (equation of time ≈ -7 min).
-        let e = solarElevation(latitude: 0, longitude: 0, at: utc("2024-03-20T12:07:00Z"))
-        XCTAssertEqual(e, 90, accuracy: 0.5)
+        XCTAssertEqual(solarElevation(latitude: 0, longitude: 0, at: utc("2024-03-20T12:07:00Z")), 89.834, accuracy: 0.05)
     }
 
-    func testSummerSolsticeNoon() {
-        // Noon elevation = 90° − latitude + declination; on the June solstice declination = 23.44°.
-        // At longitude �-0.0005° solar noon is about 12:20 UTC.
-        let e = solarElevation(latitude: 51.4769, longitude: -0.0005, at: utc("2026-06-21T12:20:00Z"))
-        XCTAssertEqual(e, 90 - 51.4769 + 23.44, accuracy: 0.3)
+    func testSouthernHemisphereEastLongitude() {
+        // Sydney Opera House, 01:00 local time.
+        XCTAssertEqual(solarElevation(latitude: -33.8568, longitude: 151.2153, at: utc("2024-09-22T15:00:00Z")), -52.095, accuracy: 0.05)
     }
 
     func testDaylightFraction() {

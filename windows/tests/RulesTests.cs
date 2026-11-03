@@ -5,23 +5,19 @@ namespace Daylit.Tests;
 public class SunTests {
     static DateTimeOffset Utc(string s) => DateTimeOffset.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
 
-    [Fact]
-    public void MatchesHomeAssistantAtNight() {
-        // Home Assistant's sun.sun reported -10.0° at this time and place (Greenwich).
-        Assert.Equal(-10.0, Sun.Elevation(Utc("2026-01-01T00:00:00Z"), 51.4769, -0.0005), 0.05);
-    }
+    // Expected values: NOAA Solar Calculator algorithm (gml.noaa.gov/grad/solcalc), geometric elevation
+    // without refraction, computed independently of Daylit's formula. Daylit agrees to about 0.005°.
+    const double GreenwichLat = 51.4769, GreenwichLon = -0.0005;   // Royal Observatory Greenwich
 
-    [Fact]
-    public void EquatorAtEquinoxNoonIsOverhead() {
-        // March equinox 2024: declination ≈ 0, so at the equator the noon sun (≈12:07 UTC at longitude 0) is near 90°.
-        Assert.Equal(90, Sun.Elevation(Utc("2024-03-20T12:07:00Z"), 0, 0), 0.5);
-    }
-
-    [Fact]
-    public void SummerSolsticeNoon() {
-        // Noon elevation = 90° − latitude + declination; on the June solstice declination = 23.44°.
-        Assert.Equal(90 - 51.4769 + 23.44, Sun.Elevation(Utc("2026-06-21T12:20:00Z"), 51.4769, -0.0005), 0.3);
-    }
+    [Theory]
+    [InlineData("2024-06-21T12:00:00Z", GreenwichLat, GreenwichLon, 61.958)]    // June solstice noon
+    [InlineData("2024-12-21T12:00:00Z", GreenwichLat, GreenwichLon, 15.084)]    // December solstice noon
+    [InlineData("2024-12-21T00:00:00Z", GreenwichLat, GreenwichLon, -61.959)]   // December solstice midnight
+    [InlineData("2024-03-20T06:00:00Z", GreenwichLat, GreenwichLon, -1.109)]    // equinox, just before sunrise
+    [InlineData("2024-03-20T12:07:00Z", 0, 0, 89.834)]                          // equator, equinox noon
+    [InlineData("2024-09-22T15:00:00Z", -33.8568, 151.2153, -52.095)]           // Sydney, 01:00 local
+    public void MatchesNoaaReference(string utc, double lat, double lon, double expected) =>
+        Assert.Equal(expected, Sun.Elevation(Utc(utc), lat, lon), 0.05);
 
     [Theory]
     [InlineData(-10, 0)] [InlineData(-3, 0)] [InlineData(4.5, 0.5)] [InlineData(12, 1)] [InlineData(60, 1)]
