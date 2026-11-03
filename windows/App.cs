@@ -308,7 +308,15 @@ sealed class Controller {
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Home Assistant unreachable — using the sun · " + where
                  : Source == Source.Sun ? "Sun · " + where
-                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + (s.Lights ? " · lights on" : "");
+                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + LightsNote(s);
+    }
+
+    /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
+    static string LightsNote(Inputs s) {
+        if (!s.Lights) return "";
+        if (s.Bri <= 0) return " · lights on";
+        string tone = s.Sat <= 35 ? " white" : s.Sat > 45 ? " warm" : "";
+        return $" · lights {(int)Math.Round(s.Bri / 2.55)}%{tone}";
     }
 
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
