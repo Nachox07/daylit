@@ -42,8 +42,14 @@ sealed class SettingsWindow : Window {
         ("homeAssistant", "Home Assistant", "The sun, a blind and the room lights from Home Assistant. With a location, the sun takes over when Home Assistant is down."),
     ];
 
-    SettingsWindow(Controller app) {
+    readonly string path;
+    /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
+    public static DateTimeOffset? FixedNow;
+
+    /// `path` is the config file to edit; snapshots pass a made-up one.
+    public SettingsWindow(Controller app, string? path = null) {
         this.app = app;
+        this.path = path ?? Config.PathName;
         Title = "Daylit settings";
         Width = 520; Height = 700; MinWidth = 440; MinHeight = 420;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -89,6 +95,9 @@ sealed class SettingsWindow : Window {
         Content = root;
         Load();
     }
+
+    /// Snapshots: the window's content, to render offscreen.
+    public FrameworkElement Detach() { var c = (FrameworkElement)Content; Content = null; return c; }
 
     // MARK: layout helpers
 
@@ -156,8 +165,8 @@ sealed class SettingsWindow : Window {
     string SourceTag => (source.SelectedItem as ComboBoxItem)?.Tag as string ?? "off";
 
     void Load() {
-        try { opened = File.Exists(Config.PathName) ? File.ReadAllText(Config.PathName) : null; } catch { opened = null; }
-        var (c, _) = Config.Load();
+        try { opened = File.Exists(path) ? File.ReadAllText(path) : null; } catch { opened = null; }
+        var (c, _) = Config.Load(path);
         string tag = c.Source?.Trim() is { Length: > 0 } s ? s
                    : c.Effective == Source.HomeAssistant ? "homeAssistant" : c.Effective == Source.Sun ? "sun" : "off";
         source.SelectedIndex = Math.Max(0, Array.FindIndex(Sources, x => string.Equals(x.tag, tag, StringComparison.OrdinalIgnoreCase)));
@@ -197,7 +206,7 @@ sealed class SettingsWindow : Window {
 
     /// The level each monitor would have right now with the blind open and the lights off: a preview only.
     void Refresh() {
-        double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(DateTimeOffset.UtcNow, a, b) : null;
+        double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
             var parts = new List<string>();
@@ -225,17 +234,17 @@ sealed class SettingsWindow : Window {
                                                       (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value)).ToList(),
             haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text);
         try {
-            string? now = File.Exists(Config.PathName) ? File.ReadAllText(Config.PathName) : null;
+            string? now = File.Exists(path) ? File.ReadAllText(path) : null;
             if (now != opened) {
                 Load();
                 Say("config.json changed while this window was open. It now shows the new file; check it and save again.", true);
                 return;
             }
             var text = ConfigPatch.Apply(edit, now);
-            Directory.CreateDirectory(Config.Dir);
-            string tmp = Config.PathName + ".tmp";
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string tmp = path + ".tmp";
             File.WriteAllText(tmp, text);
-            File.Move(tmp, Config.PathName, overwrite: true);
+            File.Move(tmp, path, overwrite: true);
             Log.Write($"settings: saved config.json (source={edit.Source})");
             app.Reload();
             Close();
@@ -282,7 +291,7 @@ sealed class SettingsWindow : Window {
     }
 
     void AskToken() {
-        var (c, _) = Config.Load();
+        var (c, _) = Config.Load(path);
         var t = TokenDialog.Ask(c.TokenName);
         if (t == null) return;
         if (Cred.Write(c.TokenName, "homeassistant", t)) { HAClient.Token = t; Say("Token saved.", false); }
@@ -293,7 +302,7 @@ sealed class SettingsWindow : Window {
     async Task Test() {
         var ids = new[] { cover.Text, lights.Text, autoSwitch.Text, sun.Text }.Select(s => s.Trim()).Where(s => s != "").ToList();
         if (ids.FirstOrDefault(s => !Config.IsEntityId(s)) is { } bad) { Say($"\"{bad}\" is not an entity id like light.office.", true); return; }
-        var (c, _) = Config.Load();
+        var (c, _) = Config.Load(path);
         var probe = new Config { HomeAssistant = new HaConfig { Url = haUrl.Text.Trim(), TokenName = c.HomeAssistant?.TokenName } };
         HAClient.Token ??= Cred.Read(probe.TokenName);
         string template = ids.Count == 0 ? "ok" : string.Join(" ", ids.Select(id => $"{{{{ '{id}' if states('{id}') in ['unknown', 'unavailable'] else '' }}}}"));

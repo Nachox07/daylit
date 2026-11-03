@@ -74,6 +74,11 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var locating = false
     let close: () -> Void
+    var path: URL = Config.path              // snapshots pass a made-up file
+    var height: CGFloat = 620                // snapshots show the whole form
+    /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
+    nonisolated(unsafe) static var fixedNow: Date?
+    static var now: Date { fixedNow ?? Date() }
     @ObservedObject var locator: Locator   // made by the caller: CI's older Swift rejects a main-actor @State default
 
     var body: some View {
@@ -95,7 +100,7 @@ struct SettingsView: View {
                     HStack {
                         Button(locating ? "Locating…" : "Locate Me", action: locate).disabled(locating)
                         Spacer()
-                        if let l = coords { Text(String(format: "Sun now %.1f°", solarElevation(latitude: l.0, longitude: l.1)))
+                        if let l = coords { Text(String(format: "Sun now %.1f°", solarElevation(latitude: l.0, longitude: l.1, at: Self.now)))
                             .font(.caption).foregroundStyle(.secondary) }
                     }
                 } header: { Text("Location") } footer: {
@@ -149,7 +154,8 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .frame(width: 480, height: 620)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(width: 480, height: height)
         .onAppear(perform: load)
     }
 
@@ -179,7 +185,7 @@ struct SettingsView: View {
     func caption(_ d: MonitorDraft) -> String {
         var s = ""
         if let l = coords {
-            let t = target(day: d.day, blindDown: d.blindDown, night: d.night, elev: solarElevation(latitude: l.0, longitude: l.1), pos: 100, lights: false)
+            let t = target(day: d.day, blindDown: d.blindDown, night: d.night, elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false)
             s = "Right now: \(t)% with the blind open."
         }
         if d.haLevels { s += (s.isEmpty ? "" : " ") + "Home Assistant helpers set these levels; these apply only when it cannot be reached." }
@@ -187,9 +193,8 @@ struct SettingsView: View {
     }
 
     func load() {
-        let p = Config.path
-        opened = try? Data(contentsOf: p)
-        let (c, _) = Config.load()
+        opened = try? Data(contentsOf: path)
+        let (c, _) = Config.load(from: path)
         let (src, _) = c.resolvedSource()
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
@@ -218,7 +223,7 @@ struct SettingsView: View {
 
     func save() {
         guard let e = edit() else { return }
-        let p = Config.path
+        let p = path
         let now = try? Data(contentsOf: p)
         if now != opened {
             load()

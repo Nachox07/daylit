@@ -35,6 +35,11 @@ static class Snapshots {
                 Save(Frame(root, 340, Palette.Solid, 8), Path.Combine(dir, $"{name}-{mode}.png"));
                 flyout.Close();
             }
+            File.WriteAllText(tmp, SettingsJson);
+            SettingsWindow.FixedNow = DateTimeOffset.FromUnixTimeSeconds(1_781_870_400);   // 2026-06-19 12:00 UTC
+            var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp);
+            Save(Frame(settings.Detach(), 520, Palette.Solid, 8), Path.Combine(dir, $"settings-{mode}.png"));
+            settings.Close();
             var osd = new Osd();
             Save(Frame(osd.Detach("Studio Display", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
             osd.Close();
@@ -42,6 +47,13 @@ static class Snapshots {
         File.Delete(tmp);
         return 0;
     }
+
+    const string SettingsJson = """
+        { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
+          "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
+          "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
+                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ] }
+        """;
 
     static Mon Fake(string label, int level, bool hdr = false, bool manual = false) =>
         new(new Display { Friendly = label, Gdi = @"\\.\DISPLAY" + label.Length, Hdr = hdr, DevicePath = "snapshot-" + label }, null) {
