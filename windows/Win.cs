@@ -88,12 +88,21 @@ static class Settings {
     public static bool? SyncOverride;
     public static SyncOffsets SyncOffsets {
         get {
+            if (SyncOverride != null) return new SyncOffsets();   // snapshots never read or write the registry
+            var s = new SyncOffsets();
             try {
-                return Registry.CurrentUser.OpenSubKey(Key)?.GetValue("SyncOffsets") is string j
-                    ? new SyncOffsets { Offsets = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(j) ?? new() } : new SyncOffsets();
-            } catch { return new SyncOffsets(); }
+                var k = Registry.CurrentUser.OpenSubKey(Key);
+                if (k?.GetValue("SyncOffsets") is string j) s.Offsets = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(j) ?? new();
+                if (k?.GetValue("SyncExcluded") is string x) s.Excluded = System.Text.Json.JsonSerializer.Deserialize<HashSet<string>>(x) ?? new();
+            } catch { }
+            return s;
         }
-        set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SyncOffsets", System.Text.Json.JsonSerializer.Serialize(value.Offsets)); }
+        set {
+            if (SyncOverride != null) return;
+            using var k = Registry.CurrentUser.CreateSubKey(Key);
+            k.SetValue("SyncOffsets", System.Text.Json.JsonSerializer.Serialize(value.Offsets));
+            k.SetValue("SyncExcluded", System.Text.Json.JsonSerializer.Serialize(value.Excluded));
+        }
     }
 
     /// Hand-set levels kept across restarts (JSON, see SavedHolds).
