@@ -63,6 +63,13 @@ public struct Config: Decodable {
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/daylit/config.json")
     }()
 
+    /// The path with the home folder shown as ~, for output a user may paste somewhere.
+    public static var displayPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let p = path.path
+        return p.hasPrefix(home + "/") ? "~" + p.dropFirst(home.count) : p
+    }
+
     /// A missing file is fine (all defaults). A broken one is reported, and the app still runs with defaults.
     /// A file that parses but fails validation keeps only the safe parts (monitors and local settings) and
     /// drops the source settings, so a bad entity id or URL is never sent to Home Assistant.
@@ -119,13 +126,23 @@ public struct Config: Decodable {
     public static func isCleartextToNonLocal(_ s: String) -> Bool {
         guard let u = URL(string: s), u.scheme?.lowercased() == "http", let host = u.host?.lowercased() else { return false }
         if host == "localhost" || host.hasSuffix(".local") || !host.contains(".") && !host.contains(":") { return false }
-        let p = host.split(separator: ".").compactMap { Int($0) }
-        if p.count == 4 {
-            if p[0] == 10 || p[0] == 127 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && (16...31).contains(p[1])) || (p[0] == 169 && p[1] == 254) { return false }
-            return true
+        let h = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        // Only real IP literals count as addresses: "10.1.2.3.example.com" is a name, not 10.1.2.3.
+        var v4 = in_addr()
+        if inet_pton(AF_INET, h, &v4) == 1 {
+            let b = withUnsafeBytes(of: v4.s_addr) { Array($0) }   // network byte order
+            let local = b[0] == 10 || b[0] == 127 || (b[0] == 192 && b[1] == 168)
+                || (b[0] == 172 && (16...31).contains(b[1])) || (b[0] == 169 && b[1] == 254)
+            return !local
         }
-        let h6 = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if h6 == "::1" || h6.hasPrefix("fe80:") || h6.hasPrefix("fc") || h6.hasPrefix("fd") { return false }
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, h, &v6) == 1 {
+            let b = withUnsafeBytes(of: v6) { Array($0) }
+            let loopback = b[0..<15].allSatisfy { $0 == 0 } && b[15] == 1
+            let uniqueLocal = b[0] & 0xFE == 0xFC                  // fc00::/7
+            let linkLocal = b[0] == 0xFE && b[1] & 0xC0 == 0x80   // fe80::/10
+            return !(loopback || uniqueLocal || linkLocal)
+        }
         return true
     }
     static func describe(_ e: Error) -> String {

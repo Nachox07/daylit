@@ -139,7 +139,12 @@ sealed class Controller {
         panel.Hide();
         var t = TokenDialog.Ask(Cfg.TokenName);
         if (t == null) return;
-        Cred.Write(Cfg.TokenName, "homeassistant", t);
+        if (!Cred.Write(Cfg.TokenName, "homeassistant", t)) {
+            Log.Write("token: Credential Manager refused to store it");
+            System.Windows.MessageBox.Show("Windows could not save the token in Credential Manager, so Daylit can't use it. Try again from the tray menu.",
+                "Daylit", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
         HAClient.Token = t;
         _ = Tick("token");
     }

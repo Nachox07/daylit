@@ -262,6 +262,12 @@ final class ConfigTests: XCTestCase {
         }
         XCTAssertTrue(Config.isCleartextToNonLocal("http://ha.example.com"))
         XCTAssertTrue(Config.isCleartextToNonLocal("http://203.0.113.5:8123"))
+        // A name that merely starts like a private IP or like fc00::/7 is still a public name.
+        XCTAssertTrue(Config.isCleartextToNonLocal("http://10.1.2.3.example.com"))
+        XCTAssertTrue(Config.isCleartextToNonLocal("http://fd.example.com"))
+        XCTAssertTrue(Config.isCleartextToNonLocal("http://[2001:db8::1]:8123"))
+        XCTAssertFalse(Config.isCleartextToNonLocal("http://[::1]:8123"))
+        XCTAssertFalse(Config.isCleartextToNonLocal("http://[fe80::1]"))
     }
 }
 

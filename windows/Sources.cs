@@ -81,12 +81,13 @@ static class Cred {
             return c.BlobSize == 0 ? null : Marshal.PtrToStringUni(c.Blob, (int)c.BlobSize / 2).Trim();
         } finally { CredFree(p); }
     }
-    public static void Write(string target, string user, string secret) {
+    /// False when Windows refused to store it (the caller must not treat the token as saved).
+    public static bool Write(string target, string user, string secret) {
         var b = Encoding.Unicode.GetBytes(secret); var h = Marshal.AllocHGlobal(b.Length);
         try {
             Marshal.Copy(b, 0, h, b.Length);
             var c = new CREDENTIAL { Type = 1, TargetName = target, UserName = user, BlobSize = (uint)b.Length, Blob = h, Persist = 2 /* LOCAL_MACHINE */ };
-            CredWriteW(ref c, 0);
+            return CredWriteW(ref c, 0);
         } finally { Marshal.FreeHGlobal(h); }
     }
 }

@@ -88,7 +88,7 @@ static class Cli {
             notes.Add("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://");
         var result = new {
             ok = problems.Count == 0,
-            path = Config.PathName,
+            path = Config.DisplayPath,
             exists,
             source = cfg.Effective.ToString(),
             problems,

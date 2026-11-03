@@ -51,7 +51,7 @@ import DaylitCore
                 if forced != "ddc", let v = Native.get(id) { control = "native"; level = v }
                 else if forced != "native", DDC.available { control = "ddc"; level = DDC.get(uuid) }
                 else if forced == "native" { control = "native" }
-                else { control = "none (install m1ddc for DDC monitors)" }
+                else { control = "none (\(DDC.hint))" }
             }
             var o: [String: Any] = ["name": s.localizedName, "match": suggestMatch(s.localizedName), "uuid": uuid,
                                     "builtIn": builtIn, "control": control, "controllable": !builtIn && level != nil]
@@ -84,9 +84,9 @@ import DaylitCore
         }
         if !exists { notes.append("no config.json: Daylit runs with sliders and brightness keys only") }
         if (cfg.monitors ?? []).contains(where: { $0.control != "native" }) || cfg.monitors == nil, !DDC.available {
-            notes.append("m1ddc not found: DDC monitors need it (brew install m1ddc)")
+            notes.append(DDC.missingNote)
         }
-        var result: [String: Any] = ["ok": problems.isEmpty, "path": Config.path.path, "exists": exists,
+        var result: [String: Any] = ["ok": problems.isEmpty, "path": Config.displayPath, "exists": exists,
                                      "source": "\(src)", "problems": problems, "notes": notes, "monitors": monitors]
         if src == .homeAssistant, let ha = cfg.homeAssistant {
             let name = ha.tokenName ?? "daylit-home-assistant"

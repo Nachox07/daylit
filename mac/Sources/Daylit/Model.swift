@@ -255,11 +255,15 @@ import DaylitCore
         let p = Config.path
         if !FileManager.default.fileExists(atPath: p.path) {
             try? FileManager.default.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let monitors = mons.map { m in
-                "    { \"match\": \"\(m.name)\", \"label\": \"\(m.label)\", \"control\": \"\(m.control == .none ? "auto" : m.control.rawValue)\", \"day\": 70, \"blindDown\": 40, \"night\": 20 }"
-            }.joined(separator: ",\n")
-            let text = "{\n  \"manualHold\": 5,\n  \"monitors\": [\n\(monitors)\n  ]\n}\n"
-            try? text.write(to: p, atomically: true, encoding: .utf8)
+            // Serialized, not interpolated: a monitor name with a quote or backslash stays valid JSON.
+            let monitors: [[String: Any]] = mons.map { m in
+                ["match": m.name, "label": m.label, "control": m.control == .none ? "auto" : m.control.rawValue,
+                 "day": 70, "blindDown": 40, "night": 20]
+            }
+            let root: [String: Any] = ["manualHold": 5, "monitors": monitors]
+            if let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: p, options: .atomic)
+            }
         }
         let o = Process(); o.executableURL = URL(fileURLWithPath: "/usr/bin/open"); o.arguments = ["-t", p.path]
         try? o.run()

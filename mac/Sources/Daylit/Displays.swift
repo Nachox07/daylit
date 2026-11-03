@@ -52,6 +52,21 @@ enum DDC {
     static let defaultTool = ["/opt/homebrew/bin/m1ddc", "/usr/local/bin/m1ddc"]
         .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/opt/homebrew/bin/m1ddc"
     static var available: Bool { FileManager.default.isExecutableFile(atPath: tool) }
+    /// Why DDC isn't available here: m1ddc only exists for Apple silicon.
+    static var hint: String {
+        #if arch(arm64)
+        return "install m1ddc for DDC monitors"
+        #else
+        return "DDC needs an Apple-silicon Mac"
+        #endif
+    }
+    static var missingNote: String {
+        #if arch(arm64)
+        return "m1ddc not found: DDC monitors need it (brew install m1ddc)"
+        #else
+        return "DDC monitors are not supported on Intel Macs (m1ddc is Apple silicon only); monitors that accept macOS's own brightness control still work"
+        #endif
+    }
 
     static func run(_ args: [String]) -> String? {
         let p = Process(); p.executableURL = URL(fileURLWithPath: tool); p.arguments = args

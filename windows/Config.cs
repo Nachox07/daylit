@@ -59,6 +59,8 @@ sealed class Config {
 
     public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Daylit");
     public static readonly string PathName = Path.Combine(Dir, "config.json");
+    /// The path as %APPDATA%\…, for output a user may paste somewhere (no user name).
+    public static string DisplayPath => @"%APPDATA%\Daylit\config.json";
 
     static readonly JsonSerializerOptions Json = new() {
         PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };

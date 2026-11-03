@@ -4,7 +4,7 @@
 //
 //  - "native" monitors: macOS's own brightness API (DisplayServices). Works while HDR is on,
 //    when most monitors ignore DDC brightness.
-//  - "ddc" monitors: DDC/CI through m1ddc (brew install m1ddc).
+//  - "ddc" monitors: DDC/CI through m1ddc (brew install m1ddc; Apple silicon only).
 //  - Settings live in ~/.config/daylit/config.json (DAYLIT_CONFIG overrides the path); the Home
 //    Assistant token in the keychain. DAYLIT_DEBUG=1 logs to stdout.
 import SwiftUI

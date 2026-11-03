@@ -87,7 +87,7 @@ struct Panel: View {
     }
 
     func note(_ mon: Mon, usable: Bool, unknown: Bool) -> String? {
-        if mon.control == .none { return "No brightness control found (install m1ddc for DDC monitors)." }
+        if mon.control == .none { return "No brightness control found (\(DDC.hint))." }
         if unknown { return "This monitor doesn't report its brightness. Move the slider to set it." }
         if mon.control == .ddc && mon.readState == .writeOnly { return "Doesn't report its brightness: the slider shows the last level sent." }
         if mon.control == .ddc && mon.readState == .silent { return "This monitor refused the change. Check that DDC/CI is on in its menu." }

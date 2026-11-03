@@ -220,6 +220,8 @@ public class ConfigTests {
     [InlineData("http://homeassistant.local:8123", false)] [InlineData("http://homeassistant:8123", false)]
     [InlineData("http://localhost:8123", false)] [InlineData("http://[fd00::1]:8123", false)] [InlineData("https://ha.example.com", false)]
     [InlineData("http://ha.example.com", true)] [InlineData("http://203.0.113.5:8123", true)]
+    [InlineData("http://10.1.2.3.example.com", true)] [InlineData("http://fd.example.com", true)]
+    [InlineData("http://[2001:db8::1]:8123", true)] [InlineData("http://[::1]:8123", false)] [InlineData("http://[fe80::1]", false)]
     public void CleartextNote(string url, bool warn) => Assert.Equal(warn, Config.IsCleartextToNonLocal(url));
 }
 
