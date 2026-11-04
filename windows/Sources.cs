@@ -10,6 +10,11 @@ namespace Daylit;
 sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sat, double[][] Levels, bool? Auto, bool HasBlind) {
     /// Per monitor: the HA "set" helper's value and when it last changed (Unix s), or null without one.
     public (double Value, double Changed)?[] Remote { get; init; } = [];
+    /// The light sensor's reading (-1: none or not a number) and seconds since it last reported (-1: no sensor).
+    public double Light { get; init; } = -1;
+    public double LightAge { get; init; } = -1;
+    /// How clear the sky is, 0…1, when the light sensor says.
+    public double? LightRatio { get; init; }
 }
 
 /// Home Assistant REST: one template call per tick returns everything; sensors are posted back.
@@ -22,7 +27,7 @@ static class HAClient {
     /// The last failure was a connection problem that usually clears by itself (see HaErrorRule).
     public static bool Transient;
 
-    record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100);
+    record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100, double light = -1, double lightAge = -1);
 
     public static async Task<string?> Call(Config c, string path, object body) {
         if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; Transient = false; return null; }
@@ -58,17 +63,40 @@ static class HAClient {
             var levels = mons.Select((m, i) => new[] {
                 a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
             var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote };
+            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge };
         } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
+    }
+
+    static readonly HttpClient slow = new() { Timeout = TimeSpan.FromSeconds(60) };
+
+    /// The last `days` of a sensor's history, as Home Assistant returns it, or the cause of the failure.
+    /// Leaves LastError and Transient alone: it runs beside the tick, which reads them.
+    public static async Task<(string? Body, string? Cause)> History(Config c, string entity, double days) {
+        if (c.HomeAssistant?.Url is not { } url || Token == null) return (null, "not configured");
+        static string Iso(DateTimeOffset t) =>
+            t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture).Replace("+", "%2B");   // "+" would read as a space
+        var end = DateTimeOffset.UtcNow; var start = end.AddDays(-days);
+        string path = $"/api/history/period/{Iso(start)}?end_time={Iso(end)}&filter_entity_id={entity}&minimal_response&no_attributes";
+        try {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + path);
+            req.Headers.Authorization = new("Bearer", Token);
+            using var r = await slow.SendAsync(req);
+            if (!r.IsSuccessStatusCode) return (null, $"HTTP {(int)r.StatusCode}");
+            return (await r.Content.ReadAsStringAsync(), null);
+        } catch (Exception e) {
+            var inner = e.InnerException ?? e;
+            return (null, $"{inner.GetType().Name}: {inner.Message}");
+        }
     }
 
     public static Task<string?> Publish(Config c, Mon m, int applied, int target, bool manual, double sun, Inputs s) =>
         !Config.IsEntityId(m.Spec!.HomeAssistant!.Sensor ?? "") ? Task.FromResult<string?>(null) :
         Call(c, "/api/states/" + m.Spec!.HomeAssistant!.Sensor, new {
             state = applied,
-            attributes = new Dictionary<string, object> {
+            attributes = new Dictionary<string, object?> {
                 ["friendly_name"] = m.Label + " brightness", ["unit_of_measurement"] = "%", ["icon"] = "mdi:monitor",
                 ["target"] = target, ["manual"] = manual, ["offset"] = m.Offset ?? 0, ["daylight"] = Math.Round(sun * 100) / 100,
+                ["light"] = s.LightRatio is double lr ? Math.Round(lr * 100, MidpointRounding.AwayFromZero) / 100 : null,   // how clear the sky is
                 ["sun_elevation"] = s.Elev, ["blind"] = s.Pos, ["lights"] = s.Lights, ["source"] = "Windows" } });
 
     public static Task<string?> SetSwitch(Config c, bool on) =>

@@ -681,3 +681,92 @@ public class TuningTests {
         Assert.Equal("config.json: tuning.timing.pollSeconds must be 5–3600", Err("""{ "tuning": { "timing": { "pollSeconds": 1 } } }"""));
     }
 }
+
+public class LightTests {
+    static LightReference Ref() {
+        // Clear mornings read up to 500 at 10–12°, noon 1600 at 30–32°.
+        var s = new List<LightSample>();
+        for (int k = 0; k < 10; k++) { s.Add(new(11, true, 50 + k * 50)); s.Add(new(31, true, 1600)); }
+        return new LightReference(s);
+    }
+
+    [Fact]
+    public void TheReferenceIsTheNinetiethPercentileOfEachStep() {
+        var r = Ref();
+        Assert.Equal(450, r.ClearSky(10.5, true));   // 50…500: the 90th percentile
+        Assert.Null(r.ClearSky(10.5, false));         // afternoons are learned apart
+        Assert.Null(new LightReference([new(11, true, 400), new(11, true, 400)]).ClearSky(11, true));   // too few
+    }
+
+    [Fact]
+    public void ACloudyMorningReadsAsAFractionOfClearSky() {
+        Assert.Equal(0.1, LightRules.Ratio(45, 11, true, Ref())!.Value, 1e-9);
+        Assert.Equal(1, LightRules.Ratio(900, 11, true, Ref()));   // brighter than clear: 1
+    }
+
+    [Fact]
+    public void AZeroWithTheSunUpIsAFaultNotACloud() {
+        Assert.Null(LightRules.Ratio(0, 31, true, Ref()));
+        Assert.Null(LightRules.Ratio(null, 31, true, Ref()));
+        Assert.Null(LightRules.Ratio(300, -1, true, Ref()));
+    }
+
+    [Fact]
+    public void OvercastKeepsTheFloorAndDawnFadesIn() {
+        Assert.Equal(0.35, LightRules.Scale(0, 20, 0.35), 1e-9);
+        Assert.Equal(1, LightRules.Scale(1, 20, 0.35));
+        Assert.Equal(0.675, LightRules.Scale(0, 4.5, 0.35), 1e-9);   // half faded in
+        Assert.Equal(1, LightRules.Scale(0, 2, 0.35));
+        Assert.Equal(1, LightRules.Scale(null, 20, 0.35));
+    }
+
+    [Fact]
+    public void DimmingIsQuickerThanBrightening() {
+        double down = LightRules.Smooth(1, 0.35, 120), up = LightRules.Smooth(0.35, 1, 120);
+        Assert.True(down < 1 - 0.6 * 0.65);   // most of the way down in 2 minutes
+        Assert.True(up < 0.35 + 0.4 * 0.65);  // under half way up
+        Assert.Equal(0.5, LightRules.Smooth(null, 0.5, 0));
+    }
+
+    [Fact]
+    public void TheLightScaleDimsOnlyTheDaylightPart() {
+        // day 70, night 20, full sun: clear 70; overcast keeps 35% of the 50-point daylight part.
+        var t = new Tuning();
+        Assert.Equal(70, Rules.Target([70, 40, 20], 100, false, t.Fraction(30), t));
+        Assert.Equal(38, Rules.Target([70, 40, 20], 100, false, t.Fraction(30), t, light: 0.35));
+        Assert.Equal(20, Rules.Target([70, 40, 20], 100, false, t.Fraction(-10), t, light: 0.35));
+    }
+
+    [Fact]
+    public void HistoryReadingsGetTheSunsPosition() {
+        const string json = """
+            [[{"entity_id":"sensor.pv","state":"300","last_changed":"2026-06-21T12:00:00+00:00"},
+              {"state":"unavailable","last_changed":"2026-06-21T12:01:00+00:00"},
+              {"state":"0","last_changed":"2026-06-21T23:00:00.123+00:00"}]]
+            """;
+        var s = LightRules.Samples(json, 51.48, 0);
+        Assert.Single(s);                  // the night reading and the non-number are skipped
+        Assert.Equal(300, s[0].Value);
+        Assert.True(s[0].Elev > 60);       // midsummer noon at Greenwich
+    }
+
+    [Fact]
+    public void ALightSensorNeedsALocation() {
+        string Err(string json) {
+            string p = Path.Combine(Path.GetTempPath(), $"daylit-light-{Guid.NewGuid():N}.json");
+            File.WriteAllText(p, json);
+            try { return Config.Load(p).error ?? ""; } finally { File.Delete(p); }
+        }
+        Assert.Equal("config.json: homeAssistant.light needs a location",
+                     Err("""{ "homeAssistant": { "url": "http://homeassistant.local:8123", "light": "sensor.pv_power" } }"""));
+        Assert.Equal("", Err("""{ "location": { "latitude": 51.48, "longitude": 0.00 }, "homeAssistant": { "url": "http://homeassistant.local:8123", "light": "sensor.pv_power" } }"""));
+    }
+
+    [Fact]
+    public void TheTemplateAsksForTheLightSensor() {
+        var t = HaTemplate.Build(new HaConfig { Url = "http://x", Light = "sensor.pv_power" }, []);
+        Assert.Contains("states('sensor.pv_power') | float(-1)", t);
+        Assert.Contains("\"lightAge\"", t);
+        Assert.Contains("\"light\": -1", HaTemplate.Build(new HaConfig { Url = "http://x" }, []));
+    }
+}
