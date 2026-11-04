@@ -53,24 +53,24 @@ struct Tile: View {
 }
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case displays, automatic, homeAssistant, appearance, tuning, app
+    case displays, automatic, homeAssistant, appearance, app
     var id: String { rawValue }
     var title: String {
         switch self {
         case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"
-        case .appearance: "Appearance"; case .tuning: "Tuning"; case .app: "App"
+        case .appearance: "Appearance"; case .app: "App"
         }
     }
     var color: Color {
         switch self {
         case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue
-        case .appearance: .indigo; case .tuning: .pink; case .app: .gray
+        case .appearance: .indigo; case .app: .gray
         }
     }
     var icon: String {
         switch self {
         case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"
-        case .appearance: "circle.lefthalf.filled"; case .tuning: "slider.horizontal.3"; case .app: "gearshape"
+        case .appearance: "circle.lefthalf.filled"; case .app: "gearshape"
         }
     }
 }
@@ -198,7 +198,6 @@ struct SettingsView: View {
         case .automatic: automaticPane
         case .homeAssistant: homeAssistantPane
         case .appearance: appearancePane
-        case .tuning: tuningPane
         case .app: appPane
         }
     }
@@ -271,6 +270,17 @@ struct SettingsView: View {
                 Text("City level is enough; Daylit saves two decimals (about 1 km) and computes the sun on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if source != "off", let curve = sunCurve(["brightness.sunDay": ("Full day", Color.orange, false), "brightness.sunNight": ("Night", Color.indigo, true)], preview: true) {
+                Section { curve } header: { Text("When the screens brighten") } footer: {
+                    Text("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    DisclosureGroup("Exact values") {
+                        ForEach(Tuning.tuningFields.filter { $0.group == "brightness" }) { number($0) }
+                    }
+                } footer: { tuningFooter(Tuning.tuningFields.filter { $0.group == "brightness" }) }
+            }
         }
     }
 
@@ -316,7 +326,7 @@ struct SettingsView: View {
                     Button("Open Config File") { m.openConfig() }
                 }
             } header: { Text("Advanced") } footer: {
-                Text(Config.displayPath + ". Everything in this window is saved there; other keys are kept.")
+                Text(Config.displayPath + ". Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -343,31 +353,11 @@ struct SettingsView: View {
                 }
             }
             Section {
-                ForEach(Tuning.appearanceFields.filter { themeRoom && source == "homeAssistant" || $0.group != "theme" || ["lightSunAbove", "darkSunBelow"].contains($0.key) }) { number($0) }
-            } header: { Text("When to switch") } footer: {
-                tuningFooter(Tuning.appearanceFields)
-            }
-        }
-    }
-
-    var tuningPane: some View {
-        Form {
-            if let curve = sunCurve(["brightness.sunDay": ("Full day", Color.orange, false), "brightness.sunNight": ("Night", Color.indigo, true)], preview: true) {
-                Section { curve } header: { Text("Today's sun") } footer: {
-                    Text("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")
-                        .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Exact values") {
+                    ForEach(Tuning.appearanceFields.filter { themeRoom && source == "homeAssistant" || $0.group != "theme" || ["lightSunAbove", "darkSunBelow"].contains($0.key) }) { number($0) }
                 }
-            }
-            Section {
-                ForEach(Tuning.tuningFields.filter { $0.group == "brightness" }) { number($0) }
-            } header: { Text("Exact values") } footer: {
-                Text("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section {
-                ForEach(Tuning.tuningFields.filter { $0.group == "timing" }) { number($0) }
-            } header: { Text("Timing") } footer: {
-                tuningFooter(Tuning.tuningFields)
+            } footer: {
+                tuningFooter(Tuning.appearanceFields)
             }
         }
     }

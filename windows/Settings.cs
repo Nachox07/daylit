@@ -65,7 +65,11 @@ sealed class SettingsWindow : Window {
         var displaysPane = Pane(monitors);
         var automaticPane = Pane(Card(null, Field("Brightness follows", source), sourceHint),
             Card("Location", Field("Latitude", lat, "51.48"), Field("Longitude", lon, "0.00"), Row(locate, sunNow),
-                 Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")));
+                 Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")),
+            brightnessCard = Card("When the screens brighten", dayCurve,
+                 Hint("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between."),
+                 new Expander { Header = "Exact values", Margin = new Thickness(0, 8, 0, 0),
+                                Content = TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")) }));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
         token.Click += (_, _) => AskToken();
         var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token)),
@@ -86,20 +90,14 @@ sealed class SettingsWindow : Window {
         var appearancePane = Pane(Card(null, look, roomBox,
                 Hint("Windows has no automatic light/dark mode of its own; this follows the sun, and with Home Assistant your blind and lights.")),
             Card("Today's sun", themeCurve, Hint("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")),
-            Card("Exact values", TuningRows(TuningField.Appearance)));
-        var tuningPane = Pane(
-            Card("Today's sun", dayCurve, Hint("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")),
-            Card("Exact values", TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")),
-                 Hint("Sun elevation: 0° is the horizon. Between the two, each monitor blends from its night level to its day level.")),
-            Card("Timing", TuningRows(TuningField.Tuning.Where(f => f.Group == "timing"))));
+            Card(null, new Expander { Header = "Exact values", Content = TuningRows(TuningField.Appearance) }));
         var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
-            Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept.")));
+            Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")));
 
         panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));
         panes.Add(("automatic", "Automatic", "\uE706", Color.FromRgb(0xF7, 0x8C, 0x1E), automaticPane));
         panes.Add(("homeAssistant", "Home Assistant", "ha", Color.FromRgb(0x18, 0xBC, 0xF2), haPane));
         panes.Add(("appearance", "Appearance", "\uE771", Color.FromRgb(0x6E, 0x5B, 0xD6), appearancePane));
-        panes.Add(("tuning", "Tuning", "\uE9E9", Color.FromRgb(0xE8, 0x3E, 0x6C), tuningPane));
         panes.Add(("app", "App", "\uE713", Color.FromRgb(0x8A, 0x8A, 0x8A), appPane));
         foreach (var p in panes) {
             var item = new ListBoxItem { Tag = p.key, Padding = new Thickness(10, 8, 10, 8), Content = new StackPanel {
@@ -235,6 +233,8 @@ sealed class SettingsWindow : Window {
 
     readonly CheckBox roomBox = new() { Content = "Count the blind and the room lights", Margin = new Thickness(0, 2, 0, 2) };
     readonly Dictionary<string, (FrameworkElement row, TextBox box)> tuneRows = new();
+    Dictionary<string, double> loadedTune = new();
+    FrameworkElement? brightnessCard;
 
     /// One row per number: label, a box that shows the default in grey while empty, the unit.
     /// Empty means the default; Reset clears them all.
@@ -279,6 +279,7 @@ sealed class SettingsWindow : Window {
     void RefreshTuningRows() {
         bool ha = SourceTag == "homeAssistant", room = ha && roomBox.IsChecked == true;
         roomBox.Visibility = ha ? Visibility.Visible : Visibility.Collapsed;
+        if (brightnessCard != null) brightnessCard.Visibility = SourceTag == "off" ? Visibility.Collapsed : Visibility.Visible;
         foreach (var f in TuningField.Appearance)
             if (tuneRows.TryGetValue(f.Id, out var r))
                 r.row.Visibility = room || f.Key is "lightSunAbove" or "darkSunBelow" ? Visibility.Visible : Visibility.Collapsed;
@@ -370,6 +371,7 @@ sealed class SettingsWindow : Window {
         var h = c.HomeAssistant;
         haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? "";
         var set = TuningField.SetValues(c.Tuning);
+        loadedTune = set;
         foreach (var (id, r) in tuneRows) r.box.Text = set.TryGetValue(id, out var v) ? Fmt(v) : "";
         roomBox.IsChecked = c.Tuning?.Theme?.Room ?? true;
 
@@ -442,7 +444,10 @@ sealed class SettingsWindow : Window {
         if (SourceTag == "homeAssistant" && haUrl.Text.Trim() == "") { Say("Home Assistant needs its URL.", true); return; }
         var values = new Dictionary<string, double>();
         foreach (var f in TuningField.All) {
-            if (!tuneRows.TryGetValue(f.Id, out var r)) continue;
+            if (!tuneRows.TryGetValue(f.Id, out var r)) {   // not in the window (timing): keep what the file has
+                if (loadedTune.TryGetValue(f.Id, out var kept)) values[f.Id] = kept;
+                continue;
+            }
             string text = r.box.Text.Trim();
             if (text == "") continue;
             if (Num(text) is not double v) { Say($"{f.Label} {f.Unit}: \"{text}\" is not a number.", true); return; }

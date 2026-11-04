@@ -46,7 +46,6 @@ import DaylitCore
             ("settings-automatic", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
             ("settings-homeassistant", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
             ("settings-appearance", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
-            ("settings-tuning", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .tuning))),
             ("settings-app", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
         ]
     }

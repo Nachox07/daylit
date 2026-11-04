@@ -147,8 +147,9 @@ follow the sun only.
 
 ## Tuning
 
-Every number behind the rules can be changed, in Settings → *Appearance* and *Tuning*, or in the
-config file's optional `tuning` block. A missing key keeps the value below; values that make no
+Every number behind the rules can be changed in the config file's optional `tuning` block. The
+Settings window has the ones people change: when the screens brighten (*Automatic*, a sun curve with
+draggable lines) and when light and dark mode switch (*Appearance*); the `timing` keys are file only. A missing key keeps the value below; values that make no
 sense (night above day, a dark edge above its light edge) are refused with the key's name.
 
 | Key | Default | What it does |
