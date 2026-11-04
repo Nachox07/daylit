@@ -191,7 +191,7 @@ sealed class Controller {
 
     // SystemEvents may raise on another thread: always hop to the UI thread.
     void OnPower(object? s, PowerModeChangedEventArgs e) => ui.BeginInvoke(() => {
-        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); ForgetContrast(); _ = Later(5000, "wake"); }   // DDC needs a moment after wake
+        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
         else if (e.Mode == PowerModes.StatusChange) {   // plugged in / unplugged
             bool was = timer.IsEnabled;
             StartTimers();
@@ -200,8 +200,9 @@ sealed class Controller {
             else if (panel.IsVisible) panel.Sync();
         }
     });
-    void OnDisplays(object? s, EventArgs e) => ui.BeginInvoke(() => { ForgetContrast(); _ = Later(1500, "displays changed"); });
-    /// The configured contrast is written again on the next tick (start, display change, wake, reload).
+    void OnDisplays(object? s, EventArgs e) => ui.BeginInvoke(() => _ = Later(1500, "displays changed", ForgetContrast));
+    /// The configured contrast is written again on the next tick. Called when the delayed tick after a
+    /// display change or wake runs, so a tick in between can't use up the write before DDC is ready.
     void ForgetContrast() { foreach (var m in Mons) m.ContrastSet = null; }
     void OnPrefs(object? s, UserPreferenceChangedEventArgs e) => ui.BeginInvoke(() => {
         if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color or UserPreferenceCategory.VisualStyle) {
@@ -209,7 +210,7 @@ sealed class Controller {
             panel.ApplyTheme();
         }
     });
-    async Task Later(int ms, string why) { await Task.Delay(ms); await Tick(why); }
+    async Task Later(int ms, string why, Action? first = null) { await Task.Delay(ms); first?.Invoke(); await Tick(why); }
 
     // After wake or idle the monitor may have been changed elsewhere: its reading is not a hand-set level.
     // A distance set by hand here is kept.
@@ -491,7 +492,11 @@ sealed class Controller {
     /// write is logged and not retried every tick. An idle PC leaves it for when the user is back: the
     /// monitor may be showing another computer.
     async Task ApplyContrast(Mon[] mons) {
-        if (Win.IdleSeconds() >= Cfg.Tuned.IdleSeconds) return;
+        if (Win.IdleSeconds() >= Cfg.Tuned.IdleSeconds) {
+            // Pending: the idle watcher ticks when the user is back, also with no source or paused on battery.
+            if (mons.Any(m => ContrastRule.ToWrite(m.Spec?.Contrast, !m.D.Hdr, m.ContrastSet) != null)) idleWatch.Start();
+            return;
+        }
         foreach (var m in mons) {
             if (ContrastRule.ToWrite(m.Spec?.Contrast, !m.D.Hdr, m.ContrastSet) is not int v) continue;
             m.ContrastSet = v;

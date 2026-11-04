@@ -173,6 +173,7 @@ import DaylitCore
         // does not always post a screen-change notification: re-probe cheaply and re-detect on a change.
         let probe = externalScreens().map { "\($0.uuid)=\(Native.usable($0.id))" }.joined(separator: ",")
         if probe != lastProbe { let first = lastProbe == nil; lastProbe = probe; if !first { redetect(); return } }
+        applyContrast()   // one left pending while idle, also with no source or paused on battery
         let battery = Power.onBattery
         if battery != onBattery {
             onBattery = battery
@@ -190,7 +191,6 @@ import DaylitCore
             // Another machine may have changed the monitors meanwhile: that reading is not a hand-set level.
             for i in mons.indices { mons[i].published = nil; mons[i].lastSet = nil }
             wasHere = here
-            applyContrast()   // one left pending while idle
             refresh(); return
         }
         if !here && wasHere && source != .off { Log.write("idle: paused") }
