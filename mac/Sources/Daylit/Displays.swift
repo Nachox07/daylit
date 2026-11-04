@@ -123,7 +123,7 @@ struct Mon: Identifiable {
     var readState: ReadState = .unknown   // DDC only: does it report its level (DaylitCore)
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
-    var offset: Int? = nil, offsetSun: Double? = nil   // a hand-set level as a distance from the target (DaylitCore.decide)
+    var offset: Int? = nil, offsetSun: Double? = nil, offsetAt: Double? = nil   // a hand-set level as a distance from the target (DaylitCore.decide)
     var publishedManual = false   // the manual flag last sent to Home Assistant
     var touched = false   // moved with the slider or keys since the last tick
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on

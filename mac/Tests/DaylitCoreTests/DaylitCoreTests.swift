@@ -132,14 +132,45 @@ final class DecideTests: XCTestCase {
         XCTAssertFalse(s.manual)
         XCTAssertNil(s.state.offset)
     }
-    func testADaytimeDistanceFadesAtDuskAndEndsAtNight() {
+    func testADaytimeDistanceFadesAtDuskAndRestsAtNight() {
         let st = HoldState(lastSet: 60, lastTarget: 80, offset: -20, offsetSun: 1)
         XCTAssertEqual(step(60, want: 80, state: st, sun: 1).write, nil)
         XCTAssertEqual(step(60, want: 70, state: st, sun: 0.15).applied, 60)     // half faded: 70 − 10
         let night = step(60, want: 50, state: st, sun: 0)
         XCTAssertEqual(night.write, 50)                                          // the night level, clean
         XCTAssertFalse(night.manual)
-        XCTAssertNil(night.state.offset)
+    }
+
+    // Unix days in UTC keep these tests independent of the machine's time zone.
+    func at(_ day: Int, _ hour: Double) -> Double { Double(day) * 86400 + hour * 3600 }
+    func utcDay(_ t: Double) -> Int { Int((t / 86400).rounded(.down)) }
+
+    func testOneMissingSunReadingDoesNotLoseADaytimeDistance() {
+        // Home Assistant gave no elevation for one poll, so the sun read as night.
+        var st = HoldState(lastSet: 60, lastTarget: 80, offset: -20, offsetSun: 0.9, offsetAt: at(100, 10))
+        var s = decide(current: 60, want: 30, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                       now: at(100, 11), dayOf: utcDay); st = s.state
+        XCTAssertEqual(s.write, 30)
+        s = decide(current: 30, want: 80, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.9,
+                   now: at(100, 11.1), dayOf: utcDay)
+        XCTAssertEqual(s.write, 60)                                              // the sun is back, so is the distance
+        XCTAssertTrue(s.manual)
+    }
+    func testADaytimeDistanceEndsWithTheDayEvenWithoutANightTick() {
+        // Set at 16:00, the computer slept, the next tick is the next morning.
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: at(100, 16))
+        let s = decide(current: 50, want: 70, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.5,
+                       now: at(101, 8), dayOf: utcDay)
+        XCTAssertEqual(s.write, 70)
+        XCTAssertNil(s.state.offset)
+        XCTAssertFalse(s.manual)
+    }
+    func testANightDistanceEndsAfterALongSleep() {
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
+        XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                               now: at(101, 6), dayOf: utcDay).state.offset)     // the same night, past midnight
+        XCTAssertNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                            now: at(101, 20), dayOf: utcDay).state.offset)       // the next evening
     }
     func testANightDistanceEndsAfterSunrise() {
         let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0)

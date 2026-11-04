@@ -99,14 +99,45 @@ public class DecideTests {
     }
 
     [Fact]
-    public void ADaytimeDistanceFadesAtDuskAndEndsAtNight() {
+    public void ADaytimeDistanceFadesAtDuskAndRestsAtNight() {
         var st = new Hold(null, 60, 80, -20, 1);
         Assert.Null(D(60, 80, s: st, sun: 1).Write);
         Assert.Equal(60, D(60, 70, s: st, sun: 0.15).Applied);   // half faded: 70 − 10
         var night = D(60, 50, s: st, sun: 0);
         Assert.Equal(50, night.Write);
         Assert.False(night.Manual);
-        Assert.Null(night.State.Offset);
+    }
+
+    // Unix days in UTC keep these tests independent of the machine's time zone.
+    static double At(int day, double hour) => day * 86400.0 + hour * 3600;
+    static int UtcDay(double t) => (int)Math.Floor(t / 86400);
+    static Step DN(int c, int target, Hold s, double sun, double now) => Rules.Decide(c, target, null, s, true, true, sun, now: now, dayOf: UtcDay);
+
+    [Fact]
+    public void OneMissingSunReadingDoesNotLoseADaytimeDistance() {
+        // Home Assistant gave no elevation for one poll, so the sun read as night.
+        var st = new Hold(null, 60, 80, -20, 0.9, At(100, 10));
+        var s = DN(60, 30, st, 0, At(100, 11)); st = s.State;
+        Assert.Equal(30, s.Write);
+        s = DN(30, 80, st, 0.9, At(100, 11.1));
+        Assert.Equal(60, s.Write);                               // the sun is back, so is the distance
+        Assert.True(s.Manual);
+    }
+
+    [Fact]
+    public void ADaytimeDistanceEndsWithTheDayEvenWithoutANightTick() {
+        // Set at 16:00, the computer slept, the next tick is the next morning.
+        var s = DN(50, 70, new Hold(null, 50, 70, -20, 0.8, At(100, 16)), 0.5, At(101, 8));
+        Assert.Equal(70, s.Write);
+        Assert.Null(s.State.Offset);
+        Assert.False(s.Manual);
+    }
+
+    [Fact]
+    public void ANightDistanceEndsAfterALongSleep() {
+        var st = new Hold(null, 30, 50, -20, 0, At(100, 23));
+        Assert.NotNull(DN(30, 50, st, 0, At(101, 6)).State.Offset);    // the same night, past midnight
+        Assert.Null(DN(30, 50, st, 0, At(101, 20)).State.Offset);      // the next evening
     }
 
     [Fact]

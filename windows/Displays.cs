@@ -123,7 +123,7 @@ sealed class Mon {
     public Display D;
     public MonitorConfig? Spec;
     public int? Cur, LastSet, LastTarget, Published;
-    public int? Offset; public double? OffsetSun;   // a hand-set level as a distance from the target (Rules.Decide)
+    public int? Offset; public double? OffsetSun, OffsetAt;   // a hand-set level as a distance from the target (Rules.Decide)
     public bool PublishedManual;                // the manual flag last sent to Home Assistant
     public bool Touched;                        // moved with the slider or keys since the last tick
     public double? RemoteSeen;                 // last_changed of the HA "set" helper already acted on
