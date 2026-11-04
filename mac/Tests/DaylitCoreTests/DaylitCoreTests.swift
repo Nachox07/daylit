@@ -414,8 +414,15 @@ final class TemplateTests: XCTestCase {
         XCTAssertTrue(t.contains("state_attr('cover.blind','current_position')"))
         XCTAssertTrue(t.contains("state_attr('light.room','brightness')"))
         XCTAssertTrue(t.contains(#""UUID-1": [{{ states('input_number.d') | float(-1) }}, -1, -1, "#))
-        XCTAssertTrue(t.contains("states.input_number.s.last_changed"))
+        XCTAssertTrue(t.contains("states['input_number.s'].last_changed"))
         XCTAssertFalse(t.contains("UUID-2"))   // a monitor without HA entities is left out
+    }
+    func testSetHelperWithDigitFirstNameAvoidsTheDottedForm() {
+        // Home Assistant can't parse states.input_number.1st…, and one syntax error fails the whole template.
+        let mon = MonitorHA(set: "input_number.1st_monitor")
+        let t = HATemplate.build(HAConfig(url: "http://x"), [("U", mon)])
+        XCTAssertTrue(t.contains("states['input_number.1st_monitor'].last_changed) if states['input_number.1st_monitor']"))
+        XCTAssertFalse(t.contains("states.input_number"))
     }
     func testParsesAnswerShape() {
         let ok = #"{"elev": 10.5, "pos": 56, "lights": true, "auto": null, "bri": 200, "sat": 20, "m": {"U": [80, 40, 20, -1, 0]}}"#

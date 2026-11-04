@@ -39,8 +39,8 @@ public enum HATemplate {
         let lightAge = ha.light.map { "{{ (now() - states['\($0)'].last_updated).total_seconds() | round(0) if states['\($0)'] else -1 }}" } ?? "-1"
         let m = mons.compactMap { mon -> String? in
             guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
-            // states.domain.name is None when the entity is missing, so a typo gives "no set helper", not an error.
-            let set = h.set.map { "\(num($0)), {{ as_timestamp(states.\($0).last_changed) if states.\($0) else 0 }}" } ?? "-1, 0"
+            // states['…'] is None when the entity is missing, so a typo gives "no set helper", not an error.
+            let set = h.set.map { "\(num($0)), {{ as_timestamp(states['\($0)'].last_changed) if states['\($0)'] else 0 }}" } ?? "-1, 0"
             return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night)), \(set)]"
         }.joined(separator: ", ")
         return """
