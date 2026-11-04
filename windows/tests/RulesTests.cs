@@ -101,11 +101,23 @@ public class DecideTests {
         var first = D(40, 70, touched: false);
         Assert.Equal(70, first.Write);
         // The monitor refused the write and still reads 40 on the next tick.
-        var next = D(40, 70, s: Rules.AfterWrite(first.State, false), touched: false);
+        var next = D(40, 70, s: Rules.AfterWrite(first.State, false, default), touched: false);
         Assert.Equal(70, next.Write);
         Assert.Null(next.State.Offset); Assert.False(next.Manual);
         // A write that went through is remembered as usual.
-        Assert.Equal(first.State, Rules.AfterWrite(first.State, true));
+        Assert.Equal(first.State, Rules.AfterWrite(first.State, true, default));
+    }
+
+    [Fact]
+    public void ARefusedHomeAssistantSetStaysPending() {
+        // Automatic mode off: only the "set" helper writes. It changed to 70; the monitor refused it.
+        var st = new Hold(100, null, null);
+        var first = D(40, 50, remote: (70, 200), s: st, auto: false);
+        Assert.Equal(70, first.Write);
+        var next = D(40, 50, remote: (70, 200), s: Rules.AfterWrite(first.State, false, st), auto: false);
+        Assert.Equal(70, next.Write);   // tried again
+        // Once it went through, the same "set" is not applied twice.
+        Assert.Null(D(70, 50, remote: (70, 200), s: Rules.AfterWrite(next.State, true, st), auto: false).Write);
     }
 
     [Fact]
@@ -829,6 +841,19 @@ public class LightTests {
         Assert.Single(s);                  // the night reading and the non-number are skipped
         Assert.Equal(300, s[0].Value);
         Assert.True(s[0].Elev > 60);       // midsummer noon at Greenwich
+    }
+
+    [Fact]
+    public void HistoryFromBeforeAUnitChangeIsSkipped() {
+        // The unit changed to kW at 12:00. Home Assistant starts the answer with the state at that moment,
+        // still the old 1500 W; only the readings after it count.
+        const string json = """
+            [[{"entity_id":"sensor.pv_power","state":"1500","last_changed":"2026-06-21T12:00:00+00:00"},
+              {"state":"1.5","last_changed":"2026-06-21T12:00:30+00:00"}]]
+            """;
+        double since = DateTimeOffset.Parse("2026-06-21T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture).ToUnixTimeSeconds();
+        Assert.Equal([1.5], LightRules.Samples(json, 51.48, 0, since).Select(x => x.Value));
+        Assert.Equal(2, LightRules.Samples(json, 51.48, 0).Count);   // no change: all of it
     }
 
     [Fact]

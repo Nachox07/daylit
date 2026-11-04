@@ -141,10 +141,11 @@ static class Rules {
         return new Step(s, c, write, remoteValue, applied, s.Offset != null && (fromRemote || (auto && weight > 0)));
     }
 
-    /// After automatic mode sent a level to the monitor. A refused write applied nothing, so forget
-    /// it: otherwise the next tick reads the old level, takes the gap for a hand-set change and stops
-    /// retrying. Without it the next tick simply writes the target again.
-    public static Hold AfterWrite(Hold s, bool ok) => ok ? s : s with { LastSet = null };
+    /// After a tick sent a level to the monitor (`before`: the state that tick started from). A refused
+    /// write applied nothing, so forget it: otherwise the next tick reads the old level, takes the gap
+    /// for a hand-set change and stops retrying. A Home Assistant "set" it carried stays pending, so
+    /// the next tick applies it again too.
+    public static Hold AfterWrite(Hold s, bool ok, Hold before) => ok ? s : s with { LastSet = null, RemoteSeen = before.RemoteSeen };
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
     public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {

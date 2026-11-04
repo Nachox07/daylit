@@ -404,13 +404,15 @@ sealed class Controller {
         var unit = lightUnit is { } lu && lu.Sensor == entity ? lu : new LightUnit(entity, "", 0);
         string key = $"{entity} {unit.Unit} {loc.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)} {loc.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
-        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty ? 3600 : 86400)) return;
+        // Hourly while there is no reference, or only hours of it since a unit change; then daily.
+        bool young = unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0) < 1;
+        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty || young ? 3600 : 86400)) return;
         lightRefBusy = true;
         try {
             lightRefAt = DateTime.UtcNow;
             var (body, cause) = await HAClient.History(Cfg, entity, unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0));
             if (body != null) {
-                var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude));
+                var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude, unit.Since));
                 if (key != lightRefFor) return;   // the config changed meanwhile
                 var fresh = new LightReference(samples);
                 Log.Write($"light: clear-sky reference from {samples.Count} readings, {fresh.Bins.Count} steps of the sky" +
@@ -568,10 +570,9 @@ sealed class Controller {
             bool dragging = m.Dragging;   // the slider is in the user's hand
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, Now);
             if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
-            if (i == li) groupBase = syncOffsets.Base(m.Key, step.Applied);
             if (!dragging) m.Touched = false;
             bool remote = step.Remote != null;
-            if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
+            if (remote && !m.WriteFailing) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
             else if (step.Write is int w && !m.WriteFailing) Log.Write($"auto: {m.Label} {c}% → {w}%");
             bool ok = true;
             if (step.Write is int v) {
@@ -582,7 +583,8 @@ sealed class Controller {
                                  : $"display: {m.Label} did not take brightness {v}%; trying again each tick");
                 m.WriteFailing = !ok;
             }
-            var st = Rules.AfterWrite(step.State, ok);   // a refused write is retried next tick
+            var st = Rules.AfterWrite(step.State, ok, hold);   // a refused write is retried next tick
+            if (i == li) groupBase = syncOffsets.Base(m.Key, ok ? step.Applied : c);   // followers go where the leader really is
             if (st.Offset != m.Offset && st.Offset is int o)
                 Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
             (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (st.RemoteSeen, st.LastSet, st.LastTarget, st.Offset, st.OffsetSun, st.OffsetAt);

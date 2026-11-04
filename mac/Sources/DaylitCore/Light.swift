@@ -89,15 +89,17 @@ public func sunRising(latitude: Double, longitude: Double, at date: Date) -> Boo
 }
 
 /// The readings in a Home Assistant history answer (GET /api/history/period, minimal_response), each
-/// with the sun's elevation and direction at that moment. Readings that are not numbers are skipped.
-public func lightSamples(history: Data, latitude: Double, longitude: Double) -> [(elev: Double, morning: Bool, value: Double)] {
+/// with the sun's elevation and direction at that moment. Readings that are not numbers are skipped, and
+/// with `since` (LightUnit.since) so is everything up to that moment: Home Assistant starts the answer
+/// with the state at the start time, which can still be in the old unit.
+public func lightSamples(history: Data, latitude: Double, longitude: Double, since: Double = 0) -> [(elev: Double, morning: Bool, value: Double)] {
     guard let series = (try? JSONSerialization.jsonObject(with: history)) as? [[[String: Any]]] else { return [] }
     let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let plain = ISO8601DateFormatter()
     var out: [(elev: Double, morning: Bool, value: Double)] = []
     for row in series.first ?? [] {
         guard let st = row["state"] as? String, let v = Double(st), let ts = row["last_changed"] as? String,
-              let d = iso.date(from: ts) ?? plain.date(from: ts) else { continue }
+              let d = iso.date(from: ts) ?? plain.date(from: ts), since <= 0 || d.timeIntervalSince1970 > since else { continue }
         let e = solarElevation(latitude: latitude, longitude: longitude, at: d)
         if e <= 0 { continue }
         out.append((e, sunRising(latitude: latitude, longitude: longitude, at: d), v))

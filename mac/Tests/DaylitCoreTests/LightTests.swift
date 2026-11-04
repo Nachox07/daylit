@@ -70,6 +70,16 @@ final class LightTests: XCTestCase {
         XCTAssertEqual(s[0].value, 300)
         XCTAssertGreaterThan(s[0].elev, 60)              // midsummer noon at Greenwich
     }
+    func testHistoryFromBeforeAUnitChangeIsSkipped() {
+        // The unit changed to kW at 12:00. Home Assistant starts the answer with the state at that moment,
+        // still the old 1500 W; only the readings after it count.
+        let json = #"[[{"entity_id":"sensor.pv_power","state":"1500","last_changed":"2026-06-21T12:00:00+00:00"},"#
+                 + #"{"state":"1.5","last_changed":"2026-06-21T12:00:30+00:00"}]]"#
+        let since = ISO8601DateFormatter().date(from: "2026-06-21T12:00:00Z")!.timeIntervalSince1970
+        let s = lightSamples(history: Data(json.utf8), latitude: 51.48, longitude: 0, since: since)
+        XCTAssertEqual(s.map(\.value), [1.5])
+        XCTAssertEqual(lightSamples(history: Data(json.utf8), latitude: 51.48, longitude: 0).count, 2)   // no change: all of it
+    }
     func testALightSensorNeedsALocation() {
         XCTAssertNotNil(Config(homeAssistant: HAConfig(url: "http://homeassistant.local:8123", light: "sensor.pv_power")).validate())
         XCTAssertNil(Config(location: .init(latitude: 51.48, longitude: 0),

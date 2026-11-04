@@ -139,11 +139,22 @@ final class DecideTests: XCTestCase {
         let first = step(40, want: 70, touched: false)
         XCTAssertEqual(first.write, 70)
         // The monitor refused the write and still reads 40 on the next tick.
-        let next = step(40, want: 70, state: first.state.afterWrite(ok: false), touched: false)
+        let next = step(40, want: 70, state: first.state.afterWrite(ok: false, before: HoldState()), touched: false)
         XCTAssertEqual(next.write, 70)
         XCTAssertNil(next.state.offset); XCTAssertFalse(next.manual)
         // A write that went through is remembered as usual.
-        XCTAssertEqual(first.state.afterWrite(ok: true), first.state)
+        XCTAssertEqual(first.state.afterWrite(ok: true, before: HoldState()), first.state)
+    }
+
+    func testARefusedHomeAssistantSetStaysPending() {
+        // Automatic mode off: only the "set" helper writes. It changed to 70; the monitor refused it.
+        let st = HoldState(remoteSeen: 100)
+        let first = step(40, want: 50, remote: RemoteSet(value: 70, changed: 200), state: st, auto: false)
+        XCTAssertEqual(first.write, 70)
+        let next = step(40, want: 50, remote: RemoteSet(value: 70, changed: 200), state: first.state.afterWrite(ok: false, before: st), auto: false)
+        XCTAssertEqual(next.write, 70)   // tried again
+        // Once it went through, the same "set" is not applied twice.
+        XCTAssertNil(step(70, want: 50, remote: RemoteSet(value: 70, changed: 200), state: next.state.afterWrite(ok: true, before: st), auto: false).write)
     }
 
     func testAppliesTargetAndRemembersIt() {

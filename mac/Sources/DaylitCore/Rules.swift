@@ -53,12 +53,13 @@ public struct HoldState: Equatable {
 }
 
 extension HoldState {
-    /// After automatic mode sent a level to the monitor. A refused write applied nothing, so forget
-    /// it: otherwise the next tick reads the old level, takes the gap for a hand-set change and stops
-    /// retrying. Without it the next tick simply writes the target again.
-    public func afterWrite(ok: Bool) -> HoldState {
+    /// After a tick sent a level to the monitor (`before`: the state that tick started from). A refused
+    /// write applied nothing, so forget it: otherwise the next tick reads the old level, takes the gap
+    /// for a hand-set change and stops retrying. A Home Assistant "set" it carried stays pending, so
+    /// the next tick applies it again too.
+    public func afterWrite(ok: Bool, before: HoldState) -> HoldState {
         var s = self
-        if !ok { s.lastSet = nil }
+        if !ok { s.lastSet = nil; s.remoteSeen = before.remoteSeen }
         return s
     }
 }

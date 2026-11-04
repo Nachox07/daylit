@@ -87,7 +87,9 @@ static class LightRules {
 
     /// The readings in a Home Assistant history answer (GET /api/history/period, minimal_response), each
     /// with the sun's elevation and direction at that moment. Readings that are not numbers are skipped.
-    public static List<LightSample> Samples(string history, double lat, double lon) {
+    /// With `since` (LightUnit.Since) everything up to that moment is skipped too: Home Assistant starts the
+    /// answer with the state at the start time, which can still be in the old unit.
+    public static List<LightSample> Samples(string history, double lat, double lon, double since = 0) {
         var r = new List<LightSample>();
         try {
             using var doc = JsonDocument.Parse(history);
@@ -99,7 +101,8 @@ static class LightRules {
                     || !row.TryGetProperty("state", out var st) || st.ValueKind != JsonValueKind.String
                     || !double.TryParse(st.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
                     || !row.TryGetProperty("last_changed", out var ts) || ts.ValueKind != JsonValueKind.String
-                    || !DateTimeOffset.TryParse(ts.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d)) continue;
+                    || !DateTimeOffset.TryParse(ts.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d)
+                    || (since > 0 && d.ToUnixTimeMilliseconds() / 1000.0 <= since)) continue;
                 double e = Sun.Elevation(d, lat, lon);
                 if (e <= 0) continue;
                 r.Add(new LightSample(e, SunRising(lat, lon, d), v));

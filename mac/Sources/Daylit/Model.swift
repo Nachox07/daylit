@@ -403,12 +403,14 @@ import DaylitCore
         let unit = lightUnit?.sensor == e ? lightUnit! : LightUnit(sensor: e, unit: "", since: 0)
         let key = "\(e) \(unit.unit) \(loc.latitude) \(loc.longitude)"
         if key != lightRefFor { lightRef = LightReference(); lightRefAt = nil; lightRefFor = key }
-        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty ? 3600 : 86400) { return }
+        // Hourly while there is no reference, or only hours of it since a unit change; then daily.
+        let young = unit.historyDays(10, now: Date().timeIntervalSince1970) < 1
+        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty || young ? 3600 : 86400) { return }
         lightRefBusy = true; defer { lightRefBusy = false }
         lightRefAt = Date()
         switch await HAClient.history(ha, e, days: unit.historyDays(10, now: Date().timeIntervalSince1970)) {
         case .success(let d):
-            let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude) }.value
+            let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude, since: unit.since) }.value
             guard key == lightRefFor else { return }   // the config changed meanwhile
             let fresh = LightReference(samples: samples)
             Log.write("light: clear-sky reference from \(samples.count) readings, \(fresh.bins.count) steps of the sky" +
@@ -526,9 +528,8 @@ import DaylitCore
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
                               here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
             if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
-            if i == leader { base = syncOffsets.base(key: m.uuid, level: step.applied) }
             if !dragging.contains(m.id) { mons[i].touched = false }
-            if let v = step.remote { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
+            if let v = step.remote, !m.writeFailing { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
             var ok = true
             if let v = step.write {
                 if step.remote == nil && !m.writeFailing { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
@@ -541,7 +542,8 @@ import DaylitCore
                 }
                 mons[i].writeFailing = !ok
             }
-            let st = step.state.afterWrite(ok: ok)   // a refused write is retried next tick
+            let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
             mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen
             if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
