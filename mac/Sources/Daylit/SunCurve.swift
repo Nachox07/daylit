@@ -75,8 +75,9 @@ struct SunCurve: View {
                     let nowE = solarElevation(latitude: latitude, longitude: longitude, at: now)
                     Circle().fill(Color.yellow).overlay(Circle().stroke(Color.orange, lineWidth: 1.5))
                         .frame(width: 12, height: 12).position(x: fraction(of: now) * w, y: y(nowE)).allowsHitTesting(false)
-                    ForEach(markers) { m in
-                        markerLine(m, w: w, y: y(m.value), h: h, top: top, bottom: bottom)
+                    let labels = spreadLabels(markers.map { Double(y($0.value)) }, gap: 24, height: Double(h))
+                    ForEach(Array(markers.enumerated()), id: \.element.id) { i, m in
+                        markerLine(m, w: w, y: y(m.value), labelY: CGFloat(labels[i]), h: h, top: top, bottom: bottom)
                     }
                     ForEach([6, 12, 18], id: \.self) { hr in
                         Text(String(format: "%02d:00", hr)).font(.caption2).foregroundStyle(.secondary)
@@ -107,7 +108,7 @@ struct SunCurve: View {
         }
     }
 
-    func markerLine(_ m: SunMarker, w: CGFloat, y: CGFloat, h: CGFloat, top: Double, bottom: Double) -> some View {
+    func markerLine(_ m: SunMarker, w: CGFloat, y: CGFloat, labelY: CGFloat, h: CGFloat, top: Double, bottom: Double) -> some View {
         ZStack(alignment: .topLeading) {
             Path { p in p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y)) }
                 .stroke(m.color, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
@@ -127,7 +128,7 @@ struct SunCurve: View {
                 set(m.id, (min(max(e, -18), 60) * 2).rounded() / 2)   // the range tuning accepts
             })
             .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
-            .position(x: 120, y: min(max(y, 12), h - 12))
+            .position(x: 120, y: labelY)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(m.title)
             .accessibilityValue("\(SettingsView.fmt(m.value)) degrees, \(crossings(m.value, below: m.below))")

@@ -128,3 +128,17 @@ extension Tuning {
         return Dictionary(uniqueKeysWithValues: pairs.compactMap { k, v in v.map { (k, $0) } })
     }
 }
+
+/// Label centres for lines drawn at `ys` (top = 0), moved apart so labels `gap` tall never overlap
+/// and stay inside 0…height. The upper label stays on its line when it can; the lower one moves down.
+public func spreadLabels(_ ys: [Double], gap: Double, height: Double) -> [Double] {
+    let order = ys.indices.sorted { ys[$0] < ys[$1] }
+    let lo = gap / 2, hi = height - gap / 2
+    var out = order.map { min(max(ys[$0], lo), hi) }
+    for i in out.indices.dropFirst() { out[i] = max(out[i], out[i - 1] + gap) }
+    if let last = out.indices.last { out[last] = min(out[last], hi) }
+    for i in out.indices.reversed().dropFirst() { out[i] = min(out[i], out[i + 1] - gap) }
+    var r = ys
+    for (k, i) in order.enumerated() { r[i] = out[k] }
+    return r
+}

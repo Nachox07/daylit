@@ -180,6 +180,12 @@ final class LookTests: XCTestCase {
         var r = LookRule()
         XCTAssertFalse(r.wantDark(elev: 1.97, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t))   // upper part of the gap: light
     }
+    func testCloseLinesGetLabelsThatDoNotOverlap() {
+        XCTAssertEqual(spreadLabels([80, 90], gap: 24, height: 170), [80, 104])
+        XCTAssertEqual(spreadLabels([90, 80], gap: 24, height: 170), [104, 80])
+        XCTAssertEqual(spreadLabels([20, 120], gap: 24, height: 170), [20, 120])   // far apart: on their lines
+        XCTAssertEqual(spreadLabels([165, 168], gap: 24, height: 170), [134, 158])   // at the bottom: pushed up
+    }
     func testWarmLightsAtNightStayDark() {
         var r = LookRule()
         XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 70))

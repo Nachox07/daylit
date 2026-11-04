@@ -266,3 +266,19 @@ public static class HaErrorRule {
     public static bool ShouldShow(bool transient, double? downSince, double now) =>
         !transient || (downSince is double since && now - since >= ShowAfter);
 }
+
+static class Layout {
+    /// Label centres for lines drawn at `ys` (top = 0), moved apart so labels `gap` tall never overlap
+    /// and stay inside 0…height. The upper label stays on its line when it can; the lower one moves down.
+    public static double[] SpreadLabels(double[] ys, double gap, double height) {
+        var order = Enumerable.Range(0, ys.Length).OrderBy(i => ys[i]).ToArray();
+        double lo = gap / 2, hi = height - gap / 2;
+        var o = order.Select(i => Math.Clamp(ys[i], lo, hi)).ToArray();
+        for (int i = 1; i < o.Length; i++) o[i] = Math.Max(o[i], o[i - 1] + gap);
+        if (o.Length > 0) o[^1] = Math.Min(o[^1], hi);
+        for (int i = o.Length - 2; i >= 0; i--) o[i] = Math.Min(o[i], o[i + 1] - gap);
+        var r = new double[ys.Length];
+        for (int k = 0; k < order.Length; k++) r[order[k]] = o[k];
+        return r;
+    }
+}

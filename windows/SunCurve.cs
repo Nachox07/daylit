@@ -88,12 +88,13 @@ sealed class SunCurve : FrameworkElement {
             dc.DrawText(ft, new Point(Fraction(hr) * w - ft.Width / 2, ChartH - ft.Height - 2));
         }
         handles.Clear();
-        foreach (var m in markers) {
+        var labelYs = Layout.SpreadLabels(markers.Select(m => Y(get(m.Id))).ToArray(), 24, ChartH);
+        foreach (var (m, idx) in markers.Select((m, i) => (m, i))) {
             double v = get(m.Id), y = Y(v);
             var pen = new Pen(Solid(m.Color), 1.5) { DashStyle = new DashStyle([4, 3], 0) };
             dc.DrawLine(pen, new Point(0, y), new Point(w, y));
             var label = Text($"{m.Title} · {Crossings(s, v, m.Below, Day(), tz)}", 12, Palette.Text, bold: true);
-            double hy = Math.Clamp(y, 12, ChartH - 12);
+            double hy = labelYs[idx];
             var pill = new Rect(16, hy - 11, label.Width + 34, 22);
             dc.DrawRoundedRectangle(Palette.Solid, new Pen(Solid(m.Color, 160), 1), pill, 11, 11);
             dc.DrawEllipse(Solid(m.Color), null, new Point(pill.X + 11, hy), 7, 7);

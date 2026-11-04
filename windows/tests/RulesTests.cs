@@ -134,6 +134,13 @@ public class LookTests {
         var t = new Tuning { Theme = new() { LightSunAbove = 2, DarkSunBelow = 1.8 } };
         Assert.False(new LookRule().WantDark(1.97, 100, false, false, 0, 0, t));   // upper part of the gap: light
     }
+    [Fact]
+    public void CloseLinesGetLabelsThatDoNotOverlap() {
+        Assert.Equal([80.0, 104.0], Layout.SpreadLabels([80, 90], 24, 170));
+        Assert.Equal([104.0, 80.0], Layout.SpreadLabels([90, 80], 24, 170));
+        Assert.Equal([20.0, 120.0], Layout.SpreadLabels([20, 120], 24, 170));   // far apart: on their lines
+        Assert.Equal([134.0, 158.0], Layout.SpreadLabels([165, 168], 24, 170));  // at the bottom: pushed up
+    }
     [Fact] public void WarmLightsAtNightStayDark() => Assert.True(new LookRule().WantDark(-10, 0, true, true, 230, 70));
     [Fact] public void WithoutBlindOnlyTheSunCounts() => Assert.False(new LookRule().WantDark(10, 0, false, false, 0, 0));
 
