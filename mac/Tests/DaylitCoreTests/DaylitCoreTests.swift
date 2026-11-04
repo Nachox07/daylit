@@ -209,6 +209,24 @@ final class LookTests: XCTestCase {
         var r = LookRule()
         XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 10))
     }
+    func testWhiteLightsSwitchAtTheSameBrightnessAsBefore() {
+        var r = LookRule()
+        XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 199, sat: 10))    // not bright enough yet
+        XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 200, sat: 10))   // 200 of 255: light
+        XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 170, sat: 10))   // still counts
+        XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 169, sat: 10))    // below 170: dark
+    }
+    func testANarrowCustomGapStartsInsideIt() {
+        var t = Tuning(); t.theme = .init(); t.theme?.lightSunAbove = 2; t.theme?.darkSunBelow = 1.8
+        var r = LookRule()
+        XCTAssertFalse(r.wantDark(elev: 1.97, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t))   // upper part of the gap: light
+    }
+    func testCloseLinesGetLabelsThatDoNotOverlap() {
+        XCTAssertEqual(spreadLabels([80, 90], gap: 24, height: 170), [80, 104])
+        XCTAssertEqual(spreadLabels([90, 80], gap: 24, height: 170), [104, 80])
+        XCTAssertEqual(spreadLabels([20, 120], gap: 24, height: 170), [20, 120])   // far apart: on their lines
+        XCTAssertEqual(spreadLabels([165, 168], gap: 24, height: 170), [134, 158])   // at the bottom: pushed up
+    }
     func testWarmLightsAtNightStayDark() {
         var r = LookRule()
         XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 70))
@@ -579,10 +597,64 @@ final class ConfigEditTests: XCTestCase {
         XCTAssertTrue(ConfigText.hasComments(Data("{ // hi\n}".utf8)))
         XCTAssertFalse(ConfigText.hasComments(Data(#"{ "a": "//not", }"#.utf8)))
     }
+    func testTuningIsWrittenOnlyWhereItDiffersFromTheDefault() throws {
+        var e = SettingsEdit(source: "off")
+        e.tuning = ["brightness.sunDay": 15, "theme.lightSunAbove": 4, "timing.pollSeconds": 20]   // 4 is the default
+        e.themeRoom = false
+        let o = json(try ConfigPatch.apply(e, to: Data(#"{"tuning":{"theme":{"darkSunBelow":0},"future":1}}"#.utf8)))
+        let t = o["tuning"] as! [String: Any]
+        XCTAssertEqual((t["brightness"] as! [String: Any])["sunDay"] as? Int, 15)
+        XCTAssertEqual((t["timing"] as! [String: Any])["pollSeconds"] as? Int, 20)
+        let theme = t["theme"] as! [String: Any]
+        XCTAssertNil(theme["lightSunAbove"]); XCTAssertNil(theme["darkSunBelow"], "cleared in the window")
+        XCTAssertEqual(theme["room"] as? Bool, false)
+        XCTAssertEqual(t["future"] as? Int, 1)
+        XCTAssertNil(json(try ConfigPatch.apply(SettingsEdit(source: "off"), to: Data(#"{"tuning":{"theme":{"darkSunBelow":0}}}"#.utf8)))["tuning"])
+        var bad = SettingsEdit(source: "off"); bad.tuning = ["brightness.sunNight": 20, "brightness.sunDay": 10]
+        XCTAssertThrowsError(try ConfigPatch.apply(bad, to: nil))
+    }
     func testAnInvalidResultIsRefused() {
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "homeAssistant", haURL: "homeassistant.local"), to: nil))
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun", lights: "Desk lamp"), to: nil))
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "sun"), to: Data("[1]".utf8)))
         XCTAssertThrowsError(try ConfigPatch.apply(SettingsEdit(source: "off"), to: Data(#"{"monitors":[null,{"match":"A"}]}"#.utf8)))
+    }
+}
+
+final class TuningTests: XCTestCase {
+    func testDefaultsGiveTheSameResultsAsBefore() {
+        let t = Tuning()
+        for elev in stride(from: -10.0, through: 30, by: 0.5) {
+            XCTAssertEqual(daylightFraction(elevation: elev, tuning: t), min(max((elev + 3) / 15, 0), 1), accuracy: 1e-12)
+            for lights in [false, true] {
+                XCTAssertEqual(target(day: 70, blindDown: 40, night: 20, elev: elev, pos: 60, lights: lights, tuning: t),
+                               target(day: 70, blindDown: 40, night: 20, elev: elev, pos: 60, lights: lights))
+            }
+        }
+        XCTAssertEqual(target(day: 70, blindDown: 40, night: 20, elev: 1.4, pos: 100, lights: true), max(25, Int((20 + 50 * 4.4 / 15).rounded())))
+    }
+    func testCustomValuesMoveTheCurveAndTheBoost() throws {
+        let t = try JSONDecoder().decode(Tuning.self, from: Data(#"{"brightness":{"sunNight":0,"sunDay":20,"lightsBoost":10,"lightsBoostSunBelow":0}}"#.utf8))
+        XCTAssertEqual(daylightFraction(elevation: 10, tuning: t), 0.5)
+        XCTAssertEqual(target(day: 70, blindDown: 40, night: 20, elev: -5, pos: 100, lights: true, tuning: t), 30)
+        XCTAssertEqual(target(day: 70, blindDown: 40, night: 20, elev: 1, pos: 100, lights: true, tuning: t), 23, "no boost above lightsBoostSunBelow")
+    }
+    func testThemeThresholdsAndRoomSwitch() {
+        var t = Tuning(); t.theme = .init(); t.theme?.lightSunAbove = 10; t.theme?.darkSunBelow = 6
+        var look = LookRule()
+        XCTAssertTrue(look.wantDark(elev: 8, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t), "8° is under the 8.5° midpoint")
+        XCTAssertFalse(look.wantDark(elev: 11, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t))
+        XCTAssertFalse(look.wantDark(elev: 8, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t), "stays light inside the gap")
+        t.theme?.room = false
+        var sunOnly = LookRule()
+        XCTAssertFalse(sunOnly.wantDark(elev: 20, pos: 0, hasBlind: true, lightsOn: false, bri: 0, sat: 0, tuning: t), "blind ignored")
+    }
+    func testImpossibleValuesAreRefused() throws {
+        func check(_ json: String) throws -> String? { try JSONDecoder().decode(Config.self, from: Data(json.utf8)).validate() }
+        XCTAssertNil(try check(#"{"tuning":{}}"#))
+        XCTAssertNotNil(try check(#"{"tuning":{"brightness":{"sunNight":10,"sunDay":5}}}"#))
+        XCTAssertNotNil(try check(#"{"tuning":{"theme":{"lightSunAbove":0,"darkSunBelow":2}}}"#))
+        XCTAssertNotNil(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#))
+        XCTAssertEqual(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#), "config.json: tuning.timing.pollSeconds must be 5–3600")
     }
 }

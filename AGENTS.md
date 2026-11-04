@@ -101,6 +101,9 @@ optional; [`config.example.json`](config.example.json) shows them all.
 | `sun` | `location` (lat/lon) | no Home Assistant |
 | `homeAssistant` | `homeAssistant.url` (+ token, pasted by the user) | the user has HA; `location` adds a fallback when HA is down |
 
+An optional `tuning` block holds every threshold (sun elevations, light/dark switch points, timing);
+see [docs/setup.md → Tuning](docs/setup.md#tuning). Leave it out unless the user asks for a change.
+
 Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `night` (0–100), and with
 Home Assistant a `homeAssistant` block naming three `input_number` entities, an optional `sensor`
 to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`) are all optional.

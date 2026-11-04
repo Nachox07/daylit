@@ -166,6 +166,26 @@ public class LookTests {
     [Fact] public void NightIsDark() => Assert.True(new LookRule().WantDark(-10, 100, true, false, 0, 0));
     [Fact] public void ClosedBlindIsDark() => Assert.True(new LookRule().WantDark(20, 20, true, false, 0, 0));
     [Fact] public void BrightWhiteLightsAtNightAreLight() => Assert.False(new LookRule().WantDark(-10, 0, true, true, 230, 10));
+    [Fact]
+    public void WhiteLightsSwitchAtTheSameBrightnessAsBefore() {
+        var r = new LookRule();
+        Assert.True(r.WantDark(-10, 0, true, true, 199, 10));    // not bright enough yet
+        Assert.False(r.WantDark(-10, 0, true, true, 200, 10));   // 200 of 255: light
+        Assert.False(r.WantDark(-10, 0, true, true, 170, 10));   // still counts
+        Assert.True(r.WantDark(-10, 0, true, true, 169, 10));    // below 170: dark
+    }
+    [Fact]
+    public void ANarrowCustomGapStartsInsideIt() {
+        var t = new Tuning { Theme = new() { LightSunAbove = 2, DarkSunBelow = 1.8 } };
+        Assert.False(new LookRule().WantDark(1.97, 100, false, false, 0, 0, t));   // upper part of the gap: light
+    }
+    [Fact]
+    public void CloseLinesGetLabelsThatDoNotOverlap() {
+        Assert.Equal([80.0, 104.0], Layout.SpreadLabels([80, 90], 24, 170));
+        Assert.Equal([104.0, 80.0], Layout.SpreadLabels([90, 80], 24, 170));
+        Assert.Equal([20.0, 120.0], Layout.SpreadLabels([20, 120], 24, 170));   // far apart: on their lines
+        Assert.Equal([134.0, 158.0], Layout.SpreadLabels([165, 168], 24, 170));  // at the bottom: pushed up
+    }
     [Fact] public void WarmLightsAtNightStayDark() => Assert.True(new LookRule().WantDark(-10, 0, true, true, 230, 70));
     [Fact] public void WithoutBlindOnlyTheSunCounts() => Assert.False(new LookRule().WantDark(10, 0, false, false, 0, 0));
 
@@ -530,5 +550,73 @@ public class ConfigPatchTests {
     }
 
     [Fact]
+    public void TuningIsWrittenOnlyWhereItDiffersFromTheDefault() {
+        var e = new SettingsEdit("off", null, null, [],
+            Tuning: new Dictionary<string, double> { ["brightness.sunDay"] = 15, ["theme.lightSunAbove"] = 4, ["timing.pollSeconds"] = 20 },
+            ThemeRoom: false);
+        var o = Json(ConfigPatch.Apply(e, """{"tuning":{"theme":{"darkSunBelow":0},"future":1}}"""));
+        var t = o["tuning"]!.AsObject();
+        Assert.Equal(15, (int)t["brightness"]!["sunDay"]!);
+        Assert.Equal(20, (int)t["timing"]!["pollSeconds"]!);
+        Assert.Null(t["theme"]!["lightSunAbove"]); Assert.Null(t["theme"]!["darkSunBelow"]);
+        Assert.False((bool)t["theme"]!["room"]!);
+        Assert.Equal(1, (int)t["future"]!);
+        Assert.Null(Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, []), """{"tuning":{"theme":{"darkSunBelow":0}}}"""))["tuning"]);
+        Assert.ThrowsAny<Exception>(() => ConfigPatch.Apply(new SettingsEdit("off", null, null, [],
+            Tuning: new Dictionary<string, double> { ["brightness.sunNight"] = 20, ["brightness.sunDay"] = 10 }), null));
+    }
+
+    [Fact]
     public void SuggestsTheModelNumber() => Assert.Equal("AW3821DW", ConfigPatch.SuggestMatch("Dell AW3821DW"));
+}
+
+public class TuningTests {
+    static Config Parse(string json) {
+        string p = Path.Combine(Path.GetTempPath(), $"daylit-tuning-{Guid.NewGuid():N}.json");
+        File.WriteAllText(p, json);
+        try { var (c, err) = Config.Load(p); Assert.Null(err); return c; } finally { File.Delete(p); }
+    }
+
+    [Fact]
+    public void DefaultsGiveTheSameResultsAsBefore() {
+        var t = new Tuning();
+        for (double elev = -10; elev <= 30; elev += 0.5) {
+            Assert.Equal(Sun.Fraction(elev), t.Fraction(elev), 12);
+            foreach (bool lights in new[] { false, true })
+                Assert.Equal(Rules.Target([70, 40, 20], 60, lights, Sun.Fraction(elev)),
+                             Rules.Target([70, 40, 20], 60, lights, t.Fraction(elev), t, elev < t.LightsBoostSunBelow));
+        }
+    }
+
+    [Fact]
+    public void CustomValuesMoveTheCurveAndTheBoost() {
+        var t = Parse("""{ "tuning": { "brightness": { "sunNight": 0, "sunDay": 20, "lightsBoost": 10, "lightsBoostSunBelow": 0 } } }""").Tuned;
+        Assert.Equal(0.5, t.Fraction(10));
+        Assert.Equal(30, Rules.Target([70, 40, 20], 100, true, t.Fraction(-5), t, -5 < t.LightsBoostSunBelow));
+        Assert.Equal(23, Rules.Target([70, 40, 20], 100, true, t.Fraction(1), t, 1 < t.LightsBoostSunBelow));
+    }
+
+    [Fact]
+    public void ThemeThresholdsAndRoomSwitch() {
+        var t = Parse("""{ "tuning": { "theme": { "lightSunAbove": 10, "darkSunBelow": 6 } } }""").Tuned;
+        var look = new LookRule();
+        Assert.True(look.WantDark(8, 100, false, false, 0, 0, t));
+        Assert.False(look.WantDark(11, 100, false, false, 0, 0, t));
+        Assert.False(look.WantDark(8, 100, false, false, 0, 0, t));
+        var sunOnly = Parse("""{ "tuning": { "theme": { "room": false } } }""").Tuned;
+        Assert.False(new LookRule().WantDark(20, 0, true, false, 0, 0, sunOnly));
+    }
+
+    [Fact]
+    public void ImpossibleValuesAreRefused() {
+        string Err(string json) {
+            string p = Path.Combine(Path.GetTempPath(), $"daylit-tuning-{Guid.NewGuid():N}.json");
+            File.WriteAllText(p, json);
+            try { return Config.Load(p).error ?? ""; } finally { File.Delete(p); }
+        }
+        Assert.Equal("", Err("""{ "tuning": {} }"""));
+        Assert.NotEqual("", Err("""{ "tuning": { "brightness": { "sunNight": 10, "sunDay": 5 } } }"""));
+        Assert.NotEqual("", Err("""{ "tuning": { "theme": { "lightSunAbove": 0, "darkSunBelow": 2 } } }"""));
+        Assert.Equal("config.json: tuning.timing.pollSeconds must be 5–3600", Err("""{ "tuning": { "timing": { "pollSeconds": 1 } } }"""));
+    }
 }
