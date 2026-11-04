@@ -142,31 +142,12 @@ struct SunCurve: View {
     }
 
     /// Today's times for this elevation: "06:52 – 21:14" while the sun is above it, or for a state that
-    /// applies below it, "until 06:52 · from 21:14".
+    /// applies below it, "until 06:52 · from 21:14" (DaylitCore.sunSpans, in the order they happen).
     func crossings(_ e: Double, below: Bool = false) -> String {
-        let s = samples, (start, length) = day
+        let (start, length) = day
         let clock = DateFormatter(); clock.dateFormat = "HH:mm"; clock.timeZone = timeZone
-        func time(_ i: Int) -> String {
-            let a = s[i - 1], b = s[i]
-            let t = a.t + (b.t - a.t) * (e - a.e) / (b.e - a.e)
-            return clock.string(from: start.addingTimeInterval((t * length / 60).rounded() * 60))
-        }
-        let up = (1..<s.count).first { s[$0 - 1].e < e && s[$0].e >= e }
-        let down = (1..<s.count).last { s[$0 - 1].e >= e && s[$0].e < e }
-        let allAbove = (s.first?.e ?? 0) >= e
-        if below {
-            switch (up, down) {
-            case let (u?, d?): return "until \(time(u)) · from \(time(d))"
-            case (nil, nil): return allAbove ? "not today" : "all day"
-            case let (u?, nil): return "until \(time(u))"
-            case let (nil, d?): return "from \(time(d))"
-            }
-        }
-        switch (up, down) {
-        case let (u?, d?): return "\(time(u)) – \(time(d))"
-        case (nil, nil): return allAbove ? "all day" : "not today"
-        case let (u?, nil): return "from \(time(u))"
-        case let (nil, d?): return "until \(time(d))"
+        return sunSpanLabel(sunSpans(samples, line: e, below: below)) { t in
+            clock.string(from: start.addingTimeInterval((t * length / 60).rounded() * 60))
         }
     }
 }

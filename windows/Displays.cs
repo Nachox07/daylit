@@ -71,9 +71,10 @@ static class Native {
         if (Get(ref w) != 0 || w.Level < 1000) return null;
         return (int)Math.Round((w.Level - 1000) / 50.0, MidpointRounding.AwayFromZero);
     }
-    public static void SetSdr(Display d, int v) {
+    /// True when Windows accepted the change.
+    public static bool SetSdr(Display d, int v) {
         var w = new WhiteSet { H = H<WhiteSet>(SET_SDR_WHITE, d.Adapter, d.TargetId), Level = (uint)(1000 + Math.Clamp(v, 0, 100) * 50), Final = 1 };
-        Set(ref w);
+        return Set(ref w) == 0;
     }
 }
 
@@ -132,6 +133,7 @@ sealed class Mon {
     public bool Manual;                        // automatic mode is holding a hand-set value
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
     public ReadState Reads = ReadState.Unknown; // DDC only: does it report its level (Rules.cs)
+    public bool WriteFailing;                  // the last automatic write was refused (logged once, retried each tick)
     /// A DDC monitor that has not reported its level yet can still be tried with the slider.
     public bool Untried => !D.Hdr && Reads == ReadState.Unknown && Cur == null;
     public bool Usable => (Cur != null || Untried) && Reads.Usable();
@@ -147,7 +149,8 @@ sealed class Mon {
     public double Night => Spec?.Night ?? Config.DefaultNight;
 
     public int? Read() => D.Hdr ? Native.GetSdr(D) : Ddc.Get(D.Gdi);
-    public void Write(int v) { if (D.Hdr) Native.SetSdr(D, v); else Ddc.Set(D.Gdi, v); }
+    /// An automatic level; false when the monitor did not take it.
+    public bool Write(int v) => D.Hdr ? Native.SetSdr(D, v) : Ddc.Set(D.Gdi, v);
     /// For sliders and hotkeys: HDR applies at once; DDC is slow, so it is debounced.
     public void WriteSoon(int v) {
         var d = D;

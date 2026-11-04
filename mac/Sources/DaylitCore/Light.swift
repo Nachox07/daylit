@@ -35,6 +35,28 @@ public struct LightReference: Equatable {
     public var isEmpty: Bool { bins.isEmpty }
 }
 
+/// The unit the sensor reports in, and since when its history is all in that unit. Changing it in Home
+/// Assistant (W to kW, lx to klx) leaves older readings 1000 times off, so the reference learns again
+/// from that moment instead of mixing the two for the next ten days.
+public struct LightUnit: Codable, Equatable {
+    public var sensor: String
+    public var unit: String     // "" until the sensor has reported one
+    public var since: Double    // Unix seconds; 0 = all of its history
+
+    public init(sensor: String, unit: String, since: Double) { self.sensor = sensor; self.unit = unit; self.since = since }
+
+    /// After a tick read `unit` for `sensor`. A missing unit (the sensor briefly unavailable) changes nothing.
+    public static func update(_ saved: LightUnit?, sensor: String, unit: String?, now: Double) -> LightUnit {
+        let u = unit ?? ""
+        guard let s = saved, s.sensor == sensor else { return LightUnit(sensor: sensor, unit: u, since: 0) }
+        if u.isEmpty || u == s.unit { return s }
+        if s.unit.isEmpty { return LightUnit(sensor: sensor, unit: u, since: s.since) }   // the first unit seen
+        return LightUnit(sensor: sensor, unit: u, since: now)
+    }
+    /// How many days of history to learn from: `days`, or fewer since the unit changed.
+    public func historyDays(_ days: Double, now: Double) -> Double { min(days, max(0, (now - since) / 86400)) }
+}
+
 /// How clear the sky is now, 0…1, or nil when the reading tells nothing: no reference for this part of
 /// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of
 /// exactly 0 while there is a reference, which is a fault (inverter off), not a cloud.

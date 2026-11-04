@@ -25,6 +25,34 @@ static class Sun {
 
     /// How much daylight counts, 0..1: 0 below -3° elevation, 1 from 12°.
     public static double Fraction(double elev) => Math.Clamp((elev + 3) / 15, 0, 1);
+
+    /// When the sun is at or above `line` today (or below it, with `below`), in the order it happens, from
+    /// a day of evenly spaced samples (t: 0 = the midnight it starts at, 1 = the next one). Usually one span
+    /// from rise to set, but near the poles the sun can dip under a line after midnight and come back,
+    /// so "above" is then the day's two ends.
+    public static List<(double From, double To)> Spans(IReadOnlyList<(double t, double e)> s, double line, bool below = false) {
+        var spans = new List<(double From, double To)>();
+        if (s.Count == 0) return spans;
+        bool Inside(double x) => below ? x < line : x >= line;
+        double? start = Inside(s[0].e) ? s[0].t : null;
+        for (int i = 1; i < s.Count; i++) {
+            var (a, b) = (s[i - 1], s[i]);
+            if (Inside(a.e) == Inside(b.e)) continue;
+            double t = a.t + (b.t - a.t) * (line - a.e) / (b.e - a.e);   // a crossing: a.e and b.e differ
+            if (start is double st) { spans.Add((st, t)); start = null; } else start = t;
+        }
+        if (start is double st2) spans.Add((st2, s[^1].t));
+        return spans;
+    }
+
+    /// "06:52 – 21:14", "until 06:52 · from 21:14", "all day" or "not today" for those spans.
+    public static string SpanLabel(IReadOnlyList<(double From, double To)> spans, Func<double, string> clock) =>
+        spans.Count == 0 ? "not today" : string.Join(" · ", spans.Select(sp => (sp.From <= 0, sp.To >= 1) switch {
+            (true, true) => "all day",
+            (true, false) => $"until {clock(sp.To)}",
+            (false, true) => $"from {clock(sp.From)}",
+            _ => $"{clock(sp.From)} – {clock(sp.To)}",
+        }));
 }
 
 /// What automatic mode remembers per monitor between ticks.
@@ -113,6 +141,11 @@ static class Rules {
         return new Step(s, c, write, remoteValue, applied, s.Offset != null && (fromRemote || (auto && weight > 0)));
     }
 
+    /// After automatic mode sent a level to the monitor. A refused write applied nothing, so forget
+    /// it: otherwise the next tick reads the old level, takes the gap for a hand-set change and stops
+    /// retrying. Without it the next tick simply writes the target again.
+    public static Hold AfterWrite(Hold s, bool ok) => ok ? s : s with { LastSet = null };
+
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
     public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {
         t ??= new Tuning();
@@ -173,6 +206,7 @@ static class HaTemplate {
         }));
         string lightAge = h.Light is { Length: > 0 } lt
             ? $"{{{{ (now() - states['{lt}'].last_updated).total_seconds() | round(0) if states['{lt}'] else -1 }}}}" : "-1";   // seconds since it last reported; states['…']: an object id may start with a digit
+        string lightUnit = h.Light is { Length: > 0 } lu ? $"{{{{ state_attr('{lu}','unit_of_measurement') | tojson }}}}" : "null";   // W, kW, lx…; null when unknown
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
             {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},
@@ -183,7 +217,8 @@ static class HaTemplate {
              "bri": {{ {{{bri}}} }},
              "sat": {{ {{{sat}}} }},
              "light": {{{Num(h.Light, -1)}}},
-             "lightAge": {{{lightAge}}} }
+             "lightAge": {{{lightAge}}},
+             "lightUnit": {{{lightUnit}}} }
             """;
     }
 }

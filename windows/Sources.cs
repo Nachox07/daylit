@@ -13,6 +13,8 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
     /// The light sensor's reading (-1: none or not a number) and seconds since it last reported (-1: no sensor).
     public double Light { get; init; } = -1;
     public double LightAge { get; init; } = -1;
+    /// Its unit_of_measurement (W, kW, lx…); null when unknown.
+    public string? LightUnit { get; init; }
     /// How clear the sky is, 0…1, when the light sensor says.
     public double? LightRatio { get; init; }
 }
@@ -27,7 +29,7 @@ static class HAClient {
     /// The last failure was a connection problem that usually clears by itself (see HaErrorRule).
     public static bool Transient;
 
-    record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100, double light = -1, double lightAge = -1);
+    record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100, double light = -1, double lightAge = -1, string? lightUnit = null);
 
     public static async Task<string?> Call(Config c, string path, object body) {
         if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; Transient = false; return null; }
@@ -63,7 +65,7 @@ static class HAClient {
             var levels = mons.Select((m, i) => new[] {
                 a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
             var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge };
+            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit };
         } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
     }
 

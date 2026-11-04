@@ -52,6 +52,17 @@ public struct HoldState: Equatable {
     }
 }
 
+extension HoldState {
+    /// After automatic mode sent a level to the monitor. A refused write applied nothing, so forget
+    /// it: otherwise the next tick reads the old level, takes the gap for a hand-set change and stops
+    /// retrying. Without it the next tick simply writes the target again.
+    public func afterWrite(ok: Bool) -> HoldState {
+        var s = self
+        if !ok { s.lastSet = nil }
+        return s
+    }
+}
+
 /// The outcome of one tick for one monitor.
 public struct Step: Equatable {
     public var state: HoldState

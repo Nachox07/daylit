@@ -48,7 +48,8 @@ enum Native {
         var b: Float = -1
         return getF(id, &b) == 0 && b >= 0 ? Int((b * 100).rounded()) : nil
     }
-    static func set(_ id: CGDirectDisplayID, _ v: Int) { _ = setF?(id, Float(v) / 100) }
+    /// True when macOS accepted the change.
+    @discardableResult static func set(_ id: CGDirectDisplayID, _ v: Int) -> Bool { setF?(id, Float(v) / 100) == 0 }
 }
 
 /// DDC/CI through m1ddc, addressing the display by its system UUID (the same one CoreGraphics reports).
@@ -129,4 +130,5 @@ struct Mon: Identifiable {
     var touched = false   // moved with the slider or keys since the last tick
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
+    var writeFailing = false         // the last automatic write was refused (logged once, retried each tick)
 }

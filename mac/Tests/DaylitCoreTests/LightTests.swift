@@ -79,6 +79,40 @@ final class LightTests: XCTestCase {
         let t = HATemplate.build(HAConfig(url: "http://x", light: "sensor.pv_power"), [])
         XCTAssertTrue(t.contains("states('sensor.pv_power') | float(-1)"))
         XCTAssertTrue(t.contains("\"lightAge\""))
+        XCTAssertTrue(t.contains("state_attr('sensor.pv_power','unit_of_measurement')"))
         XCTAssertTrue(HATemplate.build(HAConfig(url: "http://x"), []).contains("\"light\": -1"))
+        XCTAssertTrue(HATemplate.build(HAConfig(url: "http://x"), []).contains("\"lightUnit\": null"))
+    }
+    func testTheAnswerCarriesTheSensorUnit() {
+        let base = #"{"elev": 10, "pos": 100, "lights": false, "auto": null, "bri": 0, "sat": 100, "light": 3.2, "lightAge": 5, "m": {}"#
+        XCTAssertEqual(HAState.parse(Data((base + #", "lightUnit": "kW"}"#).utf8))?.lightUnit, "kW")
+        XCTAssertNil(HAState.parse(Data((base + "}").utf8))?.lightUnit)   // an answer without it still parses
+    }
+
+    func testAUnitChangeRestartsLearningFromThatMoment() {
+        let day = 86400.0, now = 100 * day
+        // First seen: its whole history is trusted.
+        let first = LightUnit.update(nil, sensor: "sensor.pv_power", unit: "W", now: now)
+        XCTAssertEqual(first, LightUnit(sensor: "sensor.pv_power", unit: "W", since: 0))
+        XCTAssertEqual(first.historyDays(10, now: now), 10)
+        // Same unit: nothing changes.
+        XCTAssertEqual(LightUnit.update(first, sensor: "sensor.pv_power", unit: "W", now: now + day), first)
+        // W to kW: the older readings are 1000 times off, so learning starts again from now.
+        let kw = LightUnit.update(first, sensor: "sensor.pv_power", unit: "kW", now: now)
+        XCTAssertEqual(kw, LightUnit(sensor: "sensor.pv_power", unit: "kW", since: now))
+        XCTAssertEqual(kw.historyDays(10, now: now + 2 * day), 2, accuracy: 1e-9)
+        XCTAssertEqual(kw.historyDays(10, now: now + 30 * day), 10)
+    }
+    func testAMissingUnitIsNotAUnitChange() {
+        let w = LightUnit(sensor: "sensor.pv_power", unit: "W", since: 0)
+        // The sensor is briefly unavailable and reports no unit: keep what was learned.
+        XCTAssertEqual(LightUnit.update(w, sensor: "sensor.pv_power", unit: nil, now: 50), w)
+        XCTAssertEqual(LightUnit.update(w, sensor: "sensor.pv_power", unit: "", now: 50), w)
+        // No unit known yet (started while it was unavailable): the first real one is adopted, not a change.
+        let unknown = LightUnit.update(nil, sensor: "sensor.pv_power", unit: nil, now: 50)
+        XCTAssertEqual(LightUnit.update(unknown, sensor: "sensor.pv_power", unit: "W", now: 60), w)
+        // Another sensor starts fresh with its own history.
+        XCTAssertEqual(LightUnit.update(w, sensor: "sensor.solar_power", unit: "kW", now: 50),
+                       LightUnit(sensor: "sensor.solar_power", unit: "kW", since: 0))
     }
 }

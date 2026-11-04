@@ -127,30 +127,10 @@ sealed class SunCurve : FrameworkElement {
     }
 
     /// Today's times for an elevation: "06:52 – 21:14" while the sun is above it, or for a state that
-    /// applies below it, "until 06:52 · from 21:14".
-    static string Crossings(List<(double t, double e)> s, double e, bool below, (DateTimeOffset start, double hours) day, TimeZoneInfo tz) {
-        string Time(int i) {
-            var (a, b) = (s[i - 1], s[i]);
-            double t = a.t + (b.t - a.t) * (e - a.e) / (b.e - a.e);
-            var at = day.start.AddMinutes(Math.Round(t * day.hours * 60));
-            return TimeZoneInfo.ConvertTime(at, tz).ToString("HH:mm", CultureInfo.InvariantCulture);
-        }
-        int? up = Enumerable.Range(1, s.Count - 1).Cast<int?>().FirstOrDefault(i => s[i!.Value - 1].e < e && s[i.Value].e >= e);
-        int? down = Enumerable.Range(1, s.Count - 1).Cast<int?>().LastOrDefault(i => s[i!.Value - 1].e >= e && s[i.Value].e < e);
-        bool allAbove = s[0].e >= e;
-        if (below) return (up, down) switch {
-            ({ } u, { } d) => $"until {Time(u)} · from {Time(d)}",
-            (null, null) => allAbove ? "not today" : "all day",
-            ({ } u, null) => $"until {Time(u)}",
-            (null, { } d) => $"from {Time(d)}",
-        };
-        return (up, down) switch {
-            ({ } u, { } d) => $"{Time(u)} – {Time(d)}",
-            (null, null) => allAbove ? "all day" : "not today",
-            ({ } u, null) => $"from {Time(u)}",
-            (null, { } d) => $"until {Time(d)}",
-        };
-    }
+    /// applies below it, "until 06:52 · from 21:14" (Sun.Spans, in the order they happen).
+    static string Crossings(List<(double t, double e)> s, double e, bool below, (DateTimeOffset start, double hours) day, TimeZoneInfo tz) =>
+        Sun.SpanLabel(Sun.Spans(s, e, below), t =>
+            TimeZoneInfo.ConvertTime(day.start.AddMinutes(Math.Round(t * day.hours * 60, MidpointRounding.AwayFromZero)), tz).ToString("HH:mm", CultureInfo.InvariantCulture));
 
     // Dragging a handle moves its line in half-degree steps.
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e) {

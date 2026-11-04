@@ -24,6 +24,46 @@ public class SunTests {
     public void DaylightFraction(double elev, double expected) => Assert.Equal(expected, Sun.Fraction(elev), 1e-9);
 }
 
+public class SunSpanTests {
+    /// A day's elevations every 10 minutes from local midnight, as the sun curve samples them.
+    static List<(double t, double e)> Day(double lat, double lon, string start) {
+        var d = DateTimeOffset.Parse(start, System.Globalization.CultureInfo.InvariantCulture);
+        return Enumerable.Range(0, 145).Select(i => (i / 144.0, Sun.Elevation(d.AddSeconds(i * 600), lat, lon))).ToList();
+    }
+    static string Clock(double t) { int m = (int)Math.Round(t * 1440, MidpointRounding.AwayFromZero); return $"{m / 60:00}:{m % 60:00}"; }
+    static string Label(List<(double t, double e)> s, double e, bool below = false) => Sun.SpanLabel(Sun.Spans(s, e, below), Clock);
+
+    [Fact]
+    public void AnOrdinaryDayRisesAndSets() {
+        var s = Day(51.48, 0, "2026-03-20T00:00:00Z");   // Greenwich, equinox, UTC
+        Assert.Equal("06:08 – 18:08", Label(s, 0));
+        Assert.Equal("until 06:08 · from 18:08", Label(s, 0, below: true));
+        Assert.Equal("not today", Label(s, 60));
+        Assert.Equal("all day", Label(s, 60, below: true));
+    }
+
+    [Fact]
+    public void AMidnightSunDipIsLabelledInTheOrderItHappens() {
+        // Tromsø at midsummer, local time UTC+2: the sun never sets, and its lowest point is about 00:45,
+        // after local midnight. A line between the midnight height and that minimum is crossed going
+        // down first and coming back up later, so "above" is everything but a short dip.
+        var s = Day(69.65, 18.96, "2026-06-20T22:00:00Z");
+        double line = (s[0].e + s.Min(x => x.e)) / 2;
+        var above = Sun.Spans(s, line);
+        Assert.Equal(2, above.Count);
+        Assert.Equal(0, above[0].From); Assert.Equal(1, above[^1].To);
+        Assert.True(above[0].To < above[1].From);
+        var dip = Sun.Spans(s, line, below: true);
+        Assert.Single(dip);
+        Assert.Equal($"until {Clock(dip[0].From)} · from {Clock(dip[0].To)}", Label(s, line));
+        Assert.Equal($"{Clock(dip[0].From)} – {Clock(dip[0].To)}", Label(s, line, below: true));
+        Assert.True(dip[0].From < dip[0].To);
+        // Polar day: above the horizon all day.
+        Assert.Equal("all day", Label(s, 0));
+        Assert.Equal("not today", Label(s, 0, below: true));
+    }
+}
+
 public class TargetTests {
     static readonly double[] Levels = [80, 40, 20];   // day, blindDown, night
     static int T(double elev, double pos, bool lights) => Rules.Target(Levels, pos, lights, Sun.Fraction(elev));
@@ -54,6 +94,18 @@ public class DecideTests {
         Assert.Null(s.Write); Assert.Null(s.State.Offset); Assert.False(s.Manual);
         Assert.Equal(1, D(46, 45, s: st, touched: true).State.Offset);    // one step with the keys counts
         Assert.Equal(2, D(47, 45, s: st, touched: false).State.Offset);   // the monitor's own buttons count
+    }
+
+    [Fact]
+    public void ARefusedWriteIsRetriedAndNotMistakenForAHandSetLevel() {
+        var first = D(40, 70, touched: false);
+        Assert.Equal(70, first.Write);
+        // The monitor refused the write and still reads 40 on the next tick.
+        var next = D(40, 70, s: Rules.AfterWrite(first.State, false), touched: false);
+        Assert.Equal(70, next.Write);
+        Assert.Null(next.State.Offset); Assert.False(next.Manual);
+        // A write that went through is remembered as usual.
+        Assert.Equal(first.State, Rules.AfterWrite(first.State, true));
     }
 
     [Fact]
@@ -796,6 +848,37 @@ public class LightTests {
         var t = HaTemplate.Build(new HaConfig { Url = "http://x", Light = "sensor.pv_power" }, []);
         Assert.Contains("states('sensor.pv_power') | float(-1)", t);
         Assert.Contains("\"lightAge\"", t);
+        Assert.Contains("state_attr('sensor.pv_power','unit_of_measurement')", t);
         Assert.Contains("\"light\": -1", HaTemplate.Build(new HaConfig { Url = "http://x" }, []));
+        Assert.Contains("\"lightUnit\": null", HaTemplate.Build(new HaConfig { Url = "http://x" }, []));
+    }
+
+    [Fact]
+    public void AUnitChangeRestartsLearningFromThatMoment() {
+        const double day = 86400, now = 100 * day;
+        // First seen: its whole history is trusted.
+        var first = LightUnit.Update(null, "sensor.pv_power", "W", now);
+        Assert.Equal(new LightUnit("sensor.pv_power", "W", 0), first);
+        Assert.Equal(10, first.HistoryDays(10, now));
+        // Same unit: nothing changes.
+        Assert.Equal(first, LightUnit.Update(first, "sensor.pv_power", "W", now + day));
+        // W to kW: the older readings are 1000 times off, so learning starts again from now.
+        var kw = LightUnit.Update(first, "sensor.pv_power", "kW", now);
+        Assert.Equal(new LightUnit("sensor.pv_power", "kW", now), kw);
+        Assert.Equal(2, kw.HistoryDays(10, now + 2 * day), 9);
+        Assert.Equal(10, kw.HistoryDays(10, now + 30 * day));
+    }
+
+    [Fact]
+    public void AMissingUnitIsNotAUnitChange() {
+        var w = new LightUnit("sensor.pv_power", "W", 0);
+        // The sensor is briefly unavailable and reports no unit: keep what was learned.
+        Assert.Equal(w, LightUnit.Update(w, "sensor.pv_power", null, 50));
+        Assert.Equal(w, LightUnit.Update(w, "sensor.pv_power", "", 50));
+        // No unit known yet (started while it was unavailable): the first real one is adopted, not a change.
+        var unknown = LightUnit.Update(null, "sensor.pv_power", null, 50);
+        Assert.Equal(w, LightUnit.Update(unknown, "sensor.pv_power", "W", 60));
+        // Another sensor starts fresh with its own history.
+        Assert.Equal(new LightUnit("sensor.solar_power", "kW", 0), LightUnit.Update(w, "sensor.solar_power", "kW", 50));
     }
 }

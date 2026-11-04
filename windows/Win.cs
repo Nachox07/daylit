@@ -111,6 +111,15 @@ static class Settings {
         set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("Holds", value.ToJson()); }
     }
 
+    /// The light sensor's unit and since when its history is in it (JSON, see LightUnit).
+    public static LightUnit? LightUnit {
+        get {
+            try { return Registry.CurrentUser.OpenSubKey(Key)?.GetValue("LightUnit") is string j ? System.Text.Json.JsonSerializer.Deserialize<LightUnit>(j) : null; }
+            catch { return null; }
+        }
+        set { if (value != null) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("LightUnit", System.Text.Json.JsonSerializer.Serialize(value)); } }
+    }
+
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;
     static void SetInt(string name, int v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v, RegistryValueKind.DWord); }
     /// Brightness hotkeys, set from the panel (Keyboard shortcuts…). Shift is added for fine steps.
