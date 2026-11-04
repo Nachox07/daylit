@@ -8,7 +8,7 @@ public struct Tuning: Equatable, Decodable {
         public var sunDay: Double?              // elevation from which the full daytime level applies
         public var lightsBoost: Double?         // room lights on at dusk: at least night + this many points
         public var lightsBoostSunBelow: Double? // ...while the sun is below this elevation
-        public var cloudyDaylight: Double?      // with a light sensor: how much of the daylight part a fully overcast sky keeps (%)
+        public var cloudyDaylight: Double?      // with a light sensor: the most daylight counts under a fully overcast sky (%)
         public init() {}
     }
     public struct Theme: Equatable, Decodable {
@@ -108,7 +108,7 @@ extension Tuning {
         .init(group: "brightness", key: "sunDay", label: "Full day level from", unit: "°", defaultValue: 12),
         .init(group: "brightness", key: "lightsBoost", label: "Room lights at dusk add", unit: "points", defaultValue: 5),
         .init(group: "brightness", key: "lightsBoostSunBelow", label: "…while the sun is below", unit: "°", defaultValue: 1.5),
-        .init(group: "brightness", key: "cloudyDaylight", label: "An overcast sky keeps this much daylight", unit: "%", defaultValue: 35),
+        .init(group: "brightness", key: "cloudyDaylight", label: "Under a fully overcast sky, daylight counts at most", unit: "%", defaultValue: 35),
         .init(group: "timing", key: "pollSeconds", label: "Check every", unit: "s", defaultValue: 30),
         .init(group: "timing", key: "batteryPollSeconds", label: "Check on battery every", unit: "s", defaultValue: 120),
         .init(group: "timing", key: "idleSeconds", label: "Idle (another computer may be in use) after", unit: "s", defaultValue: 300),

@@ -462,7 +462,8 @@ struct SettingsView: View {
     func rightNow(_ d: MonitorDraft) -> Int? {
         guard let l = coords else { return nil }
         return target(day: d.day, blindDown: d.blindDown, night: d.night,
-                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned)
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned,
+                      light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1)   // with today's clouds; snapshots stay clear
     }
 
     func caption(_ d: MonitorDraft) -> String {

@@ -30,35 +30,31 @@ sealed class LightReference {
         Bins = groups.Where(g => g.Value.Count >= MinSamples).ToDictionary(g => g.Key, g => {
             var sorted = g.Value.Order().ToList();
             return sorted[Math.Min(sorted.Count - 1, (int)Math.Round((sorted.Count - 1) * 0.9, MidpointRounding.AwayFromZero))];
-        });
+        }).Where(b => b.Value > 0).ToDictionary(b => b.Key, b => b.Value);   // a step that only ever read 0 (the sensor was off) tells nothing
     }
 
     static string Key(double elev, bool morning) => (morning ? "am" : "pm") + (int)Math.Floor(elev / Step);
     public double? ClearSky(double elev, bool morning) => Bins.TryGetValue(Key(elev, morning), out var v) ? v : null;
-    public double Largest => Bins.Count == 0 ? 0 : Bins.Values.Max();
+    /// The largest clear-sky reading in the same half of the day.
+    public double Largest(bool morning) => Bins.Where(b => b.Key.StartsWith(morning ? "am" : "pm", StringComparison.Ordinal))
+                                               .Select(b => b.Value).DefaultIfEmpty(0).Max();
     public bool IsEmpty => Bins.Count == 0;
 }
 
 static class LightRules {
     /// How clear the sky is now, 0…1, or null when the reading tells nothing: no reference for this part of
-    /// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of 0
-    /// with the sun well up, which is a fault (inverter off), not a cloud.
+    /// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of
+    /// exactly 0 while there is a reference, which is a fault (inverter off), not a cloud.
     public static double? Ratio(double? value, double elev, bool morning, LightReference r) {
-        if (value is not double v || !double.IsFinite(v) || v < 0 || elev <= 0 || r.ClearSky(elev, morning) is not double clear
-            || clear <= 0 || clear < r.Largest * 0.05) return null;
-        if (v == 0 && clear >= r.Largest * 0.2) return null;
+        if (value is not double v || !double.IsFinite(v) || v <= 0 || elev <= 0 || r.ClearSky(elev, morning) is not double clear
+            || clear < r.Largest(morning) * 0.05) return null;
         return Math.Min(1, v / clear);
     }
 
-    /// What the daylight part of the brightness is multiplied by: 1 under a clear sky (or with no reading),
-    /// down to `floor` (0…1) under a fully overcast one. Faded in between 3° and 6° of sun elevation, so
-    /// dawn and dusk keep their usual ramp.
-    public static double Scale(double? ratio, double elev, double floor) {
-        if (ratio is not double r) return 1;
-        double s = floor + (1 - floor) * Math.Clamp(r, 0, 1);
-        double w = Math.Clamp((elev - 3) / 3, 0, 1);
-        return 1 + (s - 1) * w;
-    }
+    /// The most daylight can count (0…1) under this sky: 1 when clear (or with no reading), down to `floor`
+    /// when fully overcast. Brightness uses the smaller of this and the sun's own daylight fraction, so at
+    /// dawn and dusk, when the sun gives less anyway, nothing changes, and the level only ever rises with the sun.
+    public static double Cap(double? ratio, double floor) => ratio is double r ? floor + (1 - floor) * Math.Clamp(r, 0, 1) : 1;
 
     /// Moves the scale in use toward the newest one, so a passing cloud does not jump the monitors:
     /// dimming over about 2 minutes, brightening over about 5. `dt`: seconds since the last step.

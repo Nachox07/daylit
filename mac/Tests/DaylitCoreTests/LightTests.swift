@@ -19,17 +19,35 @@ final class LightTests: XCTestCase {
         XCTAssertEqual(lightRatio(value: 45, elev: 11, morning: true, reference: ref())!, 0.1, accuracy: 1e-9)
         XCTAssertEqual(lightRatio(value: 900, elev: 11, morning: true, reference: ref()), 1)   // brighter than clear: 1
     }
-    func testAZeroWithTheSunUpIsAFaultNotACloud() {
+    func testAZeroIsAFaultNotACloud() {
         XCTAssertNil(lightRatio(value: 0, elev: 31, morning: true, reference: ref()))
+        XCTAssertNil(lightRatio(value: 0, elev: 11, morning: true, reference: ref()))   // a smaller step too
         XCTAssertNil(lightRatio(value: nil, elev: 31, morning: true, reference: ref()))
         XCTAssertNil(lightRatio(value: 300, elev: -1, morning: true, reference: ref()))
     }
-    func testOvercastKeepsTheFloorAndDawnFadesIn() {
-        XCTAssertEqual(lightScale(ratio: 0, elev: 20, floor: 0.35), 0.35, accuracy: 1e-9)
-        XCTAssertEqual(lightScale(ratio: 1, elev: 20, floor: 0.35), 1)
-        XCTAssertEqual(lightScale(ratio: 0, elev: 4.5, floor: 0.35), 0.675, accuracy: 1e-9)   // half faded in
-        XCTAssertEqual(lightScale(ratio: 0, elev: 2, floor: 0.35), 1)
-        XCTAssertEqual(lightScale(ratio: nil, elev: 20, floor: 0.35), 1)
+    func testOvercastCapsDaylightAtTheFloor() {
+        XCTAssertEqual(lightCap(ratio: 0, floor: 0.35), 0.35, accuracy: 1e-9)
+        XCTAssertEqual(lightCap(ratio: 0.5, floor: 0.35), 0.675, accuracy: 1e-9)
+        XCTAssertEqual(lightCap(ratio: 1, floor: 0.35), 1)
+        XCTAssertEqual(lightCap(ratio: nil, floor: 0.35), 1)
+    }
+    func testAnOvercastDawnNeverDipsAsTheSunRises() {
+        // day 70, night 20, fully overcast: the level climbs with the sun and stops at the cap.
+        let levels = stride(from: -3.0, through: 20, by: 0.5).map {
+            target(day: 70, blindDown: 40, night: 20, elev: $0, pos: 100, lights: false, light: 0.35)
+        }
+        XCTAssertEqual(levels, levels.sorted())
+        XCTAssertEqual(levels.last, 38)
+    }
+    func testAnEastFacingArrayIsComparedWithinItsOwnHalfOfTheDay() {
+        var s: [(elev: Double, morning: Bool, value: Double)] = []
+        for _ in 0..<5 { s.append((11, true, 4000)); s.append((11, false, 150)) }
+        let r = LightReference(samples: s)
+        XCTAssertEqual(lightRatio(value: 30, elev: 11, morning: false, reference: r)!, 0.2, accuracy: 1e-9)
+    }
+    func testAStepThatOnlyReadZeroIsNotAReference() {
+        let r = LightReference(samples: (0..<5).map { _ in (elev: 31.0, morning: true, value: 0.0) })
+        XCTAssertTrue(r.isEmpty)
     }
     func testDimmingIsQuickerThanBrightening() {
         let down = smoothLight(1, toward: 0.35, dt: 120), up = smoothLight(0.35, toward: 1, dt: 120)

@@ -41,10 +41,10 @@ static class Rules {
     /// blind position; the sun then blends it with the night value; room lights at night add a little.
     /// `boost`: room lights may lift the night level now (the sun is below tuning's lightsBoostSunBelow);
     /// without it, the default rule (daylight under 30%).
-    /// `light` (0…1, see LightRules.Scale) dims the daylight part on a cloudy day; 1 without a light sensor.
+    /// `light` (0…1, see LightRules.Cap) is the most daylight can count under a cloudy sky; 1 without a sensor.
     public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
-        double x = v[2] + (daytime - v[2]) * sun * light;
+        double x = v[2] + (daytime - v[2]) * Math.Min(sun, light);
         if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
@@ -172,7 +172,7 @@ static class HaTemplate {
             return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {set}]";
         }));
         string lightAge = h.Light is { Length: > 0 } lt
-            ? $"{{{{ (now() - states.{lt}.last_updated).total_seconds() | round(0) if states.{lt} else -1 }}}}" : "-1";   // seconds since it last reported
+            ? $"{{{{ (now() - states['{lt}'].last_updated).total_seconds() | round(0) if states['{lt}'] else -1 }}}}" : "-1";   // seconds since it last reported; states['…']: an object id may start with a digit
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
             {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},

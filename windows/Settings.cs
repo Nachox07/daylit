@@ -434,7 +434,7 @@ sealed class SettingsWindow : Window {
         double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
-            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned)}%" : "–";
+            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
             var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
             r.caption.Text = text;

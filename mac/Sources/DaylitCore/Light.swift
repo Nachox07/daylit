@@ -21,35 +21,35 @@ public struct LightReference: Equatable {
         bins = groups.filter { $0.value.count >= Self.minSamples }.mapValues { v in
             let sorted = v.sorted()
             return sorted[min(sorted.count - 1, Int((Double(sorted.count - 1) * 0.9).rounded()))]
-        }
+        }.filter { $0.value > 0 }   // a step that only ever read 0 (the sensor was off) tells nothing
     }
 
     static func key(elev: Double, morning: Bool) -> String {
         "\(morning ? "am" : "pm")\(Int((elev / step).rounded(.down)))"
     }
     public func clearSky(elev: Double, morning: Bool) -> Double? { bins[Self.key(elev: elev, morning: morning)] }
-    public var largest: Double { bins.values.max() ?? 0 }
+    /// The largest clear-sky reading in the same half of the day.
+    public func largest(morning: Bool) -> Double {
+        bins.filter { $0.key.hasPrefix(morning ? "am" : "pm") }.values.max() ?? 0
+    }
     public var isEmpty: Bool { bins.isEmpty }
 }
 
 /// How clear the sky is now, 0…1, or nil when the reading tells nothing: no reference for this part of
-/// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of 0
-/// with the sun well up, which is a fault (inverter off), not a cloud.
+/// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of
+/// exactly 0 while there is a reference, which is a fault (inverter off), not a cloud.
 public func lightRatio(value: Double?, elev: Double, morning: Bool, reference r: LightReference) -> Double? {
-    guard let v = value, v.isFinite, v >= 0, elev > 0, let clear = r.clearSky(elev: elev, morning: morning),
-          clear > 0, clear >= r.largest * 0.05 else { return nil }
-    if v == 0 && clear >= r.largest * 0.2 { return nil }
+    guard let v = value, v.isFinite, v > 0, elev > 0, let clear = r.clearSky(elev: elev, morning: morning),
+          clear >= r.largest(morning: morning) * 0.05 else { return nil }
     return min(1, v / clear)
 }
 
-/// What the daylight part of the brightness is multiplied by: 1 under a clear sky (or with no reading),
-/// down to `floor` (0…1) under a fully overcast one. Faded in between 3° and 6° of sun elevation, so
-/// dawn and dusk keep their usual ramp.
-public func lightScale(ratio: Double?, elev: Double, floor: Double) -> Double {
+/// The most daylight can count (0…1) under this sky: 1 when clear (or with no reading), down to `floor`
+/// when fully overcast. Brightness uses the smaller of this and the sun's own daylight fraction, so at
+/// dawn and dusk, when the sun gives less anyway, nothing changes, and the level only ever rises with the sun.
+public func lightCap(ratio: Double?, floor: Double) -> Double {
     guard let r = ratio else { return 1 }
-    let s = floor + (1 - floor) * min(max(r, 0), 1)
-    let w = min(max((elev - 3) / 3, 0), 1)
-    return 1 + (s - 1) * w
+    return floor + (1 - floor) * min(max(r, 0), 1)
 }
 
 /// Moves the scale in use toward the newest one, so a passing cloud does not jump the monitors:

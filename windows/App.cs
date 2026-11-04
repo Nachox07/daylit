@@ -392,6 +392,8 @@ sealed class Controller {
     string lightRefFor = "";
     /// The scale in use, smoothed, and when it last moved.
     double? lightNow;
+    /// The cap in use now (1 without a sensor), for the Settings window's "right now" preview.
+    public double LightNow => lightNow ?? 1;
     DateTime? lightAt;
 
     /// Runs beside the tick (the history call can take seconds); its state changes land on the UI thread.
@@ -407,17 +409,23 @@ sealed class Controller {
             if (body != null) {
                 var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude));
                 if (key != lightRefFor) return;   // the config changed meanwhile
-                lightRef = new LightReference(samples);
-                Log.Write($"light: clear-sky reference from {samples.Count} readings, {lightRef.Bins.Count} steps of the sky" +
-                          (lightRef.IsEmpty ? " (not enough history yet, trying again in an hour)" : ""));
-                if (lightRef.IsEmpty) LightStatus = "Not enough history in Home Assistant yet: trying again in an hour.";
+                var fresh = new LightReference(samples);
+                Log.Write($"light: clear-sky reference from {samples.Count} readings, {fresh.Bins.Count} steps of the sky" +
+                          (fresh.IsEmpty ? " (not enough history, trying again in an hour)" : ""));
+                if (!fresh.IsEmpty) lightRef = fresh;
+                else if (lightRef.IsEmpty) LightStatus = "Not enough history in Home Assistant yet: trying again in an hour.";
+                else RetryLightSoon();   // an odd answer does not replace a good reference
             } else {
                 Log.Write($"light: could not read its history ({cause ?? "no answer"}), trying again in an hour");
-                LightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour.";
+                if (lightRef.IsEmpty) LightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour.";
+                RetryLightSoon();
             }
-        } catch (Exception e) { Log.Write("light: " + e.Message); }
+        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(); }
         finally { lightRefBusy = false; }
     }
+
+    /// Try the history again in an hour, keeping the reference in use until then.
+    void RetryLightSoon() => lightRefAt = DateTime.UtcNow.AddSeconds(3600 - 86400);
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     double StepLight(double goal) {
@@ -449,9 +457,9 @@ sealed class Controller {
         double here = Sun.Elevation(DateTimeOffset.UtcNow, loc.Latitude, loc.Longitude);
         double? ratio = lightRefFor.StartsWith(e + " ", StringComparison.Ordinal)
             ? LightRules.Ratio(reading, here, LightRules.SunRising(loc.Latitude, loc.Longitude, DateTimeOffset.UtcNow), lightRef) : null;
-        light = StepLight(LightRules.Scale(ratio, here, Cfg.Tuned.CloudyDaylight / 100));
+        light = StepLight(LightRules.Cap(ratio, Cfg.Tuned.CloudyDaylight / 100));
         if (ratio is double r)
-            LightStatus = $"Now {Pct(r)}% of a clear sky, so daylight counts {Pct(light)}%.";
+            LightStatus = $"Now {Pct(r)}% of a clear sky, so daylight counts at most {Pct(light)}%.";
         else if (!lightRef.IsEmpty)
             LightStatus = reading == null ? "No reading from the sensor right now: going back to the sun's height alone."
                                           : "Too little sun to compare right now: the sun's height alone decides.";

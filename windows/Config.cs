@@ -349,7 +349,7 @@ sealed record TuningField(string Group, string Key, string Label, string Unit, d
         new("brightness", "sunDay", "Full day level from", "°", 12),
         new("brightness", "lightsBoost", "Room lights at dusk add", "points", 5),
         new("brightness", "lightsBoostSunBelow", "…while the sun is below", "°", 1.5),
-        new("brightness", "cloudyDaylight", "An overcast sky keeps this much daylight", "%", 35),
+        new("brightness", "cloudyDaylight", "Under a fully overcast sky, daylight counts at most", "%", 35),
         new("timing", "pollSeconds", "Check every", "s", 30),
         new("timing", "batteryPollSeconds", "Check on battery every", "s", 120),
         new("timing", "idleSeconds", "Idle (another computer may be in use) after", "s", 300),

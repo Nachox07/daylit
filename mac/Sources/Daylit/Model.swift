@@ -407,15 +407,21 @@ import DaylitCore
         case .success(let d):
             let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude) }.value
             guard key == lightRefFor else { return }   // the config changed meanwhile
-            lightRef = LightReference(samples: samples)
-            Log.write("light: clear-sky reference from \(samples.count) readings, \(lightRef.bins.count) steps of the sky" +
-                      (lightRef.isEmpty ? " (not enough history yet, trying again in an hour)" : ""))
-            if lightRef.isEmpty { lightStatus = "Not enough history in Home Assistant yet: trying again in an hour." }
+            let fresh = LightReference(samples: samples)
+            Log.write("light: clear-sky reference from \(samples.count) readings, \(fresh.bins.count) steps of the sky" +
+                      (fresh.isEmpty ? " (not enough history, trying again in an hour)" : ""))
+            if !fresh.isEmpty { lightRef = fresh }
+            else if lightRef.isEmpty { lightStatus = "Not enough history in Home Assistant yet: trying again in an hour." }
+            else { retryLightSoon() }   // an odd answer does not replace a good reference
         case .failure:
             Log.write("light: could not read its history (\(HAClient.lastCause ?? "no answer")), trying again in an hour")
-            lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour."
+            if lightRef.isEmpty { lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour." }
+            retryLightSoon()
         }
     }
+
+    /// Try the history again in an hour, keeping the reference in use until then.
+    func retryLightSoon() { lightRefAt = Date().addingTimeInterval(3600 - 86400) }
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     func stepLight(toward goal: Double) -> Double {
@@ -613,10 +619,10 @@ import DaylitCore
                     let ratio = lightRefFor.hasPrefix(e + " ") ? lightRatio(value: reading, elev: here,
                                            morning: sunRising(latitude: loc.latitude, longitude: loc.longitude, at: Date()), reference: lightRef) : nil
                     i.lightRatio = ratio
-                    i.light = stepLight(toward: lightScale(ratio: ratio, elev: here, floor: config.tuned.cloudyDaylight / 100))
+                    i.light = stepLight(toward: lightCap(ratio: ratio, floor: config.tuned.cloudyDaylight / 100))
                     if let r = ratio {
                         i.line += " · light \(Int((r * 100).rounded()))%"
-                        lightStatus = "Now \(Int((r * 100).rounded()))% of a clear sky, so daylight counts \(Int((i.light * 100).rounded()))%."
+                        lightStatus = "Now \(Int((r * 100).rounded()))% of a clear sky, so daylight counts at most \(Int((i.light * 100).rounded()))%."
                     } else if !lightRef.isEmpty {
                         lightStatus = reading == nil ? "No reading from the sensor right now: going back to the sun's height alone."
                                                      : "Too little sun to compare right now: the sun's height alone decides."

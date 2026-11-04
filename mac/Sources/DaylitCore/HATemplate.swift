@@ -35,7 +35,8 @@ public enum HATemplate {
         let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"
         let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
-        let lightAge = ha.light.map { "{{ (now() - states.\($0).last_updated).total_seconds() | round(0) if states.\($0) else -1 }}" } ?? "-1"
+        // states['…'], not states.domain.name: an object id may start with a digit, which the dotted form can't parse.
+        let lightAge = ha.light.map { "{{ (now() - states['\($0)'].last_updated).total_seconds() | round(0) if states['\($0)'] else -1 }}" } ?? "-1"
         let m = mons.compactMap { mon -> String? in
             guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
             // states.domain.name is None when the entity is missing, so a typo gives "no set helper", not an error.

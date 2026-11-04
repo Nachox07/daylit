@@ -98,12 +98,15 @@ shrinks, so the monitors stay dimmer.
   and again once a day. For each 2° step of the sun's height, mornings and afternoons apart, it takes what
   the sensor read on the clearest days (the 90th percentile). Panels that face east or sit in a morning
   shadow are fine: that becomes their normal. Needs a `location`, to know where the sun was at each reading.
-- **The effect.** Now ÷ clear sky gives how clear the sky is (0–1). An overcast sky keeps 35% of the
-  daylight part (`tuning.brightness.cloudyDaylight`), a clear one all of it. It dims within about two
-  minutes and brightens back over about five, so a passing cloud does not jump the screens. Below about 3°
-  of sun it does nothing, so dawn and dusk keep their usual ramp.
-- **When it can't tell.** No reading, a reading older than 15 minutes, or 0 W with the sun high (an inverter
-  that is off): the sun's height alone decides, as without a sensor.
+- **The effect.** Now ÷ clear sky gives how clear the sky is (0–1). That caps how much daylight counts:
+  at most 35% under a fully overcast sky (`tuning.brightness.cloudyDaylight`), all of it under a clear one.
+  At dawn and dusk the sun gives less than the cap anyway, so nothing changes there, and the level only
+  ever rises as the sun climbs. It dims within about two minutes and brightens back over about five, so a
+  passing cloud does not jump the screens.
+- **When it can't tell.** No reading, a reading older than 15 minutes, or exactly 0 (an inverter that is
+  off): the sun's height alone decides, as without a sensor. An export limit that caps the panels on
+  sunny days reads as a clear sky, which is right; a hazy day under that limit looks a little clearer
+  than it is.
 - Light and dark mode and the fading of a hand-set level ignore it: a cloudy morning is still daytime.
 
 The Settings window's *Home Assistant* pane has the field and shows what the sensor says now.
@@ -179,7 +182,7 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 | `brightness.sunDay` | 12 | elevation from which the full daytime level applies |
 | `brightness.lightsBoost` | 5 | room lights on at dusk keep the monitor this many points above night |
 | `brightness.lightsBoostSunBelow` | 1.5 | …while the sun is below this elevation |
-| `brightness.cloudyDaylight` | 35 | with a daylight sensor: how much of the daylight part (%) a fully overcast sky keeps |
+| `brightness.cloudyDaylight` | 35 | with a daylight sensor: the most daylight counts (%) under a fully overcast sky |
 | `theme.lightSunAbove` / `darkSunBelow` | 4 / 1 | light mode above, dark below (in between, no change) |
 | `theme.lightBlindAbove` / `darkBlindBelow` | 55 / 35 | blind open (%) needed for light mode / dark at or below |
 | `theme.whiteLightsAbove` / `whiteLightsBelow` | 78.4 / 66.6 | lights this bright (%) and white count as daylight / stop counting (HA brightness 200 / 170 of 255) |

@@ -705,20 +705,41 @@ public class LightTests {
     }
 
     [Fact]
-    public void AZeroWithTheSunUpIsAFaultNotACloud() {
+    public void AZeroIsAFaultNotACloud() {
         Assert.Null(LightRules.Ratio(0, 31, true, Ref()));
+        Assert.Null(LightRules.Ratio(0, 11, true, Ref()));   // a smaller step too
         Assert.Null(LightRules.Ratio(null, 31, true, Ref()));
         Assert.Null(LightRules.Ratio(300, -1, true, Ref()));
     }
 
     [Fact]
-    public void OvercastKeepsTheFloorAndDawnFadesIn() {
-        Assert.Equal(0.35, LightRules.Scale(0, 20, 0.35), 1e-9);
-        Assert.Equal(1, LightRules.Scale(1, 20, 0.35));
-        Assert.Equal(0.675, LightRules.Scale(0, 4.5, 0.35), 1e-9);   // half faded in
-        Assert.Equal(1, LightRules.Scale(0, 2, 0.35));
-        Assert.Equal(1, LightRules.Scale(null, 20, 0.35));
+    public void OvercastCapsDaylightAtTheFloor() {
+        Assert.Equal(0.35, LightRules.Cap(0, 0.35), 1e-9);
+        Assert.Equal(0.675, LightRules.Cap(0.5, 0.35), 1e-9);
+        Assert.Equal(1, LightRules.Cap(1, 0.35));
+        Assert.Equal(1, LightRules.Cap(null, 0.35));
     }
+
+    [Fact]
+    public void AnOvercastDawnNeverDipsAsTheSunRises() {
+        // day 70, night 20, fully overcast: the level climbs with the sun and stops at the cap.
+        var t = new Tuning();
+        var levels = Enumerable.Range(0, 47).Select(k => -3 + k * 0.5)
+            .Select(e => Rules.Target([70, 40, 20], 100, false, t.Fraction(e), t, false, 0.35)).ToList();
+        Assert.Equal(levels.Order().ToList(), levels);
+        Assert.Equal(38, levels[^1]);
+    }
+
+    [Fact]
+    public void AnEastFacingArrayIsComparedWithinItsOwnHalfOfTheDay() {
+        var s = new List<LightSample>();
+        for (int k = 0; k < 5; k++) { s.Add(new(11, true, 4000)); s.Add(new(11, false, 150)); }
+        Assert.Equal(0.2, LightRules.Ratio(30, 11, false, new LightReference(s))!.Value, 1e-9);
+    }
+
+    [Fact]
+    public void AStepThatOnlyReadZeroIsNotAReference() =>
+        Assert.True(new LightReference(Enumerable.Range(0, 5).Select(_ => new LightSample(31, true, 0))).IsEmpty);
 
     [Fact]
     public void DimmingIsQuickerThanBrightening() {
