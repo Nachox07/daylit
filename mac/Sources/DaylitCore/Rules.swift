@@ -4,9 +4,10 @@ import Foundation
 /// Target level: the daytime value slides between "blind closed" and "blind open" with the blind
 /// position; the sun then blends it with the night value (0 below -3°, full daytime from 12°).
 /// Room lights on at night add a little.
+/// `light` (0…1, see lightCap) is the most daylight can count under a cloudy sky; 1 without a sensor.
 public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
-                   tuning t: Tuning = Tuning()) -> Int {
-    let sun = daylightFraction(elevation: elev, tuning: t)
+                   tuning t: Tuning = Tuning(), light: Double = 1) -> Int {
+    let sun = min(daylightFraction(elevation: elev, tuning: t), light)
     let daytime = blindDown + (day - blindDown) * pos / 100
     var v = night + (daytime - night) * sun
     if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }

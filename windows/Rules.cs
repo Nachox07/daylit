@@ -41,9 +41,10 @@ static class Rules {
     /// blind position; the sun then blends it with the night value; room lights at night add a little.
     /// `boost`: room lights may lift the night level now (the sun is below tuning's lightsBoostSunBelow);
     /// without it, the default rule (daylight under 30%).
-    public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null) {
+    /// `light` (0…1, see LightRules.Cap) is the most daylight can count under a cloudy sky; 1 without a sensor.
+    public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
-        double x = v[2] + (daytime - v[2]) * sun;
+        double x = v[2] + (daytime - v[2]) * Math.Min(sun, light);
         if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
@@ -157,7 +158,7 @@ static class HaTemplate {
     public static string Build(HaConfig h0, IEnumerable<MonitorHa?> monitors0) {
         // Config.Validate already rejects bad ids; this second filter keeps any that slip through out of the Jinja.
         static string? Ok(string? e) => e != null && Config.IsEntityId(e) ? e : null;
-        var h = new HaConfig { Url = h0.Url, TokenName = h0.TokenName, AutoSwitch = Ok(h0.AutoSwitch), Sun = Ok(h0.Sun), Cover = Ok(h0.Cover), Lights = Ok(h0.Lights) };
+        var h = new HaConfig { Url = h0.Url, TokenName = h0.TokenName, AutoSwitch = Ok(h0.AutoSwitch), Sun = Ok(h0.Sun), Cover = Ok(h0.Cover), Lights = Ok(h0.Lights), Light = Ok(h0.Light) };
         var monitors = monitors0.Select(m => m == null ? null : new MonitorHa {
             Sensor = Ok(m.Sensor), Day = Ok(m.Day), BlindDown = Ok(m.BlindDown), Night = Ok(m.Night), Set = Ok(m.Set) });
         string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(100)" : "100";
@@ -170,6 +171,8 @@ static class HaTemplate {
                 ? $"{Num(st, -1)}, {{{{ as_timestamp(states.{st}.last_changed) if states.{st} else 0 }}}}" : "-1, 0";   // states.domain.name: None when missing
             return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {set}]";
         }));
+        string lightAge = h.Light is { Length: > 0 } lt
+            ? $"{{{{ (now() - states['{lt}'].last_updated).total_seconds() | round(0) if states['{lt}'] else -1 }}}}" : "-1";   // seconds since it last reported; states['…']: an object id may start with a digit
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
             {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},
@@ -178,7 +181,9 @@ static class HaTemplate {
              "auto": {{{auto}}},
              "m": [{{{mons_}}}],
              "bri": {{ {{{bri}}} }},
-             "sat": {{ {{{sat}}} }} }
+             "sat": {{ {{{sat}}} }},
+             "light": {{{Num(h.Light, -1)}}},
+             "lightAge": {{{lightAge}}} }
             """;
     }
 }

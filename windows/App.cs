@@ -47,6 +47,10 @@ sealed class Controller {
     public bool AutoOn = true;
     public string Subtitle = "";
     public string? Error;
+    /// The daylight sensor's state, for the Settings window (null without a sensor).
+    public string? LightStatus { get => lightStatus; private set { if (lightStatus == value) return; lightStatus = value; LightStatusChanged?.Invoke(); } }
+    string? lightStatus;
+    public event Action? LightStatusChanged;
     public bool HotkeysOk;
     public Source Source => Cfg.Effective;
     public bool PauseOnBattery => Settings.PauseOnBattery ?? Cfg.PauseOnBattery ?? true;
@@ -378,6 +382,92 @@ sealed class Controller {
     }
     double? lastHaPos;
 
+    // MARK: light sensor
+
+    /// The light sensor's clear-sky reference, rebuilt from its Home Assistant history once a day.
+    LightReference lightRef = new();
+    DateTime? lightRefAt;
+    bool lightRefBusy;
+    /// Which sensor and place the reference belongs to: a new one starts learning again.
+    string lightRefFor = "";
+    /// The scale in use, smoothed, and when it last moved.
+    double? lightNow;
+    /// The cap in use now (1 without a sensor), for the Settings window's "right now" preview.
+    public double LightNow => lightNow ?? 1;
+    DateTime? lightAt;
+
+    /// Runs beside the tick (the history call can take seconds); its state changes land on the UI thread.
+    async Task RefreshLightReference(string entity, Location loc) {
+        if (lightRefBusy) return;
+        string key = $"{entity} {loc.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)} {loc.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
+        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty ? 3600 : 86400)) return;
+        lightRefBusy = true;
+        try {
+            lightRefAt = DateTime.UtcNow;
+            var (body, cause) = await HAClient.History(Cfg, entity, 10);
+            if (body != null) {
+                var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude));
+                if (key != lightRefFor) return;   // the config changed meanwhile
+                var fresh = new LightReference(samples);
+                Log.Write($"light: clear-sky reference from {samples.Count} readings, {fresh.Bins.Count} steps of the sky" +
+                          (fresh.IsEmpty ? " (not enough history, trying again in an hour)" : ""));
+                if (!fresh.IsEmpty) lightRef = fresh;
+                else if (lightRef.IsEmpty) LightStatus = "Not enough history in Home Assistant yet: trying again in an hour.";
+                else RetryLightSoon();   // an odd answer does not replace a good reference
+            } else {
+                Log.Write($"light: could not read its history ({cause ?? "no answer"}), trying again in an hour");
+                if (lightRef.IsEmpty) LightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour.";
+                RetryLightSoon();
+            }
+        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(); }
+        finally { lightRefBusy = false; }
+    }
+
+    /// Try the history again in an hour, keeping the reference in use until then.
+    void RetryLightSoon() => lightRefAt = DateTime.UtcNow.AddSeconds(3600 - 86400);
+
+    /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
+    double StepLight(double goal) {
+        var now = DateTime.UtcNow;
+        lightNow = LightRules.Smooth(lightNow, goal, lightAt is DateTime at ? (now - at).TotalSeconds : 0);
+        lightAt = now;
+        return lightNow.Value;
+    }
+
+    /// The light scale for this tick (1: clear sky or no sensor). `fromHa`: `s` is a fresh Home Assistant answer.
+    Inputs ApplyLight(Inputs s, bool fromHa, out double light) {
+        light = 1;
+        if (!fromHa) {   // no reading: back to the sun's rule, gently
+            if (lightNow != null) {
+                light = StepLight(1);
+                if (Cfg.HomeAssistant?.Light != null) LightStatus = "Home Assistant is not answering: going back to the sun's height alone.";
+            }
+            return s;
+        }
+        if (Cfg.HomeAssistant?.Light is not { } e || !Config.IsEntityId(e) || Cfg.Location is not { } loc) {
+            LightStatus = null;
+            if (lightNow != null) light = StepLight(1);
+            return s;
+        }
+        _ = RefreshLightReference(e, loc);
+        // A sensor that has not reported for 15 minutes is stuck, not dark.
+        double? reading = s.Light >= 0 && s.LightAge < 900 ? s.Light : null;
+        // The sun here, as the reference was learned (Home Assistant's sun may be set elsewhere).
+        double here = Sun.Elevation(DateTimeOffset.UtcNow, loc.Latitude, loc.Longitude);
+        double? ratio = lightRefFor.StartsWith(e + " ", StringComparison.Ordinal)
+            ? LightRules.Ratio(reading, here, LightRules.SunRising(loc.Latitude, loc.Longitude, DateTimeOffset.UtcNow), lightRef) : null;
+        light = StepLight(LightRules.Cap(ratio, Cfg.Tuned.CloudyDaylight / 100));
+        if (ratio is double r)
+            LightStatus = $"Now {Pct(r)}% of a clear sky, so daylight counts at most {Pct(light)}%.";
+        else if (!lightRef.IsEmpty)
+            LightStatus = reading == null ? "No reading from the sensor right now: going back to the sun's height alone."
+                                          : "Too little sun to compare right now: the sun's height alone decides.";
+        return s with { LightRatio = ratio };
+    }
+    static int? Tenths(double? r) => r is double v ? (int)Math.Round(v * 10, MidpointRounding.AwayFromZero) : null;
+    static int Pct(double v) => (int)Math.Round(v * 100, MidpointRounding.AwayFromZero);
+
     async Task TickOnce() {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
@@ -425,6 +515,7 @@ sealed class Controller {
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
+        s = ApplyLight(s, !haDown && Source == Source.HomeAssistant, out double light);
         AutoOn = s.Auto ?? Settings.Auto;
         double sun = Cfg.Tuned.Fraction(s.Elev);
         bool boost = s.Elev < Cfg.Tuned.LightsBoostSunBelow;
@@ -448,7 +539,7 @@ sealed class Controller {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
+            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost, light);
             var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt);
             bool follower = groupBase != null && syncOffsets.IsMember(m.Key);
             if (groupBase is int b && follower) {
@@ -475,10 +566,10 @@ sealed class Controller {
             if (step.Write is int v) await Task.Run(() => m.Write(v));
             m.Cur = step.Current; m.Manual = step.Manual;
             int applied = step.Applied;
-            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual) &&
+            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
-                    m.Published = applied; m.PublishedManual = m.Manual;
+                    m.Published = applied; m.PublishedManual = m.Manual; m.PublishedLight = Tenths(s.LightRatio);   // steps of 10%, not every tick
                     Log.Write($"publish: {m.Spec!.HomeAssistant!.Sensor} = {applied}" + (m.Manual ? " (manual)" : ""));
                 }
             }
@@ -491,7 +582,8 @@ sealed class Controller {
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
-                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat, Cfg.Tuned);
+                 : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat, Cfg.Tuned)
+                   + (s.LightRatio is double lr ? $" · light {Pct(lr)}%" : "");
     }
 
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;

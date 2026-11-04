@@ -21,6 +21,7 @@ sealed class HaConfig {
     public string? Sun { get; set; }
     public string? Cover { get; set; }
     public string? Lights { get; set; }
+    public string? Light { get; set; }        // optional outdoor light sensor (solar power W, or lux): a cloudy day dims the monitors
 }
 
 sealed class MonitorHa {
@@ -113,7 +114,9 @@ sealed class Config {
         var ids = new List<(string key, string? id)>();
         if (c.HomeAssistant is { } ha)
             ids.AddRange([("homeAssistant.autoSwitch", ha.AutoSwitch), ("homeAssistant.sun", ha.Sun),
-                          ("homeAssistant.cover", ha.Cover), ("homeAssistant.lights", ha.Lights)]);
+                          ("homeAssistant.cover", ha.Cover), ("homeAssistant.lights", ha.Lights), ("homeAssistant.light", ha.Light)]);
+        // Its clear-sky reference comes from history, which needs the sun's position at each reading.
+        if (c.HomeAssistant?.Light is { Length: > 0 } && c.Location == null) return "config.json: homeAssistant.light needs a location";
         foreach (var m in c.Monitors ?? [])
             if (m?.HomeAssistant is { } mh) {
                 string at = $"monitor \"{m.Match}\" homeAssistant.";
@@ -169,6 +172,8 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
                            IReadOnlyDictionary<string, double>? Tuning = null, bool? ThemeRoom = null) {
     /// `Name` is the connected display's name; `SuggestedMatch` is used only when no entry matches it yet.
     public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night);
+    /// homeAssistant.light: the daylight sensor.
+    public string Light { get; init; } = "";
 }
 
 static class ConfigPatch {
@@ -205,7 +210,7 @@ static class ConfigPatch {
         } else root.Remove("location");
 
         var ha = root["homeAssistant"] as JsonObject ?? new JsonObject();
-        foreach (var (k, v) in new[] { ("url", e.HaUrl), ("autoSwitch", e.AutoSwitch), ("sun", e.Sun), ("cover", e.Cover), ("lights", e.Lights) }) {
+        foreach (var (k, v) in new[] { ("url", e.HaUrl), ("autoSwitch", e.AutoSwitch), ("sun", e.Sun), ("cover", e.Cover), ("lights", e.Lights), ("light", e.Light) }) {
             var t = v.Trim();
             if (t == "") ha.Remove(k); else ha[k] = t;
         }
@@ -264,7 +269,8 @@ static class ConfigPatch {
 /// one keeps the value Daylit has always used. Same keys and defaults as the Mac (DaylitCore/Tuning.swift).
 sealed class Tuning {
     public sealed class BrightnessPart { public double? SunNight { get; set; } public double? SunDay { get; set; }
-                                         public double? LightsBoost { get; set; } public double? LightsBoostSunBelow { get; set; } }
+                                         public double? LightsBoost { get; set; } public double? LightsBoostSunBelow { get; set; }
+                                         public double? CloudyDaylight { get; set; } }   // with a light sensor: how much of the daylight part a fully overcast sky keeps (%)
     public sealed class ThemePart { public double? LightSunAbove { get; set; } public double? DarkSunBelow { get; set; }
                                     public double? LightBlindAbove { get; set; } public double? DarkBlindBelow { get; set; }
                                     public double? WhiteLightsAbove { get; set; } public double? WhiteLightsBelow { get; set; }
@@ -281,6 +287,7 @@ sealed class Tuning {
     public double SunDay => Brightness?.SunDay ?? 12;
     public double LightsBoost => Brightness?.LightsBoost ?? 5;
     public double LightsBoostSunBelow => Brightness?.LightsBoostSunBelow ?? 1.5;
+    public double CloudyDaylight => Brightness?.CloudyDaylight ?? 35;
     public double LightSunAbove => Theme?.LightSunAbove ?? 4;
     public double DarkSunBelow => Theme?.DarkSunBelow ?? 1;
     public double LightBlindAbove => Theme?.LightBlindAbove ?? 55;
@@ -307,6 +314,7 @@ sealed class Tuning {
             Range(SunNight, -18, 30, "brightness.sunNight"), Range(SunDay, -18, 60, "brightness.sunDay"),
             SunDay > SunNight ? null : "config.json: tuning.brightness.sunDay must be above sunNight",
             Range(LightsBoost, 0, 100, "brightness.lightsBoost"), Range(LightsBoostSunBelow, -18, 60, "brightness.lightsBoostSunBelow"),
+            Range(CloudyDaylight, 0, 100, "brightness.cloudyDaylight"),
             Range(LightSunAbove, -18, 60, "theme.lightSunAbove"), Range(DarkSunBelow, -18, 60, "theme.darkSunBelow"),
             LightSunAbove >= DarkSunBelow ? null : "config.json: tuning.theme.lightSunAbove must not be below darkSunBelow",
             Range(LightBlindAbove, 0, 100, "theme.lightBlindAbove"), Range(DarkBlindBelow, 0, 100, "theme.darkBlindBelow"),
@@ -341,6 +349,7 @@ sealed record TuningField(string Group, string Key, string Label, string Unit, d
         new("brightness", "sunDay", "Full day level from", "°", 12),
         new("brightness", "lightsBoost", "Room lights at dusk add", "points", 5),
         new("brightness", "lightsBoostSunBelow", "…while the sun is below", "°", 1.5),
+        new("brightness", "cloudyDaylight", "Under a fully overcast sky, daylight counts at most", "%", 35),
         new("timing", "pollSeconds", "Check every", "s", 30),
         new("timing", "batteryPollSeconds", "Check on battery every", "s", 120),
         new("timing", "idleSeconds", "Idle (another computer may be in use) after", "s", 300),
@@ -355,6 +364,7 @@ sealed record TuningField(string Group, string Key, string Label, string Unit, d
         void Add(string k, double? v) { if (v is double x) d[k] = x; }
         Add("brightness.sunNight", t?.Brightness?.SunNight); Add("brightness.sunDay", t?.Brightness?.SunDay);
         Add("brightness.lightsBoost", t?.Brightness?.LightsBoost); Add("brightness.lightsBoostSunBelow", t?.Brightness?.LightsBoostSunBelow);
+        Add("brightness.cloudyDaylight", t?.Brightness?.CloudyDaylight);
         Add("theme.lightSunAbove", t?.Theme?.LightSunAbove); Add("theme.darkSunBelow", t?.Theme?.DarkSunBelow);
         Add("theme.lightBlindAbove", t?.Theme?.LightBlindAbove); Add("theme.darkBlindBelow", t?.Theme?.DarkBlindBelow);
         Add("theme.whiteLightsAbove", t?.Theme?.WhiteLightsAbove); Add("theme.whiteLightsBelow", t?.Theme?.WhiteLightsBelow);

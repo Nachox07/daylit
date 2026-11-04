@@ -9,9 +9,11 @@ public struct HAConfig: Decodable {
     public var sun: String?             // default sun.sun
     public var cover: String?           // optional blind; its position scales the daytime level
     public var lights: String?          // optional light; on at night = a little brighter
+    public var light: String?           // optional outdoor light sensor (solar power W, or lux): a cloudy day dims the monitors
     public init(url: String? = nil, tokenName: String? = nil, autoSwitch: String? = nil, sun: String? = nil,
-                cover: String? = nil, lights: String? = nil) {
+                cover: String? = nil, lights: String? = nil, light: String? = nil) {
         self.url = url; self.tokenName = tokenName; self.autoSwitch = autoSwitch; self.sun = sun; self.cover = cover; self.lights = lights
+        self.light = light
     }
 }
 
@@ -110,7 +112,9 @@ public struct Config: Decodable {
         var ids: [(String, String?)] = []
         if let h = homeAssistant {
             ids += [("homeAssistant.autoSwitch", h.autoSwitch), ("homeAssistant.sun", h.sun),
-                    ("homeAssistant.cover", h.cover), ("homeAssistant.lights", h.lights)]
+                    ("homeAssistant.cover", h.cover), ("homeAssistant.lights", h.lights), ("homeAssistant.light", h.light)]
+            // Its clear-sky reference comes from history, which needs the sun's position at each reading.
+            if let l = h.light, !l.isEmpty, location == nil { return "config.json: homeAssistant.light needs a location" }
         }
         for m in monitors ?? [] {
             guard let h = m.homeAssistant else { continue }

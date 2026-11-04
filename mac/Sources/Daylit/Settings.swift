@@ -144,6 +144,7 @@ struct SettingsView: View {
     @State private var sun = ""
     @State private var cover = ""
     @State private var lights = ""
+    @State private var daylightSensor = ""
     @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
     @State private var themeRoom = true
     @State private var opened: Data? = nil
@@ -305,6 +306,13 @@ struct SettingsView: View {
                 Text("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                entity("Daylight sensor", "cloud.sun", $daylightSensor, "sensor.solar_power")
+                if let s = m.lightStatus { Text(s).font(.caption).foregroundStyle(.secondary) }
+            } header: { Text("Clouds") } footer: {
+                Text("Optional. Solar panel power, or an outdoor light sensor: on a cloudy day the monitors stay dimmer. Daylit learns what a clear sky reads from the sensor's last 10 days in Home Assistant. Needs a location.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -454,7 +462,8 @@ struct SettingsView: View {
     func rightNow(_ d: MonitorDraft) -> Int? {
         guard let l = coords else { return nil }
         return target(day: d.day, blindDown: d.blindDown, night: d.night,
-                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned)
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned,
+                      light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1)   // with today's clouds; snapshots stay clear
     }
 
     func caption(_ d: MonitorDraft) -> String {
@@ -470,7 +479,7 @@ struct SettingsView: View {
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
-        haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""
+        haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
         themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
@@ -500,6 +509,7 @@ struct SettingsView: View {
                             monitors: monitors.map { .init(name: $0.name, suggestedMatch: CLI.suggestMatch($0.name), label: $0.label,
                                                            day: Int($0.day.rounded()), blindDown: Int($0.blindDown.rounded()), night: Int($0.night.rounded())) },
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
+        e.light = daylightSensor
         e.tuning = values
         e.themeRoom = themeRoom
         return e
@@ -543,7 +553,7 @@ struct SettingsView: View {
 
     /// Checks the URL and the stored token, then that each entity typed here exists.
     func test() {
-        let ids = [cover, lights, autoSwitch, sun].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let ids = [cover, lights, autoSwitch, sun, daylightSensor].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if let bad = ids.first(where: { !Config.isEntityId($0) }) { error = "\"\(bad)\" is not an entity id like light.office."; return }
         var ha = m.config.homeAssistant ?? HAConfig()
         ha.url = haURL.trimmingCharacters(in: .whitespaces)

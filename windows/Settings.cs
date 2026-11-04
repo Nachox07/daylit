@@ -28,7 +28,8 @@ sealed class SettingsWindow : Window {
     readonly TextBox lat = new(), lon = new();
     readonly TextBlock sunNow = Hint("");
     readonly Button locate = new() { Content = "Locate me" };
-    readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new();
+    readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new(), daylightSensor = new();
+    readonly TextBlock lightStatus = Hint("");
     readonly Button test = new() { Content = "Test connection" };
     CheckBox? lookBox;
     readonly StackPanel monitors = new();
@@ -75,7 +76,14 @@ sealed class SettingsWindow : Window {
         var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token)),
             Card("Room", Field("Blind", cover, "cover.office_blind"), Field("Lights", lights, "light.office"),
                  Field("Automatic switch", autoSwitch, "input_boolean.daylit_auto"), Field("Sun", sun, "sun.sun"),
-                 Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")));
+                 Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")),
+            Card("Clouds", Field("Daylight sensor", daylightSensor, "sensor.solar_power"), lightStatus,
+                 Hint("Optional. Solar panel power, or an outdoor light sensor: on a cloudy day the monitors stay dimmer. Daylit learns what a clear sky reads from the sensor's last 10 days in Home Assistant. Needs a location.")));
+        // The sensor's state, live from the app while the window is open.
+        void ShowLightStatus() { lightStatus.Text = app.LightStatus ?? ""; lightStatus.Visibility = app.LightStatus == null ? Visibility.Collapsed : Visibility.Visible; }
+        ShowLightStatus();
+        app.LightStatusChanged += ShowLightStatus;
+        Closed += (_, _) => app.LightStatusChanged -= ShowLightStatus;
         var look = new CheckBox { Content = "Light or dark mode from daylight", IsChecked = Settings.AutoLook, Margin = new Thickness(0, 2, 0, 2) };
         look.Click += (_, _) => app.SetLook(look.IsChecked == true);
         var pause = new CheckBox { Content = "Pause on battery", IsChecked = app.PauseOnBattery, Margin = new Thickness(0, 2, 0, 2),
@@ -372,7 +380,7 @@ sealed class SettingsWindow : Window {
         lat.Text = c.Location?.Latitude.ToString("0.00", CultureInfo.InvariantCulture) ?? "";
         lon.Text = c.Location?.Longitude.ToString("0.00", CultureInfo.InvariantCulture) ?? "";
         var h = c.HomeAssistant;
-        haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? "";
+        haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? ""; daylightSensor.Text = h?.Light ?? "";
         var set = TuningField.SetValues(c.Tuning);
         loadedTune = set;
         foreach (var (id, r) in tuneRows) r.box.Text = set.TryGetValue(id, out var v) ? Fmt(v) : "";
@@ -426,7 +434,7 @@ sealed class SettingsWindow : Window {
         double? elev = Coords is var (a, b) ? Daylit.Sun.Elevation(FixedNow ?? DateTimeOffset.UtcNow, a, b) : null;
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
-            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned)}%" : "–";
+            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
             var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
             r.caption.Text = text;
@@ -459,7 +467,7 @@ sealed class SettingsWindow : Window {
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon,
             rows.Select(r => new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
                                                       (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value)).ToList(),
-            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true);
+            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) { Light = daylightSensor.Text };
         try {
             string? now = File.Exists(path) ? File.ReadAllText(path) : null;
             if (now != opened) {
@@ -532,7 +540,7 @@ sealed class SettingsWindow : Window {
 
     /// Checks the URL and the stored token, then that each entity typed here exists.
     async Task Test() {
-        var ids = new[] { cover.Text, lights.Text, autoSwitch.Text, sun.Text }.Select(s => s.Trim()).Where(s => s != "").ToList();
+        var ids = new[] { cover.Text, lights.Text, autoSwitch.Text, sun.Text, daylightSensor.Text }.Select(s => s.Trim()).Where(s => s != "").ToList();
         if (ids.FirstOrDefault(s => !Config.IsEntityId(s)) is { } bad) { Say($"\"{bad}\" is not an entity id like light.office.", true); return; }
         var (c, _) = Config.Load(path);
         var probe = new Config { HomeAssistant = new HaConfig { Url = haUrl.Text.Trim(), TokenName = c.HomeAssistant?.TokenName } };
