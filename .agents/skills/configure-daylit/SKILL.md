@@ -23,7 +23,8 @@ The full guide is [AGENTS.md](../../../AGENTS.md) → *Set up Daylit for a user*
    Show the user the monitors and confirm which ones Daylit should manage and what to call them.
    Use each monitor's `match` (the model number) in the config.
 3. **Ask** only what you can't detect: source (`off` / `sun` / `homeAssistant`), location at city
-   level, the Home Assistant URL, the room's blind and lights entities, and the three
+   level, the Home Assistant URL, the room's blind and lights entities, an optional daylight sensor (solar panel power or an
+   outdoor lux sensor, for cloudy days), and the three
    `input_number` entities per monitor. Don't guess entity IDs. If the helpers don't exist yet,
    offer `homeassistant/daylit_helpers.yaml`; don't create them in Home Assistant without the
    user's go-ahead.

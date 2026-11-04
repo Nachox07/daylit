@@ -8,7 +8,8 @@
     "autoSwitch": "input_boolean.daylit_auto",
     "sun": "sun.sun",
     "cover": "cover.study_blind",
-    "lights": "light.study"
+    "lights": "light.study",
+    "light": "sensor.solar_power"
   },
   "monitors": [
     {

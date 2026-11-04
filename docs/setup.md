@@ -28,7 +28,7 @@ in the same menu.
 | `source` | `off`, `sun` or `homeAssistant`. Default: `homeAssistant` when a `homeAssistant.url` is set, else `sun` when a `location` is set, else `off`. |
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20) and, on macOS, `control` (`native` or `ddc`). |
-| `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights`, each optional. |
+| `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
@@ -73,8 +73,8 @@ into another computer right now) and which config entry matched which monitor.
 ```
 
 - The three levels can then be tuned from any Home Assistant dashboard.
-- `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`, `blind`,
-  `lights`, `source` attributes), so you can graph it.
+- `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`,
+  `light` (how clear the sky is, 0–1, with a daylight sensor), `blind`, `lights`, `source` attributes), so you can graph it.
 - `set` is optional: changing that helper sets the monitor right away, even when the computer is
   idle (dim it from your phone). It then counts as a level set by hand.
 
@@ -85,6 +85,28 @@ network, where the token would cross the internet unencrypted.
 
 Entity ids must be plain `domain.object_id` (lowercase letters, digits, `_`). Anything else is
 reported as a config problem and Home Assistant is not contacted until it is fixed.
+
+### Clouds: a daylight sensor
+
+The sun's height says "bright day" on an overcast morning too. With `homeAssistant.light` set to a sensor
+that measures daylight, Daylit knows the difference: on a cloudy day the daylight part of each target
+shrinks, so the monitors stay dimmer.
+
+- **Which sensor.** Solar panel power (W) works well; so does an outdoor lux sensor. Not an indoor one:
+  the blind and the room lights already count, and they would count twice.
+- **No calibration.** Daylit reads the sensor's last 10 days from Home Assistant's history when it starts,
+  and again once a day. For each 2° step of the sun's height, mornings and afternoons apart, it takes what
+  the sensor read on the clearest days (the 90th percentile). Panels that face east or sit in a morning
+  shadow are fine: that becomes their normal. Needs a `location`, to know where the sun was at each reading.
+- **The effect.** Now ÷ clear sky gives how clear the sky is (0–1). An overcast sky keeps 35% of the
+  daylight part (`tuning.brightness.cloudyDaylight`), a clear one all of it. It dims within about two
+  minutes and brightens back over about five, so a passing cloud does not jump the screens. Below about 3°
+  of sun it does nothing, so dawn and dusk keep their usual ramp.
+- **When it can't tell.** No reading, a reading older than 15 minutes, or 0 W with the sun high (an inverter
+  that is off): the sun's height alone decides, as without a sensor.
+- Light and dark mode and the fading of a hand-set level ignore it: a cloudy morning is still daytime.
+
+The Settings window's *Home Assistant* pane has the field and shows what the sensor says now.
 
 ### Security notes
 
@@ -157,6 +179,7 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 | `brightness.sunDay` | 12 | elevation from which the full daytime level applies |
 | `brightness.lightsBoost` | 5 | room lights on at dusk keep the monitor this many points above night |
 | `brightness.lightsBoostSunBelow` | 1.5 | …while the sun is below this elevation |
+| `brightness.cloudyDaylight` | 35 | with a daylight sensor: how much of the daylight part (%) a fully overcast sky keeps |
 | `theme.lightSunAbove` / `darkSunBelow` | 4 / 1 | light mode above, dark below (in between, no change) |
 | `theme.lightBlindAbove` / `darkBlindBelow` | 55 / 35 | blind open (%) needed for light mode / dark at or below |
 | `theme.whiteLightsAbove` / `whiteLightsBelow` | 78.4 / 66.6 | lights this bright (%) and white count as daylight / stop counting (HA brightness 200 / 170 of 255) |
