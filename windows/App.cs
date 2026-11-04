@@ -388,6 +388,8 @@ sealed class Controller {
     LightReference lightRef = new();
     DateTime? lightRefAt;
     bool lightRefBusy;
+    /// Which sensor and place the reference belongs to: a new one starts learning again.
+    string lightRefFor = "";
     /// The scale in use, smoothed, and when it last moved.
     double? lightNow;
     DateTime? lightAt;
@@ -395,6 +397,8 @@ sealed class Controller {
     /// Runs beside the tick (the history call can take seconds); its state changes land on the UI thread.
     async Task RefreshLightReference(string entity, Location loc) {
         if (lightRefBusy) return;
+        string key = $"{entity} {loc.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)} {loc.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
         if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty ? 3600 : 86400)) return;
         lightRefBusy = true;
         try {
@@ -402,6 +406,7 @@ sealed class Controller {
             var (body, cause) = await HAClient.History(Cfg, entity, 10);
             if (body != null) {
                 var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude));
+                if (key != lightRefFor) return;   // the config changed meanwhile
                 lightRef = new LightReference(samples);
                 Log.Write($"light: clear-sky reference from {samples.Count} readings, {lightRef.Bins.Count} steps of the sky" +
                           (lightRef.IsEmpty ? " (not enough history yet, trying again in an hour)" : ""));
@@ -426,7 +431,10 @@ sealed class Controller {
     Inputs ApplyLight(Inputs s, bool fromHa, out double light) {
         light = 1;
         if (!fromHa) {   // no reading: back to the sun's rule, gently
-            if (lightNow != null) light = StepLight(1);
+            if (lightNow != null) {
+                light = StepLight(1);
+                if (Cfg.HomeAssistant?.Light != null) LightStatus = "Home Assistant is not answering: going back to the sun's height alone.";
+            }
             return s;
         }
         if (Cfg.HomeAssistant?.Light is not { } e || !Config.IsEntityId(e) || Cfg.Location is not { } loc) {
@@ -437,15 +445,19 @@ sealed class Controller {
         _ = RefreshLightReference(e, loc);
         // A sensor that has not reported for 15 minutes is stuck, not dark.
         double? reading = s.Light >= 0 && s.LightAge < 900 ? s.Light : null;
-        double? ratio = LightRules.Ratio(reading, s.Elev, LightRules.SunRising(loc.Latitude, loc.Longitude, DateTimeOffset.UtcNow), lightRef);
-        light = StepLight(LightRules.Scale(ratio, s.Elev, Cfg.Tuned.CloudyDaylight / 100));
+        // The sun here, as the reference was learned (Home Assistant's sun may be set elsewhere).
+        double here = Sun.Elevation(DateTimeOffset.UtcNow, loc.Latitude, loc.Longitude);
+        double? ratio = lightRefFor.StartsWith(e + " ", StringComparison.Ordinal)
+            ? LightRules.Ratio(reading, here, LightRules.SunRising(loc.Latitude, loc.Longitude, DateTimeOffset.UtcNow), lightRef) : null;
+        light = StepLight(LightRules.Scale(ratio, here, Cfg.Tuned.CloudyDaylight / 100));
         if (ratio is double r)
             LightStatus = $"Now {Pct(r)}% of a clear sky, so daylight counts {Pct(light)}%.";
         else if (!lightRef.IsEmpty)
-            LightStatus = reading == null ? "No reading from the sensor right now: the sun's height alone decides."
+            LightStatus = reading == null ? "No reading from the sensor right now: going back to the sun's height alone."
                                           : "Too little sun to compare right now: the sun's height alone decides.";
         return s with { LightRatio = ratio };
     }
+    static int? Tenths(double? r) => r is double v ? (int)Math.Round(v * 10, MidpointRounding.AwayFromZero) : null;
     static int Pct(double v) => (int)Math.Round(v * 100, MidpointRounding.AwayFromZero);
 
     async Task TickOnce() {
@@ -546,10 +558,10 @@ sealed class Controller {
             if (step.Write is int v) await Task.Run(() => m.Write(v));
             m.Cur = step.Current; m.Manual = step.Manual;
             int applied = step.Applied;
-            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual) &&
+            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
-                    m.Published = applied; m.PublishedManual = m.Manual;
+                    m.Published = applied; m.PublishedManual = m.Manual; m.PublishedLight = Tenths(s.LightRatio);   // steps of 10%, not every tick
                     Log.Write($"publish: {m.Spec!.HomeAssistant!.Sensor} = {applied}" + (m.Manual ? " (manual)" : ""));
                 }
             }
