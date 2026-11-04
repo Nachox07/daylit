@@ -165,6 +165,17 @@ final class DecideTests: XCTestCase {
         XCTAssertNil(s.state.offset)
         XCTAssertFalse(s.manual)
     }
+    func testALinkedMonitorMovedOnItsOwnKeepsItsNewPlace() {
+        var g = SyncOffsets(levels: [(key: "a", level: 70), (key: "b", level: 60)])
+        g.move("b", level: 45, base: 70)
+        XCTAssertEqual(g.level(key: "b", base: 80), 55)   // 25 below the group now
+        g.move("c", level: 10, base: 70)                  // not a member: nothing
+        XCTAssertNil(g.level(key: "c", base: 70))
+    }
+    func testAnOffsetSavedWithoutATimeCountsFromWhenItWasSaved() {
+        let h = SavedHolds(entries: ["m": .init(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, saved: 1000)])
+        XCTAssertEqual(h.restore(key: "m", now: 2000)?.offsetAt, 1000)
+    }
     func testANightDistanceEndsAfterALongSleep() {
         let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
         XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
@@ -528,10 +539,10 @@ final class SyncTests: XCTestCase {
 
     func testSavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
         var saved = SavedHolds()
-        saved.record(key: "A", state: HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1), now: 1000)
+        saved.record(key: "A", state: HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1, offsetAt: 900), now: 1000)
         let back = try! JSONDecoder().decode(SavedHolds.self, from: try! JSONEncoder().encode(saved))
         let st = back.restore(key: "A", now: 1000 + 3600)
-        XCTAssertEqual(st, HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1))
+        XCTAssertEqual(st, HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1, offsetAt: 900))
         // The monitor is at 40 (set by hand before the restart): it keeps following the target 30 below.
         let s = decide(current: 40, want: 72, remote: nil, state: st!, here: true, auto: true, dragging: false, sun: 1)
         XCTAssertEqual(s.write, 42)

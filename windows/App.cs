@@ -450,11 +450,19 @@ sealed class Controller {
             if (m.Cur is not int c) continue;
             int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
             var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt);
-            if (groupBase is int b && syncOffsets.Level(m.Key, b) is int lv) {
-                target = lv; hold = hold with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
+            bool follower = groupBase != null && syncOffsets.IsMember(m.Key);
+            if (groupBase is int b && follower) {
+                // Moved on its own (its buttons) since the last tick: that is its new place in the group.
+                if (here && AutoOn && m.LastSet is int last && c != last && (m.Touched || Math.Abs(c - last) > 1) && c != syncOffsets.Level(m.Key, b)) {
+                    syncOffsets.Move(m.Key, c, b); Settings.SyncOffsets = syncOffsets;
+                    Log.Write($"sync: {m.Label} moved by hand, now {(c - b >= 0 ? "+" : "")}{c - b} from the group");
+                }
+                target = syncOffsets.Level(m.Key, b) ?? target;
+                hold = hold with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
             }
-            bool dragging = (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;   // the slider is in the user's hand
+            bool dragging = m.Dragging;   // the slider is in the user's hand
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, Now);
+            if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
             if (i == li) groupBase = syncOffsets.Base(m.Key, step.Applied);
             if (!dragging) m.Touched = false;
             if (step.State.Offset != m.Offset && step.State.Offset is int o)

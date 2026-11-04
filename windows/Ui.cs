@@ -292,6 +292,8 @@ sealed class Flyout : Window {
             System.Windows.Automation.AutomationProperties.SetName(s, $"{m.Label} brightness");   // screen readers and agents
             s.ToolTipOpening += (_, _) => s.ToolTip = KeysHint;
             s.ToolTip = KeysHint;
+            s.GotMouseCapture += (_, _) => m.Dragging = true;
+            s.LostMouseCapture += (_, _) => m.Dragging = false;
             s.ValueChanged += (_, e) => {
                 if (syncing) return;
                 int v = (int)Math.Round(e.NewValue);

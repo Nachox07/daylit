@@ -448,11 +448,19 @@ import DaylitCore
             let m = mons[i]
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
             var want = ownTarget(m)
-            if let b = base, let lv = syncOffsets.level(key: m.uuid, base: b) {
-                want = lv; state.lastSet = nil; state.offset = nil; state.offsetSun = nil; state.offsetAt = nil
+            let follower = base != nil && syncOffsets.isMember(m.uuid)
+            if let b = base, follower {
+                // Moved on its own (its buttons) since the last tick: that is its new place in the group.
+                if here && auto, let last = m.lastSet, c0 != last, m.touched || abs(c0 - last) > 1, c0 != syncOffsets.level(key: m.uuid, base: b) {
+                    syncOffsets.move(m.uuid, level: c0, base: b); saveSync()
+                    Log.write("sync: \(m.label) moved by hand, now \(c0 - b >= 0 ? "+" : "")\(c0 - b) from the group")
+                }
+                want = syncOffsets.level(key: m.uuid, base: b) ?? want
+                state.lastSet = nil; state.offset = nil; state.offsetSun = nil; state.offsetAt = nil
             }
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
                               here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
+            if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
             if i == leader { base = syncOffsets.base(key: m.uuid, level: step.applied) }
             if !dragging.contains(m.id) { mons[i].touched = false }
             mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen

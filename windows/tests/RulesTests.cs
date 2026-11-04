@@ -134,6 +134,21 @@ public class DecideTests {
     }
 
     [Fact]
+    public void ALinkedMonitorMovedOnItsOwnKeepsItsNewPlace() {
+        var g = SyncOffsets.Capture([("a", 70), ("b", 60)]);
+        g.Move("b", 45, 70);
+        Assert.Equal(55, g.Level("b", 80));   // 25 below the group now
+        g.Move("c", 10, 70);                  // not a member: nothing
+        Assert.Null(g.Level("c", 70));
+    }
+
+    [Fact]
+    public void AnOffsetSavedWithoutATimeCountsFromWhenItWasSaved() {
+        var h = new SavedHolds { Entries = { ["m"] = new SavedHolds.Entry(50, 70, 1000, -20, 0.8) } };
+        Assert.Equal(1000, h.Restore("m", 2000)?.OffsetAt);
+    }
+
+    [Fact]
     public void ANightDistanceEndsAfterALongSleep() {
         var st = new Hold(null, 30, 50, -20, 0, At(100, 23));
         Assert.NotNull(DN(30, 50, st, 0, At(101, 6)).State.Offset);    // the same night, past midnight
@@ -480,10 +495,10 @@ public class SyncTests {
     [Fact]
     public void SavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
         var saved = new SavedHolds();
-        Assert.True(saved.Record("A", new Hold(null, 40, 70, -30, 1), 1000));
+        Assert.True(saved.Record("A", new Hold(null, 40, 70, -30, 1, 900), 1000));
         var back = SavedHolds.FromJson(saved.ToJson());
         var r = back.Restore("A", 1000 + 3600);
-        Assert.Equal(new Hold(null, 40, 70, -30, 1), r);
+        Assert.Equal(new Hold(null, 40, 70, -30, 1, 900), r);
         // At 40 (set by hand before the restart): keeps following the target 30 below.
         var step = Rules.Decide(40, 72, null, r!.Value, true, true, 1);
         Assert.Equal(42, step.Write);

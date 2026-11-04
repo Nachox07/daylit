@@ -220,6 +220,9 @@ sealed class SyncOffsets {
     /// Puts a monitor back at its current offset from the group (`levels` are the connected monitors').
     public void Join(string key, IReadOnlyList<(string Key, int Level)> levels) { Excluded.Remove(key); Adopt(levels); }
     public int Members(IEnumerable<string> keys) => keys.Count(IsMember);
+    /// A member moved on its own (its monitor's buttons, or Home Assistant): it keeps the new level as its
+    /// distance from the group, instead of being pulled back.
+    public void Move(string key, int level, int b) { if (Offsets.ContainsKey(key)) Offsets[key] = level - b; }
 
     /// Captures the current levels; the first monitor's level is the base (its offset is 0).
     public static SyncOffsets Capture(IEnumerable<(string Key, int Level)> levels) {
@@ -284,7 +287,7 @@ sealed class SavedHolds {
     }
     /// The state to start a monitor with after a restart, or null when there is none or it is too old.
     public Hold? Restore(string key, double now, double? maxAge = null) =>
-        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= (maxAge ?? MaxAge) ? new Hold(null, e.LastSet, e.LastTarget, e.Offset, e.OffsetSun, e.OffsetAt) : null;
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= (maxAge ?? MaxAge) ? new Hold(null, e.LastSet, e.LastTarget, e.Offset, e.OffsetSun, e.OffsetAt ?? (e.Offset != null ? e.Saved : null)) : null;   // saved before offsets had a time
 
     public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
     public static SavedHolds FromJson(string? json) {

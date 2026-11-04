@@ -234,6 +234,10 @@ public struct SyncOffsets: Equatable, Codable {
         adopt(levels)
     }
 
+    /// A member moved on its own (its monitor's buttons, or Home Assistant): it keeps the new level as its
+    /// distance from the group, instead of being pulled back.
+    public mutating func move(_ key: String, level: Int, base: Int) { if offsets[key] != nil { offsets[key] = level - base } }
+
     /// How many of `keys` are in the group.
     public func members(of keys: [String]) -> Int { keys.filter(isMember).count }
 
@@ -311,7 +315,8 @@ public struct SavedHolds: Equatable, Codable {
     /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
     public func restore(key: String, now: Double, maxAge: Double = Self.maxAge) -> HoldState? {
         guard let e = entries[key], now - e.saved <= maxAge, now >= e.saved else { return nil }
-        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget, offset: e.offset, offsetSun: e.offsetSun, offsetAt: e.offsetAt)
+        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget, offset: e.offset, offsetSun: e.offsetSun,
+                         offsetAt: e.offsetAt ?? (e.offset != nil ? e.saved : nil))   // saved before offsets had a time
     }
 }
 
