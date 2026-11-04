@@ -98,7 +98,9 @@ sealed class LookRule {
         t ??= new Tuning();
         hasBlind &= t.Room; lightsOn &= t.Room;
         // Before any answer, the middle of each gap decides (3° and 50% with the defaults).
-        double midSun = (t.LightSunAbove + t.DarkSunBelow) / 2 + 0.5, midBlind = (t.LightBlindAbove + t.DarkBlindBelow) / 2 + 5;
+        // Before any answer, a point inside each gap decides (3° and 50% with the defaults).
+        double midSun = (t.LightSunAbove + t.DarkSunBelow) / 2 + Math.Min(0.5, (t.LightSunAbove - t.DarkSunBelow) / 4);
+        double midBlind = (t.LightBlindAbove + t.DarkBlindBelow) / 2 + Math.Min(5, (t.LightBlindAbove - t.DarkBlindBelow) / 4);
         daylight = hasBlind
             ? elev > t.LightSunAbove && pos >= t.LightBlindAbove ? true : elev < t.DarkSunBelow || pos <= t.DarkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)
             : elev > t.LightSunAbove ? true : elev < t.DarkSunBelow ? false : daylight ?? elev > midSun;

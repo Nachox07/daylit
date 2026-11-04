@@ -175,6 +175,11 @@ final class LookTests: XCTestCase {
         XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 170, sat: 10))   // still counts
         XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 169, sat: 10))    // below 170: dark
     }
+    func testANarrowCustomGapStartsInsideIt() {
+        var t = Tuning(); t.theme = .init(); t.theme?.lightSunAbove = 2; t.theme?.darkSunBelow = 1.8
+        var r = LookRule()
+        XCTAssertFalse(r.wantDark(elev: 1.97, pos: 100, hasBlind: false, lightsOn: false, bri: 0, sat: 0, tuning: t))   // upper part of the gap: light
+    }
     func testWarmLightsAtNightStayDark() {
         var r = LookRule()
         XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 70))

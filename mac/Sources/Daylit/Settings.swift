@@ -410,7 +410,8 @@ struct SettingsView: View {
     }
 
     /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.
-    static func keepOrder(_ id: String, _ v: Double, _ value: (String) -> Double) -> Double {
+    static func keepOrder(_ id: String, _ v0: Double, _ value: (String) -> Double) -> Double {
+        let v = min(max(v0, -18), id == "brightness.sunNight" ? 30 : 60)   // the ranges tuning accepts
         switch id {
         case "brightness.sunDay": return max(v, value("brightness.sunNight") + 0.5)
         case "brightness.sunNight": return min(v, value("brightness.sunDay") - 0.5)

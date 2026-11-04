@@ -106,8 +106,9 @@ public struct LookRule: Equatable {
     public mutating func wantDark(elev: Double, pos: Double, hasBlind: Bool, lightsOn: Bool, bri: Double, sat: Double,
                                   tuning t: Tuning = Tuning()) -> Bool {
         let hasBlind = hasBlind && t.room, lightsOn = lightsOn && t.room
-        // Before any answer, the middle of each gap decides (3° and 50% with the defaults).
-        let midSun = (t.lightSunAbove + t.darkSunBelow) / 2 + 0.5, midBlind = (t.lightBlindAbove + t.darkBlindBelow) / 2 + 5
+        // Before any answer, a point inside each gap decides (3° and 50% with the defaults).
+        let midSun = (t.lightSunAbove + t.darkSunBelow) / 2 + min(0.5, (t.lightSunAbove - t.darkSunBelow) / 4)
+        let midBlind = (t.lightBlindAbove + t.darkBlindBelow) / 2 + min(5, (t.lightBlindAbove - t.darkBlindBelow) / 4)
         if hasBlind {
             daylight = elev > t.lightSunAbove && pos >= t.lightBlindAbove ? true
                      : elev < t.darkSunBelow || pos <= t.darkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)

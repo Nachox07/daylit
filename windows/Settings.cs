@@ -199,13 +199,16 @@ sealed class SettingsWindow : Window {
         tuneRows.TryGetValue(id, out var r) && Num(r.box.Text) is double v ? v : TuningField.All.First(f => f.Id == id).Default;
 
     /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.
-    double KeepOrder(string id, double v) => id switch {
-        "brightness.sunDay" => Math.Max(v, TuneValue("brightness.sunNight") + 0.5),
-        "brightness.sunNight" => Math.Min(v, TuneValue("brightness.sunDay") - 0.5),
-        "theme.lightSunAbove" => Math.Max(v, TuneValue("theme.darkSunBelow")),
-        "theme.darkSunBelow" => Math.Min(v, TuneValue("theme.lightSunAbove")),
-        _ => v,
-    };
+    double KeepOrder(string id, double v0) {
+        double v = Math.Clamp(v0, -18, id == "brightness.sunNight" ? 30 : 60);   // the ranges tuning accepts
+        return id switch {
+            "brightness.sunDay" => Math.Max(v, TuneValue("brightness.sunNight") + 0.5),
+            "brightness.sunNight" => Math.Min(v, TuneValue("brightness.sunDay") - 0.5),
+            "theme.lightSunAbove" => Math.Max(v, TuneValue("theme.darkSunBelow")),
+            "theme.darkSunBelow" => Math.Min(v, TuneValue("theme.lightSunAbove")),
+            _ => v,
+        };
+    }
 
     /// Today's sun pictures; a hint instead without a location.
     void RebuildCurves() {

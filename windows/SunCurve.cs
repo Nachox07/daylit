@@ -163,7 +163,7 @@ sealed class SunCurve : FrameworkElement {
         Cursor = dragging != null || handles.Any(h => h.r.Contains(p)) ? Cursors.SizeNS : Cursors.Arrow;
         if (dragging == null) return;
         double v = top - Math.Clamp(p.Y, 0, ChartH) / ChartH * (top - bottom);
-        set(dragging, Math.Round(Math.Clamp(v, -18, 60) * 2) / 2);
+        set(dragging, Math.Round(Math.Clamp(v, -18, 60) * 2, MidpointRounding.AwayFromZero) / 2);
         InvalidateVisual();
     }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { dragging = null; ReleaseMouseCapture(); }

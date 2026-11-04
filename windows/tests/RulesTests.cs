@@ -129,6 +129,11 @@ public class LookTests {
         Assert.False(r.WantDark(-10, 0, true, true, 170, 10));   // still counts
         Assert.True(r.WantDark(-10, 0, true, true, 169, 10));    // below 170: dark
     }
+    [Fact]
+    public void ANarrowCustomGapStartsInsideIt() {
+        var t = new Tuning { Theme = new() { LightSunAbove = 2, DarkSunBelow = 1.8 } };
+        Assert.False(new LookRule().WantDark(1.97, 100, false, false, 0, 0, t));   // upper part of the gap: light
+    }
     [Fact] public void WarmLightsAtNightStayDark() => Assert.True(new LookRule().WantDark(-10, 0, true, true, 230, 70));
     [Fact] public void WithoutBlindOnlyTheSunCounts() => Assert.False(new LookRule().WantDark(10, 0, false, false, 0, 0));
 
