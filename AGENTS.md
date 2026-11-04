@@ -134,7 +134,8 @@ computer right now, or no token stored yet) and which config entry matched which
   Assistant entities later without editing JSON; it keeps every other key in the file.
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
-  and *Automatic*. Hand-set levels survive a restart (kept for 12 hours).
+  and *Automatic*. A level set by hand keeps its distance from the
+  automatic one until sunset, and survives a restart (for up to 12 hours).
 - "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on
   battery. "Light or dark mode from daylight" (on by default on Windows, off on macOS; on macOS the
   first switch asks for the Automation permission for System Events).

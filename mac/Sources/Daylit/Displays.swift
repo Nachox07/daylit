@@ -123,6 +123,7 @@ struct Mon: Identifiable {
     var readState: ReadState = .unknown   // DDC only: does it report its level (DaylitCore)
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
+    var offset: Int? = nil, offsetSun: Double? = nil   // a hand-set level as a distance from the target (DaylitCore.decide)
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
 }

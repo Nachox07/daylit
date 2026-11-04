@@ -205,7 +205,16 @@ sealed class Controller {
     });
     async Task Later(int ms, string why) { await Task.Delay(ms); await Tick(why); }
 
+    // After wake or idle the monitor may have been changed elsewhere: its reading is not a hand-set level.
+    // A distance set by hand here is kept.
     void ForgetHandSet() { foreach (var m in Mons) m.LastSet = null; }
+
+    /// Back to the automatic level now (the "manual" note in the panel).
+    public void Resume(Mon m) {
+        m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.Manual = false;
+        Log.Write($"resume: {m.Label} back to automatic");
+        _ = Tick("resume");
+    }
 
     // MARK: panel, keys, sliders
 
@@ -299,7 +308,7 @@ sealed class Controller {
             AutoOn = on;
             if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);
             else Settings.Auto = on;
-            if (on) ForgetHandSet();
+            if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; }
             await Tick("automatic " + (on ? "on" : "off"));
         } catch (Exception e) { Log.Write("set auto: " + e); }
     }
@@ -339,7 +348,7 @@ sealed class Controller {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
             if (m == null) {
                 var fresh = new Mon(d, Mon.Match(d, Cfg.Monitors));
-                if (holds.Restore(d.Key, Now) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
+                if (holds.Restore(d.Key, Now) is Hold h) { fresh.LastSet = h.LastSet; fresh.LastTarget = h.LastTarget; fresh.Offset = h.Offset; fresh.OffsetSun = h.OffsetSun; }
                 return fresh;
             }
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
@@ -437,9 +446,11 @@ sealed class Controller {
             m.Manual = false;
             if (m.Cur is not int c) continue;
             int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun);
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
-            (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
-            if (holds.Record(m.Key, m.LastSet, m.LastTarget, Now)) holdsChanged = true;
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun), AutoOn, here, sun);
+            if (step.State.Offset != m.Offset && step.State.Offset is int o)
+                Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
+            (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget, step.State.Offset, step.State.OffsetSun);
+            if (holds.Record(m.Key, step.State, Now)) holdsChanged = true;
             bool remote = step.Remote != null;
             if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
             else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");

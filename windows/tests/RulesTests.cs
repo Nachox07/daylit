@@ -44,8 +44,8 @@ public class TargetTests {
 }
 
 public class DecideTests {
-    static Step D(int c, int target, (double, double)? remote = null, Hold s = default, bool auto = true, bool here = true, int hold = 5) =>
-        Rules.Decide(c, target, remote, s, auto, here, hold);
+    static Step D(int c, int target, (double, double)? remote = null, Hold s = default, bool auto = true, bool here = true, double sun = 1) =>
+        Rules.Decide(c, target, remote, s, auto, here, sun);
 
     [Fact]
     public void AppliesTargetAndRemembersIt() {
@@ -60,18 +60,62 @@ public class DecideTests {
     [Fact] public void NoWriteWhenAlreadyAtTarget() => Assert.Null(D(70, 70).Write);
 
     [Fact]
-    public void HandSetLevelIsHeldWhileTargetMovesLessThanHold() {
-        var s = D(50, 73, s: new Hold(null, 70, 70));
+    public void HandSetLevelIsKeptAsADistanceFromTheTarget() {
+        var s = D(50, 70, s: new Hold(null, 70, 70));   // automatic set 70; the user chose 50
         Assert.Null(s.Write);
         Assert.True(s.Manual);
-        Assert.Equal(50, s.Applied);
+        Assert.Equal(-20, s.State.Offset);
+        var next = D(50, 81, s: s.State);                // the target rises: still 20 below
+        Assert.Equal(61, next.Write);
+        Assert.True(next.Manual);
     }
 
     [Fact]
-    public void HandSetLevelIsReplacedOnceTargetMovesByHold() {
-        var s = D(50, 75, s: new Hold(null, 70, 70));
-        Assert.Equal(75, s.Write);
+    public void ACloudyMorningKeepsTheDimmerLevel() {
+        // Replays a real morning: the user turned the screen down while the blind opened and the sun rose.
+        var st = new Hold(null, 76, 76);
+        var s = D(52, 76, s: st, sun: 0.82); st = s.State;
+        Assert.Null(s.Write);
+        s = D(52, 81, s: st, sun: 0.84); st = s.State; Assert.Equal(57, s.Write);
+        s = D(57, 87, s: st, sun: 0.84); st = s.State; Assert.Equal(63, s.Write);
+        s = D(63, 92, s: st, sun: 0.96); Assert.Equal(68, s.Write);
+        Assert.True(s.Manual);
+    }
+
+    [Fact]
+    public void AHandSetLevelEqualToTheTargetIsNotManual() {
+        var s = D(72, 72, s: new Hold(null, 70, 70));
         Assert.False(s.Manual);
+        Assert.Null(s.State.Offset);
+    }
+
+    [Fact]
+    public void ADaytimeDistanceFadesAtDuskAndEndsAtNight() {
+        var st = new Hold(null, 60, 80, -20, 1);
+        Assert.Null(D(60, 80, s: st, sun: 1).Write);
+        Assert.Equal(60, D(60, 70, s: st, sun: 0.15).Applied);   // half faded: 70 − 10
+        var night = D(60, 50, s: st, sun: 0);
+        Assert.Equal(50, night.Write);
+        Assert.False(night.Manual);
+        Assert.Null(night.State.Offset);
+    }
+
+    [Fact]
+    public void ANightDistanceEndsAfterSunrise() {
+        var st = new Hold(null, 30, 50, -20, 0);
+        Assert.Null(D(30, 50, s: st, sun: 0).Write);
+        Assert.Equal(50, D(30, 60, s: st, sun: 0.15).Write);
+        var day = D(30, 70, s: st, sun: 0.3);
+        Assert.Equal(70, day.Write);
+        Assert.Null(day.State.Offset);
+    }
+
+    [Fact]
+    public void TheDistanceIsClampedButKept() {
+        var s = D(10, 30, s: new Hold(null, 10, 40, -30, 1));
+        Assert.Equal(0, s.Write);
+        Assert.Equal(-30, s.State.Offset);
+        Assert.Equal(30, D(0, 60, s: s.State).Write);
     }
 
     [Fact]
@@ -103,9 +147,10 @@ public class DecideTests {
         Assert.Equal(30, s.Current);
         Assert.True(s.Manual);
         Assert.Equal(2000, s.State.RemoteSeen);
-        var next = D(30, 70, s: s.State);   // the next tick at the same target keeps 30
+        var next = D(30, 70, s: s.State);   // the next tick at the same target keeps 30, a higher one moves with it
         Assert.Null(next.Write);
         Assert.True(next.Manual);
+        Assert.Equal(40, D(30, 80, s: next.State).Write);
     }
 
     [Fact]
@@ -280,10 +325,10 @@ public class WriteOnlyTests {
         Assert.Equal(ReadState.Readable, ReadState.Readable.AfterUserWrite(true));
     }
     [Fact] public void WriteOnlyFollowsTargetUntilMovedByHand() {
-        var auto = Rules.Decide(60, 72, null, new Hold(null, 60, 60), true, true, 5);
+        var auto = Rules.Decide(60, 72, null, new Hold(null, 60, 60), true, true, 1);
         Assert.Equal(72, auto.Write);
         Assert.False(auto.Manual);
-        var held = Rules.Decide(40, 74, null, auto.State, true, true, 5);   // slider moved to 40 by hand
+        var held = Rules.Decide(40, 72, null, auto.State, true, true, 1);   // slider moved to 40 by hand: kept, 32 below
         Assert.Null(held.Write);
         Assert.True(held.Manual);
     }
@@ -369,30 +414,36 @@ public class SyncTests {
     [Fact]
     public void SavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
         var saved = new SavedHolds();
-        Assert.True(saved.Record("A", 70, 70, 1000));
+        Assert.True(saved.Record("A", new Hold(null, 40, 70, -30, 1), 1000));
         var back = SavedHolds.FromJson(saved.ToJson());
         var r = back.Restore("A", 1000 + 3600);
-        Assert.Equal((70, 70), (r!.Value.LastSet, r.Value.LastTarget));
-        // At 40 (set by hand before the restart), target barely moved: kept, nothing written.
-        var step = Rules.Decide(40, 72, null, new Hold(null, r.Value.LastSet, r.Value.LastTarget), true, true, 5);
-        Assert.Null(step.Write);
+        Assert.Equal(new Hold(null, 40, 70, -30, 1), r);
+        // At 40 (set by hand before the restart): keeps following the target 30 below.
+        var step = Rules.Decide(40, 72, null, r!.Value, true, true, 1);
+        Assert.Equal(42, step.Write);
         Assert.True(step.Manual);
     }
 
     [Fact]
     public void WithoutSavedHoldARestartAppliesTheTarget() {
-        var step = Rules.Decide(40, 72, null, new Hold(null, null, null), true, true, 5);
+        var step = Rules.Decide(40, 72, null, new Hold(null, null, null), true, true, 1);
         Assert.Equal(72, step.Write);
+    }
+
+    [Fact]
+    public void HoldsSavedBeforeOffsetsStillLoad() {
+        var back = SavedHolds.FromJson("""{"A":{"LastSet":40,"LastTarget":70,"Saved":10}}""");
+        Assert.Equal(new Hold(null, 40, 70), back.Restore("A", 20));
     }
 
     [Fact]
     public void SavedHoldExpiresAndEmptyStateIsDropped() {
         var saved = new SavedHolds();
-        saved.Record("A", 70, 70, 0);
+        saved.Record("A", new Hold(null, 70, 70), 0);
         Assert.Null(saved.Restore("A", SavedHolds.MaxAge + 1));
         Assert.Null(saved.Restore("B", 10));
-        Assert.False(saved.Record("A", 70, 70, 50));   // unchanged: keeps the original time
-        Assert.True(saved.Record("A", null, null, 60));
+        Assert.False(saved.Record("A", new Hold(null, 70, 70), 50));   // unchanged: keeps the original time
+        Assert.True(saved.Record("A", new Hold(null, null, null), 60));
         Assert.Empty(saved.Entries);
         Assert.NotNull(SavedHolds.FromJson("not json"));
     }

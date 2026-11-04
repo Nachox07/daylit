@@ -51,7 +51,6 @@ sealed class Config {
 
     public const double DefaultDay = 70, DefaultBlindDown = 40, DefaultNight = 20;
     public const int IdleSeconds = 300;       // no input for this long = someone else is using the monitors
-    public int Hold => ManualHold ?? 5;
     public string TokenName => string.IsNullOrWhiteSpace(HomeAssistant?.TokenName) ? "daylit-home-assistant" : HomeAssistant!.TokenName!;
     public bool HasHa => !string.IsNullOrWhiteSpace(HomeAssistant?.Url);
 
@@ -159,7 +158,6 @@ sealed class Config {
     public const string Starter = """
         {
           "source": "off",
-          "manualHold": 5,
           "monitors": []
         }
         """;

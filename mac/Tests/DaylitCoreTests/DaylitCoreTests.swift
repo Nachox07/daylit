@@ -81,8 +81,8 @@ final class TargetTests: XCTestCase {
 
 final class DecideTests: XCTestCase {
     func step(_ c: Int, want: Int, remote: RemoteSet? = nil, state: HoldState = HoldState(),
-              here: Bool = true, auto: Bool = true, dragging: Bool = false, hold: Int = 5) -> Step {
-        decide(current: c, want: want, remote: remote, state: state, here: here, auto: auto, dragging: dragging, hold: hold)
+              here: Bool = true, auto: Bool = true, dragging: Bool = false, sun: Double = 1) -> Step {
+        decide(current: c, want: want, remote: remote, state: state, here: here, auto: auto, dragging: dragging, sun: sun)
     }
 
     func testAppliesTargetAndRemembersIt() {
@@ -95,17 +95,57 @@ final class DecideTests: XCTestCase {
     func testNoWriteWhenAlreadyAtTarget() {
         XCTAssertNil(step(70, want: 70).write)
     }
-    func testHandSetLevelIsHeldWhileTargetMovesLessThanHold() {
-        // Automatic set 70; the user then chose 50; the target moved only to 73.
-        let s = step(50, want: 73, state: HoldState(lastSet: 70, lastTarget: 70))
+    func testHandSetLevelIsKeptAsADistanceFromTheTarget() {
+        // Automatic set 70; the user chose 50 (20 below). The tick that notices keeps 50.
+        let s = step(50, want: 70, state: HoldState(lastSet: 70, lastTarget: 70))
         XCTAssertNil(s.write)
         XCTAssertTrue(s.manual)
-        XCTAssertEqual(s.applied, 50)
+        XCTAssertEqual(s.state.offset, -20)
+        // The target rises: the screen follows it, still 20 below.
+        let next = step(50, want: 81, state: s.state)
+        XCTAssertEqual(next.write, 61)
+        XCTAssertTrue(next.manual)
     }
-    func testHandSetLevelIsReplacedOnceTargetMovesByHold() {
-        let s = step(50, want: 75, state: HoldState(lastSet: 70, lastTarget: 70))
-        XCTAssertEqual(s.write, 75)
+    func testACloudyMorningKeepsTheDimmerLevel() {
+        // Replays a real morning: the user turned the screen down twice while the blind opened and the sun rose.
+        var st = HoldState(lastSet: 76, lastTarget: 76)
+        var s = step(52, want: 76, state: st, sun: 0.82); st = s.state            // set by hand: 24 below
+        XCTAssertNil(s.write)
+        s = step(52, want: 81, state: st, sun: 0.84); st = s.state               // blind 40 → 54 %
+        XCTAssertEqual(s.write, 57)
+        s = step(57, want: 87, state: st, sun: 0.84); st = s.state               // blind 80 %
+        XCTAssertEqual(s.write, 63)
+        s = step(63, want: 92, state: st, sun: 0.96)                             // the sun rises
+        XCTAssertEqual(s.write, 68)
+        XCTAssertTrue(s.manual)
+    }
+    func testAHandSetLevelEqualToTheTargetIsNotManual() {
+        let s = step(72, want: 72, state: HoldState(lastSet: 70, lastTarget: 70))
         XCTAssertFalse(s.manual)
+        XCTAssertNil(s.state.offset)
+    }
+    func testADaytimeDistanceFadesAtDuskAndEndsAtNight() {
+        let st = HoldState(lastSet: 60, lastTarget: 80, offset: -20, offsetSun: 1)
+        XCTAssertEqual(step(60, want: 80, state: st, sun: 1).write, nil)
+        XCTAssertEqual(step(60, want: 70, state: st, sun: 0.15).applied, 60)     // half faded: 70 − 10
+        let night = step(60, want: 50, state: st, sun: 0)
+        XCTAssertEqual(night.write, 50)                                          // the night level, clean
+        XCTAssertFalse(night.manual)
+        XCTAssertNil(night.state.offset)
+    }
+    func testANightDistanceEndsAfterSunrise() {
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0)
+        XCTAssertNil(step(30, want: 50, state: st, sun: 0).write)                // kept through the night
+        XCTAssertEqual(step(30, want: 60, state: st, sun: 0.15).write, 50)       // half gone
+        let day = step(30, want: 70, state: st, sun: 0.3)
+        XCTAssertEqual(day.write, 70)
+        XCTAssertNil(day.state.offset)
+    }
+    func testTheDistanceIsClampedButKept() {
+        let s = step(10, want: 30, state: HoldState(lastSet: 10, lastTarget: 40, offset: -30, offsetSun: 1))
+        XCTAssertEqual(s.write, 0)
+        XCTAssertEqual(s.state.offset, -30)
+        XCTAssertEqual(step(0, want: 60, state: s.state).write, 30)
     }
     func testIdleMachineLeavesTheMonitorAlone() {
         let s = step(50, want: 70, here: false)
@@ -132,10 +172,11 @@ final class DecideTests: XCTestCase {
         XCTAssertFalse(s.skip)
         XCTAssertTrue(s.manual)
         XCTAssertEqual(s.state.remoteSeen, 2000)
-        // Held as hand-set: the next tick at the same target keeps 30.
+        // Followed like a hand-set level: the next tick at the same target keeps 30, a higher one moves with it.
         let next = step(30, want: 70, state: s.state)
         XCTAssertNil(next.write)
         XCTAssertTrue(next.manual)
+        XCTAssertEqual(step(30, want: 80, state: next.state).write, 40)
     }
     func testSetHelperUnchangedDoesNothing() {
         let s = step(70, want: 70, remote: RemoteSet(value: 30, changed: 1000), state: HoldState(lastSet: 70, lastTarget: 70, remoteSeen: 1000))
@@ -343,12 +384,12 @@ final class WriteOnlyTests: XCTestCase {
     func testWriteOnlyAutomaticFollowsTargetUntilTheUserMovesTheSlider() {
         // Untouched: the slider holds what automatic last sent, so the next target is applied.
         var st = HoldState(lastSet: 60, lastTarget: 60)
-        let auto = decide(current: 60, want: 72, remote: nil, state: st, here: true, auto: true, dragging: false, hold: 5)
+        let auto = decide(current: 60, want: 72, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1)
         XCTAssertEqual(auto.write, 72)
         XCTAssertFalse(auto.manual)
-        // Moved by hand to 40: kept as manual while the target moves less than the hold.
+        // Moved by hand to 40: kept, 32 below the target.
         st = auto.state
-        let held = decide(current: 40, want: 74, remote: nil, state: st, here: true, auto: true, dragging: false, hold: 5)
+        let held = decide(current: 40, want: 72, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1)
         XCTAssertNil(held.write)
         XCTAssertTrue(held.manual)
     }
@@ -425,19 +466,25 @@ final class SyncTests: XCTestCase {
 
     func testSavedHoldRestoresWithinMaxAgeAndKeepsTheHandSetLevel() {
         var saved = SavedHolds()
-        saved.record(key: "A", state: HoldState(lastSet: 70, lastTarget: 70), now: 1000)
+        saved.record(key: "A", state: HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1), now: 1000)
         let back = try! JSONDecoder().decode(SavedHolds.self, from: try! JSONEncoder().encode(saved))
         let st = back.restore(key: "A", now: 1000 + 3600)
-        XCTAssertEqual(st, HoldState(lastSet: 70, lastTarget: 70))
-        // The monitor is at 40 (set by hand before the restart) and the target barely moved: kept.
-        let s = decide(current: 40, want: 72, remote: nil, state: st!, here: true, auto: true, dragging: false, hold: 5)
-        XCTAssertNil(s.write)
+        XCTAssertEqual(st, HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1))
+        // The monitor is at 40 (set by hand before the restart): it keeps following the target 30 below.
+        let s = decide(current: 40, want: 72, remote: nil, state: st!, here: true, auto: true, dragging: false, sun: 1)
+        XCTAssertEqual(s.write, 42)
         XCTAssertTrue(s.manual)
     }
 
     func testWithoutSavedHoldARestartAppliesTheTarget() {
-        let s = decide(current: 40, want: 72, remote: nil, state: HoldState(), here: true, auto: true, dragging: false, hold: 5)
+        let s = decide(current: 40, want: 72, remote: nil, state: HoldState(), here: true, auto: true, dragging: false, sun: 1)
         XCTAssertEqual(s.write, 72)
+    }
+
+    func testHoldsSavedBeforeOffsetsStillLoad() {
+        let old = Data(#"{"entries":{"A":{"lastSet":40,"lastTarget":70,"saved":10}}}"#.utf8)
+        let back = try! JSONDecoder().decode(SavedHolds.self, from: old)
+        XCTAssertEqual(back.restore(key: "A", now: 20), HoldState(lastSet: 40, lastTarget: 70))
     }
 
     func testSavedHoldExpiresAndEmptyStateIsDropped() {

@@ -123,6 +123,7 @@ sealed class Mon {
     public Display D;
     public MonitorConfig? Spec;
     public int? Cur, LastSet, LastTarget, Published;
+    public int? Offset; public double? OffsetSun;   // a hand-set level as a distance from the target (Rules.Decide)
     public double? RemoteSeen;                 // last_changed of the HA "set" helper already acted on
     public bool Manual;                        // automatic mode is holding a hand-set value
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after

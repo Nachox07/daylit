@@ -68,7 +68,7 @@ static class HAClient {
             state = applied,
             attributes = new Dictionary<string, object> {
                 ["friendly_name"] = m.Label + " brightness", ["unit_of_measurement"] = "%", ["icon"] = "mdi:monitor",
-                ["target"] = target, ["manual"] = manual, ["daylight"] = Math.Round(sun * 100) / 100,
+                ["target"] = target, ["manual"] = manual, ["offset"] = m.Offset ?? 0, ["daylight"] = Math.Round(sun * 100) / 100,
                 ["sun_elevation"] = s.Elev, ["blind"] = s.Pos, ["lights"] = s.Lights, ["source"] = "Windows" } });
 
     public static Task<string?> SetSwitch(Config c, bool on) =>

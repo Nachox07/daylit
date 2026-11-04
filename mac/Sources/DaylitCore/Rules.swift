@@ -40,8 +40,11 @@ public struct HoldState: Equatable {
     public var lastSet: Int?         // level automatic mode last applied (nil: none yet / forget)
     public var lastTarget: Int?      // target at that time
     public var remoteSeen: Double?   // last_changed of the "set" helper already acted on
-    public init(lastSet: Int? = nil, lastTarget: Int? = nil, remoteSeen: Double? = nil) {
+    public var offset: Int?          // a hand-set level, as its distance from the target (nil: none)
+    public var offsetSun: Double?    // daylight fraction (0…1) when it was set
+    public init(lastSet: Int? = nil, lastTarget: Int? = nil, remoteSeen: Double? = nil, offset: Int? = nil, offsetSun: Double? = nil) {
         self.lastSet = lastSet; self.lastTarget = lastTarget; self.remoteSeen = remoteSeen
+        self.offset = offset; self.offsetSun = offsetSun
     }
 }
 
@@ -52,18 +55,34 @@ public struct Step: Equatable {
     public var remote: Int?          // a "set" from Home Assistant was applied (this value)
     public var skip = false          // idle and nothing from HA: leave this monitor alone (no badge or publish change)
     public var applied: Int          // level the monitor is at after this tick (what gets published)
-    public var manual = false        // a hand-set (or HA-set) level is being kept
+    public var manual = false        // a hand-set (or HA-set) level is being followed
     public var level: Int?           // new value for the slider
+}
+
+/// How much of a hand-set offset still applies (0…1) for today's sun, or nil once it is over.
+/// One set by day fades out as the sun goes down and ends at night, so tomorrow starts clean; one set
+/// at night ends as the sun comes up. Either way the change is gradual, over 0.3 of the daylight
+/// fraction (about half an hour around sunrise or sunset).
+public func offsetWeight(sun: Double, setAt: Double) -> Double? {
+    let edge = 0.3
+    if setAt > 0 {
+        if sun <= 0 { return nil }
+        return min(1, sun / min(edge, setAt))
+    }
+    if sun >= edge { return nil }
+    return 1 - sun / edge
 }
 
 /// One automatic decision for one monitor (macOS rules).
 ///
-/// - A change of the HA "set" helper applies once, even when this Mac is idle, then is held like a
+/// - A change of the HA "set" helper applies once, even when this Mac is idle, then is followed like a
 ///   hand-set level. The value seen on the first look is not a command.
 /// - Idle (someone may be using the other machine on these monitors): nothing else happens.
-/// - A level set by hand is kept until the target moves by `hold` points.
+/// - A level set by hand keeps its distance from the target: set 52 when the target is 76 and the
+///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
+///   fades at dusk and ends at night (see offsetWeight); a new hand-set level replaces it.
 public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: HoldState,
-                   here: Bool, auto: Bool, dragging: Bool, hold: Int) -> Step {
+                   here: Bool, auto: Bool, dragging: Bool, sun: Double) -> Step {
     var s = s0, c = c0, step = Step(state: s0, applied: c0)
     var fromRemote = false
     if let r = remote {
@@ -74,22 +93,29 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
             if c != v { step.write = v }
             c = v; fromRemote = true
             step.remote = v; step.level = v
-            s.lastTarget = want; s.lastSet = v == want ? nil : want   // held as hand-set until the target moves
+            s.lastSet = v; s.lastTarget = want
+            s.offset = v == want ? nil : v - want; s.offsetSun = sun
         }
     }
     if !here && !fromRemote { step.state = s; step.skip = true; return step }
 
-    var applied = c, manual = fromRemote
+    var applied = c
     if auto && !fromRemote && !dragging {
-        let handSet = s.lastSet != nil && c != s.lastSet!
-        if handSet && abs(want - (s.lastTarget ?? want)) < hold {
-            manual = true
-        } else {
-            if c != want { step.write = want }
-            applied = want; s.lastSet = want; s.lastTarget = want; step.level = want
+        if let last = s.lastSet, c != last {   // moved by hand since the last tick
+            s.offset = c == want ? nil : c - want; s.offsetSun = sun
         }
+        var level = want
+        if let o = s.offset {
+            if let w = offsetWeight(sun: sun, setAt: s.offsetSun ?? sun) {
+                level = min(max(want + Int((Double(o) * w).rounded()), 0), 100)
+            } else {
+                s.offset = nil; s.offsetSun = nil
+            }
+        }
+        if c != level { step.write = level; step.level = level }
+        applied = level; s.lastSet = level; s.lastTarget = want
     }
-    step.state = s; step.applied = applied; step.manual = manual
+    step.state = s; step.applied = applied; step.manual = s.offset != nil && (auto || fromRemote)
     return step
 }
 
@@ -236,8 +262,12 @@ public struct SavedHolds: Equatable, Codable {
     public struct Entry: Equatable, Codable {
         public var lastSet: Int?
         public var lastTarget: Int?
+        public var offset: Int?
+        public var offsetSun: Double?
         public var saved: Double     // Unix seconds
-        public init(lastSet: Int?, lastTarget: Int?, saved: Double) { self.lastSet = lastSet; self.lastTarget = lastTarget; self.saved = saved }
+        public init(lastSet: Int?, lastTarget: Int?, offset: Int? = nil, offsetSun: Double? = nil, saved: Double) {
+            self.lastSet = lastSet; self.lastTarget = lastTarget; self.offset = offset; self.offsetSun = offsetSun; self.saved = saved
+        }
     }
     public static let maxAge: Double = 12 * 3600
     public var entries: [String: Entry]
@@ -246,12 +276,12 @@ public struct SavedHolds: Equatable, Codable {
     /// Records a monitor's state; one with nothing to remember is removed.
     public mutating func record(key: String, state: HoldState, now: Double) {
         if state.lastSet == nil && state.lastTarget == nil { entries[key] = nil; return }
-        entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, saved: now)
+        entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, offset: state.offset, offsetSun: state.offsetSun, saved: now)
     }
     /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
     public func restore(key: String, now: Double) -> HoldState? {
         guard let e = entries[key], now - e.saved <= Self.maxAge, now >= e.saved else { return nil }
-        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget)
+        return HoldState(lastSet: e.lastSet, lastTarget: e.lastTarget, offset: e.offset, offsetSun: e.offsetSun)
     }
 }
 

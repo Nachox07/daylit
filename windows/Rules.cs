@@ -28,7 +28,8 @@ static class Sun {
 }
 
 /// What automatic mode remembers per monitor between ticks.
-record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget);
+/// Offset: a hand-set level as its distance from the target; OffsetSun: the daylight fraction when it was set.
+record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offset = null, double? OffsetSun = null);
 
 /// The outcome of one tick for one monitor.
 /// Current: the level after this tick; Write: what to send to the monitor; Remote: a "set" from HA that was applied.
@@ -44,12 +45,23 @@ static class Rules {
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
 
+    /// How much of a hand-set offset still applies (0…1) for today's sun, or null once it is over.
+    /// One set by day fades out as the sun goes down and ends at night, so tomorrow starts clean; one set
+    /// at night ends as the sun comes up. Either way over 0.3 of the daylight fraction (about half an hour).
+    public static double? OffsetWeight(double sun, double setAt) {
+        const double edge = 0.3;
+        if (setAt > 0) return sun <= 0 ? null : Math.Min(1, sun / Math.Min(edge, setAt));
+        return sun >= edge ? null : 1 - sun / edge;
+    }
+
     /// One automatic decision for one monitor (Windows rules).
-    /// - A change of the HA "set" helper applies once, even when this PC is idle, then is held like a
+    /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
     ///   hand-set level. The value seen on the first look is not a command.
-    /// - A level set by hand is kept until the target moves by `hold` points.
+    /// - A level set by hand keeps its distance from the target: set 52 when the target is 76 and the
+    ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
+    ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
     /// - An idle PC (someone may be using the other machine on these monitors) writes nothing automatic.
-    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, int hold) {
+    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun) {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
@@ -58,20 +70,24 @@ static class Rules {
                 int v = (int)Math.Round(Math.Clamp(r.Value, 0, 100), MidpointRounding.AwayFromZero);
                 if (c != v) write = v;
                 c = v; fromRemote = true; remoteValue = v;
-                s = s with { RemoteSeen = r.Changed, LastTarget = target, LastSet = v == target ? null : target };   // held as hand-set until the target moves
+                s = s with { RemoteSeen = r.Changed, LastTarget = target, LastSet = v, Offset = v == target ? null : v - target, OffsetSun = sun };
             }
         }
-        int applied = c; bool manual = false;
-        if (auto) {
-            bool handSet = s.LastSet != null && c != s.LastSet;
-            if (fromRemote || (handSet && Math.Abs(target - (s.LastTarget ?? target)) < hold)) manual = true;
-            else if (here) {
-                if (c != target) write = target;
-                applied = target; c = target;
-                s = s with { LastSet = target, LastTarget = target };
+        int applied = c;
+        if (auto && !fromRemote && here) {
+            if (s.LastSet is int last && c != last)   // moved by hand since the last tick
+                s = s with { Offset = c == target ? null : c - target, OffsetSun = sun };
+            int level = target;
+            if (s.Offset is int o) {
+                if (OffsetWeight(sun, s.OffsetSun ?? sun) is double w)
+                    level = Math.Clamp(target + (int)Math.Round(o * w, MidpointRounding.AwayFromZero), 0, 100);
+                else s = s with { Offset = null, OffsetSun = null };
             }
+            if (c != level) write = level;
+            applied = level; c = level;
+            s = s with { LastSet = level, LastTarget = target };
         }
-        return new Step(s, c, write, remoteValue, applied, manual);
+        return new Step(s, c, write, remoteValue, applied, (auto || fromRemote) && s.Offset != null);
     }
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
@@ -225,20 +241,20 @@ sealed class SyncOffsets {
 /// the automatic target. Saved per monitor (its stable key) with the time it was saved; an entry older
 /// than MaxAge is forgotten, since the target has moved on by then anyway.
 sealed class SavedHolds {
-    public sealed record Entry(int? LastSet, int? LastTarget, double Saved);
+    public sealed record Entry(int? LastSet, int? LastTarget, double Saved, int? Offset = null, double? OffsetSun = null);
     public static readonly double MaxAge = 12 * 3600;
     public Dictionary<string, Entry> Entries { get; set; } = new();
 
     /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
-    public bool Record(string key, int? lastSet, int? lastTarget, double now) {
-        if (lastSet == null && lastTarget == null) return Entries.Remove(key);
-        if (Entries.TryGetValue(key, out var e) && e.LastSet == lastSet && e.LastTarget == lastTarget) return false;   // keep "last decided" time
-        Entries[key] = new Entry(lastSet, lastTarget, now);
+    public bool Record(string key, Hold h, double now) {
+        if (h.LastSet == null && h.LastTarget == null) return Entries.Remove(key);
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset) return false;   // keep "last decided" time
+        Entries[key] = new Entry(h.LastSet, h.LastTarget, now, h.Offset, h.OffsetSun);
         return true;
     }
     /// The state to start a monitor with after a restart, or null when there is none or it is too old.
-    public (int? LastSet, int? LastTarget)? Restore(string key, double now) =>
-        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= MaxAge ? (e.LastSet, e.LastTarget) : null;
+    public Hold? Restore(string key, double now) =>
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= MaxAge ? new Hold(null, e.LastSet, e.LastTarget, e.Offset, e.OffsetSun) : null;
 
     public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
     public static SavedHolds FromJson(string? json) {

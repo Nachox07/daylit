@@ -113,14 +113,17 @@ import DaylitCore
             }
             if let o = old[s.uuid] {
                 m.level = o.level; m.remoteSeen = o.remoteSeen
-                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published; m.readState = o.readState }
+                if o.control == control {
+                    m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.offset = o.offset; m.offsetSun = o.offsetSun
+                    m.published = o.published; m.readState = o.readState
+                }
                 else {
                     // Another control reads on its own scale: the new reading is not a level set by hand.
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
                 }
             }
             else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970) {
-                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
+                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget; m.offset = h.offset; m.offsetSun = h.offsetSun
             }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
             if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)" + (m.noControl != nil ? ", no brightness control right now" : "")) }
@@ -293,8 +296,20 @@ import DaylitCore
         } else {
             UserDefaults.standard.set(on, forKey: "auto")
         }
-        if on { for i in mons.indices { mons[i].lastSet = nil; mons[i].manual = false } }
+        if on { for i in mons.indices { forgetHandSet(i) } }
         refresh()
+    }
+
+    /// Back to the automatic level now (the Manual badge in the panel).
+    func resume(_ i: Int) {
+        guard mons.indices.contains(i) else { return }
+        forgetHandSet(i)
+        Log.write("resume: \(mons[i].label) back to automatic")
+        refresh()
+    }
+
+    private func forgetHandSet(_ i: Int) {
+        mons[i].lastSet = nil; mons[i].offset = nil; mons[i].offsetSun = nil; mons[i].manual = false
     }
 
     func setPause(_ on: Bool) {
@@ -348,7 +363,7 @@ import DaylitCore
                 ["match": m.name, "label": m.label, "control": m.control == .none ? "auto" : m.control.rawValue,
                  "day": 70, "blindDown": 40, "night": 20]
             }
-            let root: [String: Any] = ["manualHold": 5, "monitors": monitors]
+            let root: [String: Any] = ["monitors": monitors]
             if let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
                 try? data.write(to: p, options: .atomic)
             }
@@ -415,7 +430,6 @@ import DaylitCore
 
         let sun = daylightFraction(elevation: inp.elev)
         let here = idleSeconds() < Self.idleLimit
-        let hold = config.manualHold ?? 5
         func ownTarget(_ m: Mon) -> Int {
             let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
             return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
@@ -431,9 +445,13 @@ import DaylitCore
             let m = mons[i]
             let want = synced[m.uuid] ?? ownTarget(m)
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
-                              state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen),
-                              here: here, auto: auto, dragging: dragging.contains(m.id), hold: hold)
+                              state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun),
+                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun)
             mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen
+            if step.state.offset != m.offset, let o = step.state.offset {
+                Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
+            }
+            mons[i].offset = step.state.offset; mons[i].offsetSun = step.state.offsetSun
             if let v = step.remote { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
             if let v = step.write {
                 if step.remote == nil { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
@@ -446,7 +464,7 @@ import DaylitCore
             if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
-                    "target": want, "manual": manual, "daylight": (sun * 100).rounded() / 100,
+                    "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
                 if case .success = r {   // retried next tick if the post failed
@@ -464,9 +482,9 @@ import DaylitCore
     func saveHolds() {
         let before = holds, now = Date().timeIntervalSince1970
         for m in mons {
-            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget)
+            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, offset: m.offset, offsetSun: m.offsetSun)
             // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
-            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget }) != true {
+            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget && $0.offset == st.offset }) != true {
                 holds.record(key: m.uuid, state: st, now: now)
             }
         }

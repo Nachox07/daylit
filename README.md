@@ -96,8 +96,10 @@ a target per monitor from three levels you choose: *day*, *blind closed* and *ni
 2. The sun blends it with *night*: night below −3° elevation, full daytime from 12°.
 3. Room lights on around dusk keep it a little above *night*, so a lit room is not too dark.
 
-A level you set by hand stays until the target moves 5 points, so Daylit does not fight you. The
-sun's position is computed locally; the tests check it against NOAA reference values to within 0.05°.
+A level you set by hand keeps its distance from the target, so Daylit does not fight you: turn the
+screen 20 points down on a grey morning and it stays 20 below while the blind opens and the sun climbs.
+That distance fades out at sunset, so the next day starts clean; *Manual ✕* on the monitor's row goes
+back to automatic at once. The sun's position is computed locally; the tests check it against NOAA reference values to within 0.05°.
 
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.
