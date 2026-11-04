@@ -63,6 +63,10 @@ public struct SettingsEdit: Equatable {
     public var latitude: Double?, longitude: Double?
     public var monitors: [Monitor]
     public var haURL, autoSwitch, sun, cover, lights: String
+    /// Tuning values keyed "group.key"; a known key missing here is removed (back to its default).
+    public var tuning: [String: Double] = [:]
+    /// tuning.theme.room; nil or true removes the key (true is the default).
+    public var themeRoom: Bool? = nil
     public init(source: String, latitude: Double? = nil, longitude: Double? = nil, monitors: [Monitor] = [],
                 haURL: String = "", autoSwitch: String = "", sun: String = "", cover: String = "", lights: String = "") {
         self.source = source; self.latitude = latitude; self.longitude = longitude; self.monitors = monitors
@@ -120,6 +124,17 @@ public enum ConfigPatch {
         }
         root["monitors"] = list.isEmpty ? nil : list
 
+        var tune = root["tuning"] as? [String: Any] ?? [:]   // unknown keys in it are kept
+        for f in Tuning.allFields {
+            var group = tune[f.group] as? [String: Any] ?? [:]
+            if let v = e.tuning[f.id], v != f.defaultValue { group[f.key] = number(v) } else { group[f.key] = nil }
+            tune[f.group] = group.isEmpty ? nil : group
+        }
+        var theme = tune["theme"] as? [String: Any] ?? [:]
+        theme["room"] = e.themeRoom == false ? false : nil
+        tune["theme"] = theme.isEmpty ? nil : theme
+        root["tuning"] = tune.isEmpty ? nil : tune
+
         let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         let c = try JSONDecoder().decode(Config.self, from: out)
         if let err = c.validate() { throw ConfigEditError.invalid(err) }
@@ -130,5 +145,7 @@ public enum ConfigPatch {
     static func round2(_ v: Double) -> NSDecimalNumber {
         NSDecimalNumber(string: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), v == 0 ? 0 : v))
     }
+    /// A whole number as an integer, otherwise as typed (no binary-float tails like 1.5000000001).
+    static func number(_ v: Double) -> Any { v == v.rounded() && abs(v) < 1e9 ? Int(v) : NSDecimalNumber(string: String(v)) }
     static func clamp(_ v: Int) -> Int { min(100, max(0, v)) }
 }

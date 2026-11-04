@@ -45,6 +45,7 @@ import DaylitCore
             ("settings-displays", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
             ("settings-automatic", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
             ("settings-homeassistant", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
+            ("settings-appearance", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
             ("settings-app", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
         ]
     }
@@ -56,7 +57,8 @@ import DaylitCore
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
           "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
-                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ] }
+                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ],
+          "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """.utf8).write(to: u)
         return u
     }

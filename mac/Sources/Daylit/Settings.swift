@@ -53,16 +53,25 @@ struct Tile: View {
 }
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case displays, automatic, homeAssistant, app
+    case displays, automatic, homeAssistant, appearance, app
     var id: String { rawValue }
     var title: String {
-        switch self { case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"; case .app: "App" }
+        switch self {
+        case .displays: "Displays"; case .automatic: "Automatic"; case .homeAssistant: "Home Assistant"
+        case .appearance: "Appearance"; case .app: "App"
+        }
     }
     var color: Color {
-        switch self { case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue; case .app: .gray }
+        switch self {
+        case .displays: .blue; case .automatic: .orange; case .homeAssistant: HALogo.blue
+        case .appearance: .indigo; case .app: .gray
+        }
     }
     var icon: String {
-        switch self { case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"; case .app: "gearshape" }
+        switch self {
+        case .displays: "display"; case .automatic: "sun.max"; case .homeAssistant: "ha"
+        case .appearance: "circle.lefthalf.filled"; case .app: "gearshape"
+        }
     }
 }
 
@@ -135,6 +144,8 @@ struct SettingsView: View {
     @State private var sun = ""
     @State private var cover = ""
     @State private var lights = ""
+    @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
+    @State private var themeRoom = true
     @State private var opened: Data? = nil
     @State private var error: String? = nil
     @State private var note: String? = nil
@@ -142,7 +153,7 @@ struct SettingsView: View {
     @State private var locating = false
     let close: () -> Void
     var path: URL = Config.path              // snapshots pass a made-up file
-    var height: CGFloat = 540
+    var height: CGFloat = 600
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     nonisolated(unsafe) static var fixedNow: Date?
     static var now: Date { fixedNow ?? Date() }
@@ -171,6 +182,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 Text(current.title).font(.headline).frame(maxWidth: .infinity).frame(height: 28)
                 detail.formStyle(.grouped)
+                    .scrollIndicators(Self.fixedNow != nil ? .never : .automatic)   // snapshots: no overlay scrollbar that comes and goes
                 footer
             }
             .background(Color(nsColor: .windowBackgroundColor))
@@ -186,6 +198,7 @@ struct SettingsView: View {
         case .displays: displaysPane
         case .automatic: automaticPane
         case .homeAssistant: homeAssistantPane
+        case .appearance: appearancePane
         case .app: appPane
         }
     }
@@ -244,8 +257,8 @@ struct SettingsView: View {
                 Text(sourceHint).font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                TextField("Latitude", text: $lat, prompt: Text("36.72"))
-                TextField("Longitude", text: $lon, prompt: Text("-4.42"))
+                TextField("Latitude", text: $lat, prompt: Text("51.48"))
+                TextField("Longitude", text: $lon, prompt: Text("0.00"))
                 HStack {
                     Button(action: locate) { Label(locating ? "Locating…" : "Locate Me", systemImage: "location") }.disabled(locating)
                     Spacer()
@@ -257,6 +270,17 @@ struct SettingsView: View {
             } header: { Text("Location") } footer: {
                 Text("City level is enough; Daylit saves two decimals (about 1 km) and computes the sun on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if source != "off", let curve = sunCurve(["brightness.sunDay": ("Full day", Color.orange, false), "brightness.sunNight": ("Night", Color.indigo, true)], preview: true) {
+                Section { curve } header: { Text("When the screens brighten") } footer: {
+                    Text("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    DisclosureGroup("Exact values") {
+                        ForEach(Tuning.tuningFields.filter { $0.group == "brightness" }) { number($0) }
+                    }
+                } footer: { tuningFooter(Tuning.tuningFields.filter { $0.group == "brightness" }) }
             }
         }
     }
@@ -287,9 +311,6 @@ struct SettingsView: View {
     var appPane: some View {
         Form {
             Section {
-                Toggle(isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) })) {
-                    Row("Light or dark mode from daylight", "circle.lefthalf.filled")
-                }.disabled(source == "off")
                 if m.hasBattery {
                     Toggle(isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) })) {
                         Row("Pause on battery", "battery.50")
@@ -306,11 +327,102 @@ struct SettingsView: View {
                     Button("Open Config File") { m.openConfig() }
                 }
             } header: { Text("Advanced") } footer: {
-                Text(Config.displayPath + ". Everything in this window is saved there; other keys are kept.")
+                Text(Config.displayPath + ". Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
+
+    var appearancePane: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(get: { m.lookOn }, set: { m.setLook($0) })) {
+                    Row("Light or dark mode from daylight", "circle.lefthalf.filled")
+                }.disabled(source == "off")
+                if source == "homeAssistant" {
+                    Toggle(isOn: $themeRoom) { Row("Count the blind and the room lights", "lightbulb") }
+                }
+            } footer: {
+                Text(source == "off" ? "Needs the sun or Home Assistant (Automatic)." :
+                     "Switches as soon as you turn it on. macOS's own Auto appearance follows only sunset; this also knows your blind and lights.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let curve = sunCurve(["theme.lightSunAbove": ("Light", Color.orange, false), "theme.darkSunBelow": ("Dark", Color.indigo, true)]) {
+                Section { curve } header: { Text("Today's sun") } footer: {
+                    Text("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                DisclosureGroup("Exact values") {
+                    ForEach(Tuning.appearanceFields.filter { themeRoom && source == "homeAssistant" || $0.group != "theme" || ["lightSunAbove", "darkSunBelow"].contains($0.key) }) { number($0) }
+                }
+            } footer: {
+                tuningFooter(Tuning.appearanceFields)
+            }
+        }
+    }
+
+    func tuningFooter(_ fields: [TuningField]) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Empty fields use the default, shown in grey. Saved in config.json under \"tuning\".")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Reset to Defaults") {
+                for f in fields { tune[f.id] = "" }
+                if fields.contains(where: { $0.group == "theme" }) { themeRoom = true }
+            }
+            .controlSize(.small)
+            .disabled(fields.allSatisfy { (tune[$0.id] ?? "").isEmpty } && (themeRoom || !fields.contains { $0.group == "theme" }))
+        }
+    }
+
+    func number(_ f: TuningField) -> some View {
+        LabeledContent(f.label) {
+            HStack(spacing: 6) {
+                TextField(f.label, text: Binding(get: { tune[f.id] ?? "" }, set: { tune[f.id] = $0 }), prompt: Text(Self.fmt(f.defaultValue)))
+                    .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
+                Text(f.unit).foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
+            }
+        }
+    }
+
+    /// The value a tuning field has in the window: what is typed, or its default.
+    func value(_ id: String) -> Double {
+        Double((tune[id] ?? "").replacingOccurrences(of: ",", with: ".")) ?? Tuning.allFields.first { $0.id == id }?.defaultValue ?? 0
+    }
+
+    /// Today's sun with draggable lines for the given fields; nil without a location.
+    func sunCurve(_ lines: KeyValuePairs<String, (String, Color, Bool)>, preview: Bool = false) -> SunCurve? {
+        guard let l = coords else { return nil }
+        var tz = TimeZone.current
+        if Self.fixedNow != nil { tz = TimeZone(identifier: "UTC")! }   // snapshots: the same on every machine
+        let first = monitors.first
+        return SunCurve(latitude: l.0, longitude: l.1, now: Self.now, timeZone: tz,
+                        markers: lines.map { SunMarker(id: $0.key, title: $0.value.0, color: $0.value.1, value: value($0.key), below: $0.value.2) },
+                        set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) },
+                        level: preview ? first.map { d in { e in
+                            var t = m.config.tuned
+                            t.brightness = .init()
+                            t.brightness?.sunNight = value("brightness.sunNight"); t.brightness?.sunDay = value("brightness.sunDay")
+                            return target(day: d.day, blindDown: d.blindDown, night: d.night, elev: e, pos: 100, lights: false, tuning: t)
+                        } } : nil,
+                        levelTitle: first.map { "\($0.label) through the day, blind open" } ?? "")
+    }
+
+    /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.
+    static func keepOrder(_ id: String, _ v0: Double, _ value: (String) -> Double) -> Double {
+        let v = min(max(v0, -18), id == "brightness.sunNight" ? 30 : 60)   // the ranges tuning accepts
+        switch id {
+        case "brightness.sunDay": return max(v, value("brightness.sunNight") + 0.5)
+        case "brightness.sunNight": return min(v, value("brightness.sunDay") - 0.5)
+        case "theme.lightSunAbove": return max(v, value("theme.darkSunBelow"))
+        case "theme.darkSunBelow": return min(v, value("theme.lightSunAbove"))
+        default: return v
+        }
+    }
+
+    static func fmt(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
 
     func entity(_ title: String, _ icon: String, _ v: Binding<String>, _ example: String) -> some View {
         TextField(text: v, prompt: Text(example)) { Row(title, icon) }
@@ -342,7 +454,7 @@ struct SettingsView: View {
     func rightNow(_ d: MonitorDraft) -> Int? {
         guard let l = coords else { return nil }
         return target(day: d.day, blindDown: d.blindDown, night: d.night,
-                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false)
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned)
     }
 
     func caption(_ d: MonitorDraft) -> String {
@@ -359,6 +471,8 @@ struct SettingsView: View {
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
         haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""
+        tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
+        themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
             let cfg = c.monitors?.first { mon.name.localizedCaseInsensitiveContains($0.match) }
             let ha = cfg?.homeAssistant
@@ -372,13 +486,23 @@ struct SettingsView: View {
 
     func edit() -> SettingsEdit? {
         let blank = lat.trimmingCharacters(in: .whitespaces).isEmpty && lon.trimmingCharacters(in: .whitespaces).isEmpty
-        if !blank && coords == nil { error = "Latitude is −90 to 90 and longitude −180 to 180, like 36.72 and -4.42."; return nil }
+        if !blank && coords == nil { error = "Latitude is −90 to 90 and longitude −180 to 180, like 51.48 and 0.00."; return nil }
         if source == "sun" && coords == nil { error = "The sun needs a location: type it or use Locate Me."; return nil }
         if source == "homeAssistant" && haURL.trimmingCharacters(in: .whitespaces).isEmpty { error = "Home Assistant needs its URL."; return nil }
-        return SettingsEdit(source: source, latitude: coords?.0, longitude: coords?.1,
+        var values: [String: Double] = [:]
+        for f in Tuning.allFields {
+            let text = (tune[f.id] ?? "").trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+            if text.isEmpty { continue }
+            guard let v = Double(text) else { error = "\(f.label) \(f.unit): \"\(text)\" is not a number."; return nil }
+            values[f.id] = v
+        }
+        var e = SettingsEdit(source: source, latitude: coords?.0, longitude: coords?.1,
                             monitors: monitors.map { .init(name: $0.name, suggestedMatch: CLI.suggestMatch($0.name), label: $0.label,
                                                            day: Int($0.day.rounded()), blindDown: Int($0.blindDown.rounded()), night: Int($0.night.rounded())) },
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
+        e.tuning = values
+        e.themeRoom = themeRoom
+        return e
     }
 
     func save() {

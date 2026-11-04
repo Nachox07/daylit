@@ -51,6 +51,8 @@ public struct Config: Decodable {
     public var builtIn: Bool?           // macOS: show the built-in screen's slider while the lid is open (default true)
     public var homeAssistant: HAConfig?
     public var monitors: [MonitorConfig]?
+    public var tuning: Tuning?          // the numbers behind the rules (Tuning.swift); missing = the defaults
+    public var tuned: Tuning { tuning ?? Tuning() }
 
     public init(source: String? = nil, location: Location? = nil, manualHold: Int? = nil, pauseOnBattery: Bool? = nil,
                 ddcTool: String? = nil, homeAssistant: HAConfig? = nil, monitors: [MonitorConfig]? = nil) {
@@ -106,6 +108,7 @@ public struct Config: Decodable {
             return "config.json: location latitude/longitude out of range"
         }
         if let h = manualHold, !(0...100).contains(h) { return "config.json: manualHold must be 0–100" }
+        if let e = tuning?.validate() { return e }
         var ids: [(String, String?)] = []
         if let h = homeAssistant {
             ids += [("homeAssistant.autoSwitch", h.autoSwitch), ("homeAssistant.sun", h.sun),

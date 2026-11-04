@@ -95,7 +95,10 @@ import DaylitCore
             notes.append(DDC.missingNote)
         }
         var result: [String: Any] = ["ok": problems.isEmpty, "path": Config.displayPath, "exists": exists,
-                                     "source": "\(src)", "problems": problems, "notes": notes, "monitors": monitors]
+                                     "source": "\(src)", "problems": problems, "notes": notes, "monitors": monitors,
+                                     // the numbers in use, defaults included
+                                     "tuning": Dictionary(uniqueKeysWithValues: Tuning.allFields.map { f in
+                                         (f.id, cfg.tuned.setValues[f.id] ?? f.defaultValue) }).merging(["theme.room": cfg.tuned.room ? 1 : 0]) { a, _ in a }]
         if src == .homeAssistant, let ha = cfg.homeAssistant {
             let name = ha.tokenName ?? "daylit-home-assistant"
             let stored = HAClient.tokenStored(name)   // presence only, never read or printed

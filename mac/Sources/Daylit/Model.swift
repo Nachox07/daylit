@@ -5,7 +5,6 @@ import ServiceManagement
 import DaylitCore
 
 @MainActor final class Daylit: ObservableObject {
-    static let idleLimit: Double = 300
 
     @Published var mons: [Mon] = []
     @Published var builtIn: BuiltIn?     // lid open: manual slider only (config "builtIn": false hides it)
@@ -119,7 +118,7 @@ import DaylitCore
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
                 }
             }
-            else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970) {
+            else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970, maxAge: config.tuned.manualKeepHours * 3600) {
                 m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
             }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
@@ -159,7 +158,7 @@ import DaylitCore
             }
         }
         if paused || mons.isEmpty { return }   // nothing to do until power or a monitor comes back
-        let here = idleSeconds() < Self.idleLimit
+        let here = idleSeconds() < config.tuned.idleSeconds
         if here && !wasHere {
             // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
             Log.write("back: applying targets")
@@ -170,7 +169,7 @@ import DaylitCore
         if !here && wasHere && source != .off { Log.write("idle: paused") }
         wasHere = here
         guard source != .off else { return }
-        let interval: Double = Power.onBattery ? 120 : 30
+        let interval: Double = Power.onBattery ? config.tuned.batteryPollSeconds : config.tuned.pollSeconds
         if Date().timeIntervalSince(lastTick) >= interval { refresh() }
     }
 
@@ -322,7 +321,7 @@ import DaylitCore
     // flip back and forth. Only acts when the decision changes, so a manual switch stays until then.
     func updateLook(_ s: Inputs) {
         guard lookOn else { lookDark = nil; look = LookRule(); return }
-        let wantDark = look.wantDark(elev: s.elev, pos: s.pos, hasBlind: s.hasBlind, lightsOn: s.fromHA && s.lights, bri: s.bri, sat: s.sat)
+        let wantDark = look.wantDark(elev: s.elev, pos: s.pos, hasBlind: s.hasBlind, lightsOn: s.fromHA && s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned)
         if wantDark != lookDark {
             Log.write("theme: " + (wantDark ? "dark" : "light"))
             if wantDark != Appearance.isDark, let e = Appearance.setDark(wantDark) {
@@ -413,12 +412,12 @@ import DaylitCore
         if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; return }
         guard let inp = await inputs(), gen == generation else { return }
 
-        let sun = daylightFraction(elevation: inp.elev)
-        let here = idleSeconds() < Self.idleLimit
+        let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
+        let here = idleSeconds() < config.tuned.idleSeconds
         let hold = config.manualHold ?? 5
         func ownTarget(_ m: Mon) -> Int {
             let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
-            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights)
+            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights, tuning: config.tuned)
         }
         // Sync: the first group member that is reporting drives the group; the others keep their offsets.
         var synced: [String: Int] = [:]
@@ -511,10 +510,10 @@ import DaylitCore
                 lastHALevels = s.m.mapValues(fallbackLevels)
                 lastHAPos = ha.cover != nil ? s.pos : nil
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
-                let sun = Int((daylightFraction(elevation: s.elev) * 100).rounded())
+                let sun = Int((daylightFraction(elevation: s.elev, tuning: config.tuned) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
-                if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat) }
+                if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned) }
                 return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                               hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
             case .failure(let f):
@@ -527,7 +526,7 @@ import DaylitCore
                                                   now: Date().timeIntervalSince1970)
                 problem = show ? message : configProblem
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
-                if config.location != nil, Date().timeIntervalSince(haDownSince!) >= 60 {
+                if config.location != nil, Date().timeIntervalSince(haDownSince!) >= config.tuned.haFallbackSeconds {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
                     return fromSun(nil)   // the error line under it says Home Assistant is unreachable
                 }

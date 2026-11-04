@@ -40,7 +40,7 @@ static class Snapshots {
             }
             File.WriteAllText(tmp, SettingsJson);
             SettingsWindow.FixedNow = DateTimeOffset.FromUnixTimeSeconds(1_781_870_400);   // 2026-06-19 12:00 UTC
-            foreach (var pane in new[] { "displays", "automatic", "homeAssistant", "app" }) {
+            foreach (var pane in new[] { "displays", "automatic", "homeAssistant", "appearance", "app" }) {
                 var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp, pane);
                 Save(Frame(settings.Detach(), 860, Palette.Solid, 8), Path.Combine(dir, $"settings-{pane.ToLowerInvariant()}-{mode}.png"));
                 settings.Close();
@@ -57,7 +57,8 @@ static class Snapshots {
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
           "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
-                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ] }
+                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ],
+          "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """;
 
     static Mon Fake(string label, int level, bool hdr = false, bool manual = false) =>

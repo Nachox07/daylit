@@ -48,9 +48,10 @@ sealed class Config {
     public bool? PauseOnBattery { get; set; }   // default for the panel switch (true when missing)
     public HaConfig? HomeAssistant { get; set; }
     public MonitorConfig[]? Monitors { get; set; }
+    public Tuning? Tuning { get; set; }
+    [JsonIgnore] public Tuning Tuned => Tuning ?? new Tuning();
 
     public const double DefaultDay = 70, DefaultBlindDown = 40, DefaultNight = 20;
-    public const int IdleSeconds = 300;       // no input for this long = someone else is using the monitors
     public int Hold => ManualHold ?? 5;
     public string TokenName => string.IsNullOrWhiteSpace(HomeAssistant?.TokenName) ? "daylit-home-assistant" : HomeAssistant!.TokenName!;
     public bool HasHa => !string.IsNullOrWhiteSpace(HomeAssistant?.Url);
@@ -126,6 +127,7 @@ sealed class Config {
         if (c.Location is { } l && (l.Latitude is < -90 or > 90 || l.Longitude is < -180 or > 180))
             return "config.json: location latitude/longitude out of range";
         if (c.ManualHold is < 0 or > 100) return "config.json: manualHold must be 0–100";
+        if (c.Tuning?.Validate() is { } bad) return bad;
         if (c.Monitors != null)
             foreach (var m in c.Monitors)
                 if (m == null || string.IsNullOrWhiteSpace(m.Match)) return "config.json: every monitor needs a match";
@@ -167,7 +169,8 @@ sealed class Config {
 
 /// What the settings window owns. Everything else in config.json is kept as it is.
 sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, IReadOnlyList<SettingsEdit.Monitor> Monitors,
-                           string HaUrl = "", string AutoSwitch = "", string Sun = "", string Cover = "", string Lights = "") {
+                           string HaUrl = "", string AutoSwitch = "", string Sun = "", string Cover = "", string Lights = "",
+                           IReadOnlyDictionary<string, double>? Tuning = null, bool? ThemeRoom = null) {
     /// `Name` is the connected display's name; `SuggestedMatch` is used only when no entry matches it yet.
     public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night);
 }
@@ -230,6 +233,23 @@ static class ConfigPatch {
         }
         if (list.Count > 0) root["monitors"] = list;
 
+        // Tuning: a known key is written only where it differs from its default; unknown keys are kept.
+        var tune = root["tuning"] as JsonObject ?? new JsonObject();
+        root.Remove("tuning");
+        foreach (var f in TuningField.All) {
+            var group = tune[f.Group] as JsonObject ?? new JsonObject();
+            tune.Remove(f.Group);
+            if (e.Tuning != null && e.Tuning.TryGetValue(f.Id, out var v) && v != f.Default)
+                group[f.Key] = v == Math.Round(v) ? (JsonNode)(long)v : (JsonNode)(decimal)v;
+            else group.Remove(f.Key);
+            if (group.Count > 0) tune[f.Group] = group;
+        }
+        var theme = tune["theme"] as JsonObject ?? new JsonObject();
+        tune.Remove("theme");
+        if (e.ThemeRoom == false) theme["room"] = false; else theme.Remove("room");
+        if (theme.Count > 0) tune["theme"] = theme;
+        if (tune.Count > 0) root["tuning"] = tune;
+
         var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
         try {
@@ -242,4 +262,110 @@ static class ConfigPatch {
 
     /// Two decimals, written exactly as shown in the window.
     static decimal Round2(double v) { var d = Math.Round((decimal)v, 2, MidpointRounding.AwayFromZero); return d == 0 ? 0m : d; }
+}
+
+/// The numbers behind the rules, from config.json's optional "tuning" block. Every key is optional; a missing
+/// one keeps the value Daylit has always used. Same keys and defaults as the Mac (DaylitCore/Tuning.swift).
+sealed class Tuning {
+    public sealed class BrightnessPart { public double? SunNight { get; set; } public double? SunDay { get; set; }
+                                         public double? LightsBoost { get; set; } public double? LightsBoostSunBelow { get; set; } }
+    public sealed class ThemePart { public double? LightSunAbove { get; set; } public double? DarkSunBelow { get; set; }
+                                    public double? LightBlindAbove { get; set; } public double? DarkBlindBelow { get; set; }
+                                    public double? WhiteLightsAbove { get; set; } public double? WhiteLightsBelow { get; set; }
+                                    public double? WhiteSaturationMax { get; set; } public double? WarmSaturationMin { get; set; }
+                                    public bool? Room { get; set; } }
+    public sealed class TimingPart { public double? PollSeconds { get; set; } public double? BatteryPollSeconds { get; set; }
+                                     public double? IdleSeconds { get; set; } public double? HaFallbackSeconds { get; set; }
+                                     public double? ManualKeepHours { get; set; } }
+    public BrightnessPart? Brightness { get; set; }
+    public ThemePart? Theme { get; set; }
+    public TimingPart? Timing { get; set; }
+
+    public double SunNight => Brightness?.SunNight ?? -3;
+    public double SunDay => Brightness?.SunDay ?? 12;
+    public double LightsBoost => Brightness?.LightsBoost ?? 5;
+    public double LightsBoostSunBelow => Brightness?.LightsBoostSunBelow ?? 1.5;
+    public double LightSunAbove => Theme?.LightSunAbove ?? 4;
+    public double DarkSunBelow => Theme?.DarkSunBelow ?? 1;
+    public double LightBlindAbove => Theme?.LightBlindAbove ?? 55;
+    public double DarkBlindBelow => Theme?.DarkBlindBelow ?? 35;
+    public double WhiteLightsAbove => Theme?.WhiteLightsAbove ?? 78.4;
+    public double WhiteLightsBelow => Theme?.WhiteLightsBelow ?? 66.6;
+    public double WhiteSaturationMax => Theme?.WhiteSaturationMax ?? 35;
+    public double WarmSaturationMin => Theme?.WarmSaturationMin ?? 45;
+    public bool Room => Theme?.Room ?? true;
+    public double PollSeconds => Timing?.PollSeconds ?? 30;
+    public double BatteryPollSeconds => Timing?.BatteryPollSeconds ?? 120;
+    public double IdleSeconds => Timing?.IdleSeconds ?? 300;
+    public double HaFallbackSeconds => Timing?.HaFallbackSeconds ?? 60;
+    public double ManualKeepHours => Timing?.ManualKeepHours ?? 12;
+
+    /// Sun elevation → 0 (night) … 1 (full day).
+    public double Fraction(double elev) => Math.Clamp((elev - SunNight) / (SunDay - SunNight), 0, 1);
+
+    /// First impossible value, or null.
+    public string? Validate() {
+        static string F(double v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string? Range(double v, double lo, double hi, string key) => v >= lo && v <= hi ? null : $"config.json: tuning.{key} must be {F(lo)}–{F(hi)}";
+        string?[] checks = [
+            Range(SunNight, -18, 30, "brightness.sunNight"), Range(SunDay, -18, 60, "brightness.sunDay"),
+            SunDay > SunNight ? null : "config.json: tuning.brightness.sunDay must be above sunNight",
+            Range(LightsBoost, 0, 100, "brightness.lightsBoost"), Range(LightsBoostSunBelow, -18, 60, "brightness.lightsBoostSunBelow"),
+            Range(LightSunAbove, -18, 60, "theme.lightSunAbove"), Range(DarkSunBelow, -18, 60, "theme.darkSunBelow"),
+            LightSunAbove >= DarkSunBelow ? null : "config.json: tuning.theme.lightSunAbove must not be below darkSunBelow",
+            Range(LightBlindAbove, 0, 100, "theme.lightBlindAbove"), Range(DarkBlindBelow, 0, 100, "theme.darkBlindBelow"),
+            LightBlindAbove >= DarkBlindBelow ? null : "config.json: tuning.theme.lightBlindAbove must not be below darkBlindBelow",
+            Range(WhiteLightsAbove, 0, 100, "theme.whiteLightsAbove"), Range(WhiteLightsBelow, 0, 100, "theme.whiteLightsBelow"),
+            WhiteLightsAbove >= WhiteLightsBelow ? null : "config.json: tuning.theme.whiteLightsAbove must not be below whiteLightsBelow",
+            Range(WhiteSaturationMax, 0, 100, "theme.whiteSaturationMax"), Range(WarmSaturationMin, 0, 100, "theme.warmSaturationMin"),
+            WarmSaturationMin >= WhiteSaturationMax ? null : "config.json: tuning.theme.warmSaturationMin must not be below whiteSaturationMax",
+            Range(PollSeconds, 5, 3600, "timing.pollSeconds"), Range(BatteryPollSeconds, 5, 3600, "timing.batteryPollSeconds"),
+            Range(IdleSeconds, 30, 86400, "timing.idleSeconds"), Range(HaFallbackSeconds, 0, 3600, "timing.haFallbackSeconds"),
+            Range(ManualKeepHours, 0, 168, "timing.manualKeepHours"),
+        ];
+        return checks.FirstOrDefault(c => c != null);
+    }
+}
+
+/// One number the settings window shows: where it lives in "tuning", its label, unit and default (same list as the Mac).
+sealed record TuningField(string Group, string Key, string Label, string Unit, double Default) {
+    public string Id => Group + "." + Key;
+    public static readonly TuningField[] Appearance = [
+        new("theme", "lightSunAbove", "Light once the sun is above", "°", 4),
+        new("theme", "darkSunBelow", "Dark again below", "°", 1),
+        new("theme", "lightBlindAbove", "Light needs the blind open at least", "%", 55),
+        new("theme", "darkBlindBelow", "Dark at or below", "%", 35),
+        new("theme", "whiteLightsAbove", "White lights count as daylight from", "%", 78.4),
+        new("theme", "whiteLightsBelow", "…and stop counting below", "%", 66.6),
+        new("theme", "whiteSaturationMax", "White: colour saturation up to", "", 35),
+        new("theme", "warmSaturationMin", "Warm: colour saturation above", "", 45),
+    ];
+    public static readonly TuningField[] Tuning = [
+        new("brightness", "sunNight", "Night level at or below", "°", -3),
+        new("brightness", "sunDay", "Full day level from", "°", 12),
+        new("brightness", "lightsBoost", "Room lights at dusk add", "points", 5),
+        new("brightness", "lightsBoostSunBelow", "…while the sun is below", "°", 1.5),
+        new("timing", "pollSeconds", "Check every", "s", 30),
+        new("timing", "batteryPollSeconds", "Check on battery every", "s", 120),
+        new("timing", "idleSeconds", "Idle (another computer may be in use) after", "s", 300),
+        new("timing", "haFallbackSeconds", "Sun takes over when Home Assistant is down for", "s", 60),
+        new("timing", "manualKeepHours", "Keep hand-set levels after a restart for", "h", 12),
+    ];
+    public static IEnumerable<TuningField> All => Appearance.Concat(Tuning);
+
+    /// The values set in a config's tuning block, keyed "group.key".
+    public static Dictionary<string, double> SetValues(Tuning? t) {
+        var d = new Dictionary<string, double>();
+        void Add(string k, double? v) { if (v is double x) d[k] = x; }
+        Add("brightness.sunNight", t?.Brightness?.SunNight); Add("brightness.sunDay", t?.Brightness?.SunDay);
+        Add("brightness.lightsBoost", t?.Brightness?.LightsBoost); Add("brightness.lightsBoostSunBelow", t?.Brightness?.LightsBoostSunBelow);
+        Add("theme.lightSunAbove", t?.Theme?.LightSunAbove); Add("theme.darkSunBelow", t?.Theme?.DarkSunBelow);
+        Add("theme.lightBlindAbove", t?.Theme?.LightBlindAbove); Add("theme.darkBlindBelow", t?.Theme?.DarkBlindBelow);
+        Add("theme.whiteLightsAbove", t?.Theme?.WhiteLightsAbove); Add("theme.whiteLightsBelow", t?.Theme?.WhiteLightsBelow);
+        Add("theme.whiteSaturationMax", t?.Theme?.WhiteSaturationMax); Add("theme.warmSaturationMin", t?.Theme?.WarmSaturationMin);
+        Add("timing.pollSeconds", t?.Timing?.PollSeconds); Add("timing.batteryPollSeconds", t?.Timing?.BatteryPollSeconds);
+        Add("timing.idleSeconds", t?.Timing?.IdleSeconds); Add("timing.haFallbackSeconds", t?.Timing?.HaFallbackSeconds);
+        Add("timing.manualKeepHours", t?.Timing?.ManualKeepHours);
+        return d;
+    }
 }

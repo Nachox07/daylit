@@ -18,4 +18,6 @@ public func solarElevation(latitude: Double, longitude: Double, at date: Date = 
 }
 
 /// How much daylight counts, 0...1: 0 below -3° elevation, 1 from 12°.
-public func daylightFraction(elevation: Double) -> Double { min(max((elevation + 3) / 15, 0), 1) }
+public func daylightFraction(elevation: Double, tuning t: Tuning = Tuning()) -> Double {
+    min(max((elevation - t.sunNight) / (t.sunDay - t.sunNight), 0), 1)
+}
