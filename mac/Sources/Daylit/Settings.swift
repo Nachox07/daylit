@@ -182,6 +182,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 Text(current.title).font(.headline).frame(maxWidth: .infinity).frame(height: 28)
                 detail.formStyle(.grouped)
+                    .scrollIndicators(Self.fixedNow != nil ? .never : .automatic)   // snapshots: no overlay scrollbar that comes and goes
                 footer
             }
             .background(Color(nsColor: .windowBackgroundColor))
