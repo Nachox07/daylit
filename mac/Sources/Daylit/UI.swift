@@ -172,8 +172,17 @@ struct Panel: View {
                 Image(systemName: "display").foregroundStyle(.secondary).accessibilityHidden(true)
                 Text(mon.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 if mon.manual {
-                    Text("Manual").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule()).help("Set by hand: kept until the automatic level moves")
+                    Button { m.resume(i) } label: {
+                        HStack(spacing: 3) {
+                            Text("Manual")
+                            Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                        }
+                        .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Set by hand: follows the automatic level this far from it until the sun sets. Click to go back to automatic.")
+                    .accessibilityLabel("Manual, back to automatic")
                 }
                 Spacer()
                 if m.sync && m.mons.count > 2 { memberButton(i, linked: linked) }

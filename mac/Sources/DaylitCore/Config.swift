@@ -45,7 +45,6 @@ public struct Location: Decodable {
 public struct Config: Decodable {
     public var source: String?
     public var location: Location?
-    public var manualHold: Int?
     public var pauseOnBattery: Bool?    // default for the panel switch (true when missing)
     public var ddcTool: String?
     public var builtIn: Bool?           // macOS: show the built-in screen's slider while the lid is open (default true)
@@ -54,9 +53,9 @@ public struct Config: Decodable {
     public var tuning: Tuning?          // the numbers behind the rules (Tuning.swift); missing = the defaults
     public var tuned: Tuning { tuning ?? Tuning() }
 
-    public init(source: String? = nil, location: Location? = nil, manualHold: Int? = nil, pauseOnBattery: Bool? = nil,
+    public init(source: String? = nil, location: Location? = nil, pauseOnBattery: Bool? = nil,
                 ddcTool: String? = nil, homeAssistant: HAConfig? = nil, monitors: [MonitorConfig]? = nil) {
-        self.source = source; self.location = location; self.manualHold = manualHold; self.pauseOnBattery = pauseOnBattery
+        self.source = source; self.location = location; self.pauseOnBattery = pauseOnBattery
         self.ddcTool = ddcTool; self.homeAssistant = homeAssistant; self.monitors = monitors
     }
 
@@ -81,7 +80,7 @@ public struct Config: Decodable {
         do { c = try JSONDecoder().decode(Config.self, from: ConfigText.relaxed(d)) }
         catch { return (Config(), "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
-            var safe = Config(manualHold: c.manualHold, pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
+            var safe = Config(pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
             safe.builtIn = c.builtIn
             return (safe, err)
         }
@@ -107,7 +106,6 @@ public struct Config: Decodable {
         if let l = location, !(-90...90).contains(l.latitude) || !(-180...180).contains(l.longitude) {
             return "config.json: location latitude/longitude out of range"
         }
-        if let h = manualHold, !(0...100).contains(h) { return "config.json: manualHold must be 0–100" }
         if let e = tuning?.validate() { return e }
         var ids: [(String, String?)] = []
         if let h = homeAssistant {

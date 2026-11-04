@@ -28,7 +28,9 @@ static class Sun {
 }
 
 /// What automatic mode remembers per monitor between ticks.
-record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget);
+/// Offset: a hand-set level as its distance from the target; OffsetSun: the daylight fraction when it was set;
+/// OffsetAt: when (Unix seconds).
+record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offset = null, double? OffsetSun = null, double? OffsetAt = null);
 
 /// The outcome of one tick for one monitor.
 /// Current: the level after this tick; Write: what to send to the monitor; Remote: a "set" from HA that was applied.
@@ -46,12 +48,36 @@ static class Rules {
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
 
+    /// How much of a hand-set offset applies (0…1) for the sun now, or null once it is over.
+    /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
+    /// (OffsetExpired), so tomorrow starts clean. One set at night ends as the sun comes up. Either way
+    /// over 0.3 of the daylight fraction (about half an hour).
+    public static double? OffsetWeight(double sun, double setAt) {
+        const double edge = 0.3;
+        if (setAt > 0) return Math.Min(1, Math.Max(0, sun) / Math.Min(edge, setAt));
+        return sun >= edge ? null : 1 - sun / edge;
+    }
+
+    /// An offset from an earlier day, or from a night long over, no longer applies, even when no tick ran
+    /// in between (the PC slept). `dayOf` gives the local calendar day of a Unix time.
+    public static bool OffsetExpired(Hold s, double now, Func<double, int> dayOf) {
+        if (s.Offset == null || s.OffsetAt is not double at || now <= 0) return false;
+        if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at);
+        return now - at > 18 * 3600;   // longer than any night
+    }
+
+    /// The local calendar day of a Unix time.
+    public static int LocalDay(double t) => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).LocalDateTime).DayNumber;
+
     /// One automatic decision for one monitor (Windows rules).
-    /// - A change of the HA "set" helper applies once, even when this PC is idle, then is held like a
+    /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
     ///   hand-set level. The value seen on the first look is not a command.
-    /// - A level set by hand is kept until the target moves by `hold` points.
+    /// - A level set by hand keeps its distance from the target: set 52 when the target is 76 and the
+    ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
+    ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
     /// - An idle PC (someone may be using the other machine on these monitors) writes nothing automatic.
-    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, int hold) {
+    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun, bool touched = true,
+                              bool dragging = false, double now = 0, Func<double, int>? dayOf = null) {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
@@ -60,20 +86,30 @@ static class Rules {
                 int v = (int)Math.Round(Math.Clamp(r.Value, 0, 100), MidpointRounding.AwayFromZero);
                 if (c != v) write = v;
                 c = v; fromRemote = true; remoteValue = v;
-                s = s with { RemoteSeen = r.Changed, LastTarget = target, LastSet = v == target ? null : target };   // held as hand-set until the target moves
+                s = s with { RemoteSeen = r.Changed, LastTarget = target, LastSet = v, Offset = v == target ? null : v - target, OffsetSun = sun, OffsetAt = now };
             }
         }
-        int applied = c; bool manual = false;
-        if (auto) {
-            bool handSet = s.LastSet != null && c != s.LastSet;
-            if (fromRemote || (handSet && Math.Abs(target - (s.LastTarget ?? target)) < hold)) manual = true;
-            else if (here) {
-                if (c != target) write = target;
-                applied = target; c = target;
-                s = s with { LastSet = target, LastTarget = target };
+        int applied = c;
+        if (here && OffsetExpired(s, now, dayOf ?? LocalDay)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
+        if (auto && !fromRemote && here && !dragging) {
+            if (s.LastSet is int last && c != last) {
+                if (touched || Math.Abs(c - last) > 1)   // moved by hand since the last tick
+                    s = s with { Offset = c == target ? null : c - target, OffsetSun = sun, OffsetAt = now };
+                else c = last;   // a reading 1 off what Daylit wrote, with no hand on it: the monitor rounding
             }
+            int level = target;
+            if (s.Offset is int o) {
+                if (OffsetWeight(sun, s.OffsetSun ?? sun) is double w)
+                    level = Math.Clamp(target + (int)Math.Round(o * w, MidpointRounding.AwayFromZero), 0, 100);
+                else s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
+            }
+            if (c != level) write = level;
+            applied = level; c = level;
+            s = s with { LastSet = level, LastTarget = target };
         }
-        return new Step(s, c, write, remoteValue, applied, manual);
+        // The badge shows only while the offset changes something (a daytime one rests at night).
+        double weight = s.Offset == null ? 0 : OffsetWeight(sun, s.OffsetSun ?? sun) ?? 0;
+        return new Step(s, c, write, remoteValue, applied, s.Offset != null && (fromRemote || (auto && weight > 0)));
     }
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
@@ -184,6 +220,9 @@ sealed class SyncOffsets {
     /// Puts a monitor back at its current offset from the group (`levels` are the connected monitors').
     public void Join(string key, IReadOnlyList<(string Key, int Level)> levels) { Excluded.Remove(key); Adopt(levels); }
     public int Members(IEnumerable<string> keys) => keys.Count(IsMember);
+    /// A member moved on its own (its monitor's buttons, or Home Assistant): it keeps the new level as its
+    /// distance from the group, instead of being pulled back.
+    public void Move(string key, int level, int b) { if (Offsets.ContainsKey(key)) Offsets[key] = level - b; }
 
     /// Captures the current levels; the first monitor's level is the base (its offset is 0).
     public static SyncOffsets Capture(IEnumerable<(string Key, int Level)> levels) {
@@ -235,20 +274,20 @@ sealed class SyncOffsets {
 /// the automatic target. Saved per monitor (its stable key) with the time it was saved; an entry older
 /// than MaxAge is forgotten, since the target has moved on by then anyway.
 sealed class SavedHolds {
-    public sealed record Entry(int? LastSet, int? LastTarget, double Saved);
+    public sealed record Entry(int? LastSet, int? LastTarget, double Saved, int? Offset = null, double? OffsetSun = null, double? OffsetAt = null);
     public static readonly double MaxAge = 12 * 3600;
     public Dictionary<string, Entry> Entries { get; set; } = new();
 
     /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
-    public bool Record(string key, int? lastSet, int? lastTarget, double now) {
-        if (lastSet == null && lastTarget == null) return Entries.Remove(key);
-        if (Entries.TryGetValue(key, out var e) && e.LastSet == lastSet && e.LastTarget == lastTarget) return false;   // keep "last decided" time
-        Entries[key] = new Entry(lastSet, lastTarget, now);
+    public bool Record(string key, Hold h, double now) {
+        if (h.LastSet == null && h.LastTarget == null) return Entries.Remove(key);
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset) return false;   // keep "last decided" time
+        Entries[key] = new Entry(h.LastSet, h.LastTarget, now, h.Offset, h.OffsetSun, h.OffsetAt);
         return true;
     }
     /// The state to start a monitor with after a restart, or null when there is none or it is too old.
-    public (int? LastSet, int? LastTarget)? Restore(string key, double now, double? maxAge = null) =>
-        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= (maxAge ?? MaxAge) ? (e.LastSet, e.LastTarget) : null;
+    public Hold? Restore(string key, double now, double? maxAge = null) =>
+        Entries.TryGetValue(key, out var e) && now >= e.Saved && now - e.Saved <= (maxAge ?? MaxAge) ? new Hold(null, e.LastSet, e.LastTarget, e.Offset, e.OffsetSun, e.OffsetAt ?? (e.Offset != null ? e.Saved : null)) : null;   // saved before offsets had a time
 
     public string ToJson() => System.Text.Json.JsonSerializer.Serialize(Entries);
     public static SavedHolds FromJson(string? json) {

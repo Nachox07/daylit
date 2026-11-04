@@ -267,6 +267,8 @@ sealed class Flyout : Window {
             var icon = new TextBlock { Text = Palette.Monitor, FontFamily = Palette.Icons, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
             var name = new TextBlock { Text = m.Label, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             var note = Small(""); note.VerticalAlignment = VerticalAlignment.Center; note.Margin = new Thickness(8, 0, 8, 0); note.TextWrapping = TextWrapping.NoWrap;
+            // "manual ✕": a hand-set level follows the automatic one at its distance until sunset; a click goes back to automatic.
+            note.MouseLeftButtonUp += (_, e) => { if (m.Manual) { app.Resume(m); e.Handled = true; } };
             var pct = new TextBlock { Text = "–", VerticalAlignment = VerticalAlignment.Center, MinWidth = 40, TextAlignment = TextAlignment.Right };
             Typography.SetNumeralAlignment(pct, FontNumeralAlignment.Tabular);
             // With three or more monitors linked: leave or rejoin the group, one monitor at a time.
@@ -290,6 +292,8 @@ sealed class Flyout : Window {
             System.Windows.Automation.AutomationProperties.SetName(s, $"{m.Label} brightness");   // screen readers and agents
             s.ToolTipOpening += (_, _) => s.ToolTip = KeysHint;
             s.ToolTip = KeysHint;
+            s.GotMouseCapture += (_, _) => m.Dragging = true;
+            s.LostMouseCapture += (_, _) => m.Dragging = false;
             s.ValueChanged += (_, e) => {
                 if (syncing) return;
                 int v = (int)Math.Round(e.NewValue);
@@ -317,8 +321,10 @@ sealed class Flyout : Window {
             foreach (var (m, s, pct, note, card, _) in rowViews) {
                 s.IsEnabled = m.Usable;
                 card.Opacity = m.Usable ? 1 : 0.55;
+                note.Cursor = m.Manual ? WI.Cursors.Hand : null;
+                note.ToolTip = m.Manual ? "Set by hand: follows the automatic level this far from it until the sun sets. Click to go back to automatic." : null;
                 note.Text = m.Untried ? "level not reported" : m.Reads == ReadState.Silent ? "refused (DDC/CI off?)"
-                          : !m.On ? "no control: turn on HDR, or DDC/CI in its menu" : m.Manual ? "manual" : m.D.Hdr ? "HDR"
+                          : !m.On ? "no control: turn on HDR, or DDC/CI in its menu" : m.Manual ? "manual ✕" : m.D.Hdr ? "HDR"
                           : m.Reads == ReadState.WriteOnly ? "no readback" : "";
                 if (m.Cur is int c) {
                     bool held = s.IsMouseCaptureWithin || (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;

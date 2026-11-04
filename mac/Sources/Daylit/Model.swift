@@ -55,7 +55,9 @@ import DaylitCore
         // A cheap check every 5 s; the real work runs every 30 s (120 s on battery) or on an event.
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in Task { @MainActor in self.check() } }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in log("wake"); try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
+            Task { @MainActor in
+                log("wake"); for i in self.mons.indices { self.mons[i].lastSet = nil }   // as after idle
+                try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in self.screensChanged() }
@@ -112,14 +114,17 @@ import DaylitCore
             }
             if let o = old[s.uuid] {
                 m.level = o.level; m.remoteSeen = o.remoteSeen
-                if o.control == control { m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.published = o.published; m.readState = o.readState }
+                if o.control == control {
+                    m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.offset = o.offset; m.offsetSun = o.offsetSun; m.offsetAt = o.offsetAt
+                    m.published = o.published; m.readState = o.readState
+                }
                 else {
                     // Another control reads on its own scale: the new reading is not a level set by hand.
                     Log.write("control: \(m.label) now uses \(control.rawValue) (was \(o.control.rawValue))")
                 }
             }
             else if let h = holds.restore(key: s.uuid, now: Date().timeIntervalSince1970, maxAge: config.tuned.manualKeepHours * 3600) {
-                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget
+                m.lastSet = h.lastSet; m.lastTarget = h.lastTarget; m.offset = h.offset; m.offsetSun = h.offsetSun; m.offsetAt = h.offsetAt
             }
             if control == .native, let v = Native.get(s.id) { m.level = Double(v) }
             if old[s.uuid] == nil { Log.write("display: \(m.label) (\(s.name)) via \(control.rawValue)" + (m.noControl != nil ? ", no brightness control right now" : "")) }
@@ -162,7 +167,8 @@ import DaylitCore
         if here && !wasHere {
             // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
             Log.write("back: applying targets")
-            for i in mons.indices { mons[i].published = nil }
+            // Another machine may have changed the monitors meanwhile: that reading is not a hand-set level.
+            for i in mons.indices { mons[i].published = nil; mons[i].lastSet = nil }
             wasHere = here
             refresh(); return
         }
@@ -233,7 +239,7 @@ import DaylitCore
 
     func setLevel(_ i: Int, _ v: Double) {
         guard mons.indices.contains(i) else { return }
-        mons[i].level = v
+        mons[i].level = v; mons[i].touched = true
         let m = mons[i]
         if m.control == .native { Native.set(m.id, Int(v)); return }
         guard m.control == .ddc else { return }
@@ -292,8 +298,20 @@ import DaylitCore
         } else {
             UserDefaults.standard.set(on, forKey: "auto")
         }
-        if on { for i in mons.indices { mons[i].lastSet = nil; mons[i].manual = false } }
+        if on { for i in mons.indices { forgetHandSet(i) } }
         refresh()
+    }
+
+    /// Back to the automatic level now (the Manual badge in the panel).
+    func resume(_ i: Int) {
+        guard mons.indices.contains(i) else { return }
+        forgetHandSet(i)
+        Log.write("resume: \(mons[i].label) back to automatic")
+        refresh()
+    }
+
+    private func forgetHandSet(_ i: Int) {
+        mons[i].lastSet = nil; mons[i].offset = nil; mons[i].offsetSun = nil; mons[i].offsetAt = nil; mons[i].manual = false
     }
 
     func setPause(_ on: Bool) {
@@ -347,7 +365,7 @@ import DaylitCore
                 ["match": m.name, "label": m.label, "control": m.control == .none ? "auto" : m.control.rawValue,
                  "day": 70, "blindDown": 40, "night": 20]
             }
-            let root: [String: Any] = ["manualHold": 5, "monitors": monitors]
+            let root: [String: Any] = ["monitors": monitors]
             if let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
                 try? data.write(to: p, options: .atomic)
             }
@@ -414,25 +432,42 @@ import DaylitCore
 
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
-        let hold = config.manualHold ?? 5
         func ownTarget(_ m: Mon) -> Int {
             let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
             return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights, tuning: config.tuned)
         }
-        // Sync: the first group member that is reporting drives the group; the others keep their offsets.
-        var synced: [String: Int] = [:]
+        // Sync: the first group member that is reporting leads, with its own target and hand-set offset;
+        // the others follow the level it lands on, each at its link offset (a hand-set level of theirs is
+        // part of that offset, so they keep none of their own).
         if sync, mons.count > 1 { adoptSync() }
-        if sync, mons.count > 1, let li = mons.indices.first(where: { cur[$0] != nil && syncOffsets.isMember(mons[$0].uuid) }) {
-            synced = syncOffsets.targets(leader: mons[li].uuid, leaderTarget: ownTarget(mons[li]), keys: mons.map(\.uuid))
-        }
-        for i in mons.indices {
+        let leader = sync && mons.count > 1 ? mons.indices.first(where: { cur[$0] != nil && syncOffsets.isMember(mons[$0].uuid) }) : nil
+        var base: Int? = nil
+        let now = Date().timeIntervalSince1970
+        for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
-            let want = synced[m.uuid] ?? ownTarget(m)
-            let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
-                              state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen),
-                              here: here, auto: auto, dragging: dragging.contains(m.id), hold: hold)
+            var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
+            var want = ownTarget(m)
+            let follower = base != nil && syncOffsets.isMember(m.uuid)
+            if let b = base, follower {
+                // Moved on its own (its buttons) since the last tick: that is its new place in the group.
+                if here && auto, let last = m.lastSet, c0 != last, m.touched || abs(c0 - last) > 1, c0 != syncOffsets.level(key: m.uuid, base: b) {
+                    syncOffsets.move(m.uuid, level: c0, base: b); saveSync()
+                    Log.write("sync: \(m.label) moved by hand, now \(c0 - b >= 0 ? "+" : "")\(c0 - b) from the group")
+                }
+                want = syncOffsets.level(key: m.uuid, base: b) ?? want
+                state.lastSet = nil; state.offset = nil; state.offsetSun = nil; state.offsetAt = nil
+            }
+            let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
+                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
+            if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
+            if i == leader { base = syncOffsets.base(key: m.uuid, level: step.applied) }
+            if !dragging.contains(m.id) { mons[i].touched = false }
             mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen
+            if step.state.offset != m.offset, let o = step.state.offset {
+                Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
+            }
+            mons[i].offset = step.state.offset; mons[i].offsetSun = step.state.offsetSun; mons[i].offsetAt = step.state.offsetAt
             if let v = step.remote { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
             if let v = step.write {
                 if step.remote == nil { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
@@ -442,14 +477,14 @@ import DaylitCore
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = step.applied, manual = step.manual
             mons[i].manual = manual
-            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied {
+            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
-                    "target": want, "manual": manual, "daylight": (sun * 100).rounded() / 100,
+                    "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
                 if case .success = r {   // retried next tick if the post failed
-                    mons[i].published = applied
+                    mons[i].published = applied; mons[i].publishedManual = manual
                     Log.write("publish: \(sensor) = \(applied)" + (manual ? " (manual)" : ""))
                 }
             }
@@ -463,9 +498,9 @@ import DaylitCore
     func saveHolds() {
         let before = holds, now = Date().timeIntervalSince1970
         for m in mons {
-            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget)
+            let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
             // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
-            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget }) != true {
+            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget && $0.offset == st.offset }) != true {
                 holds.record(key: m.uuid, state: st, now: now)
             }
         }

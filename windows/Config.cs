@@ -44,7 +44,6 @@ sealed class MonitorConfig {
 sealed class Config {
     public string? Source { get; set; }
     public Location? Location { get; set; }
-    public int? ManualHold { get; set; }
     public bool? PauseOnBattery { get; set; }   // default for the panel switch (true when missing)
     public HaConfig? HomeAssistant { get; set; }
     public MonitorConfig[]? Monitors { get; set; }
@@ -52,7 +51,6 @@ sealed class Config {
     [JsonIgnore] public Tuning Tuned => Tuning ?? new Tuning();
 
     public const double DefaultDay = 70, DefaultBlindDown = 40, DefaultNight = 20;
-    public int Hold => ManualHold ?? 5;
     public string TokenName => string.IsNullOrWhiteSpace(HomeAssistant?.TokenName) ? "daylit-home-assistant" : HomeAssistant!.TokenName!;
     public bool HasHa => !string.IsNullOrWhiteSpace(HomeAssistant?.Url);
 
@@ -79,8 +77,8 @@ sealed class Config {
             return (Resolve(new Config(), out _), "config.json is not valid: " + Short(e.Message));
         }
         err = Validate(c);
-        if (err != null) {   // keep what is safe: monitors and hold; drop the source settings
-            var safe = new Config { ManualHold = c.ManualHold, PauseOnBattery = c.PauseOnBattery, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
+        if (err != null) {   // keep what is safe: monitors and local settings; drop the source settings
+            var safe = new Config { PauseOnBattery = c.PauseOnBattery, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
             return (Resolve(safe, out _), err);
         }
         return (Resolve(c, out err), err);
@@ -126,7 +124,6 @@ sealed class Config {
             if (id != null && !IsEntityId(id)) return $"config.json: {key} is not an entity id like light.office";
         if (c.Location is { } l && (l.Latitude is < -90 or > 90 || l.Longitude is < -180 or > 180))
             return "config.json: location latitude/longitude out of range";
-        if (c.ManualHold is < 0 or > 100) return "config.json: manualHold must be 0–100";
         if (c.Tuning?.Validate() is { } bad) return bad;
         if (c.Monitors != null)
             foreach (var m in c.Monitors)
@@ -161,7 +158,6 @@ sealed class Config {
     public const string Starter = """
         {
           "source": "off",
-          "manualHold": 5,
           "monitors": []
         }
         """;

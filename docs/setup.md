@@ -29,7 +29,6 @@ in the same menu.
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights`, each optional. |
-| `manualHold` | A level you set by hand stays until the automatic target moves this many points (default 5). |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
@@ -74,7 +73,7 @@ into another computer right now) and which config entry matched which monitor.
 ```
 
 - The three levels can then be tuned from any Home Assistant dashboard.
-- `sensor` is published by Daylit with what it applied (`target`, `manual`, `daylight`, `blind`,
+- `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`, `blind`,
   `lights`, `source` attributes), so you can graph it.
 - `set` is optional: changing that helper sets the monitor right away, even when the computer is
   idle (dim it from your phone). It then counts as a level set by hand.

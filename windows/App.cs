@@ -205,7 +205,16 @@ sealed class Controller {
     });
     async Task Later(int ms, string why) { await Task.Delay(ms); await Tick(why); }
 
+    // After wake or idle the monitor may have been changed elsewhere: its reading is not a hand-set level.
+    // A distance set by hand here is kept.
     void ForgetHandSet() { foreach (var m in Mons) m.LastSet = null; }
+
+    /// Back to the automatic level now (the "manual" note in the panel).
+    public void Resume(Mon m) {
+        m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; m.Manual = false;
+        Log.Write($"resume: {m.Label} back to automatic");
+        _ = Tick("resume");
+    }
 
     // MARK: panel, keys, sliders
 
@@ -245,13 +254,13 @@ sealed class Controller {
     }
 
     public void UserSet(Mon m, int v) {
-        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v);
+        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.Touched = true; m.WriteSoon(v);
         if (!Settings.SyncMonitors || Mons.Count < 2) return;
         // Sync: the other monitors follow with the offsets captured when sync was switched on.
         AdoptSync();
         var follow = syncOffsets.Follow(m.Key, v, Mons.Select(x => x.Key));
         foreach (var o in Mons)
-            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.WriteSoon(lv); }
+            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.Touched = true; o.WriteSoon(lv); }
         panel.Sync();
     }
 
@@ -299,7 +308,7 @@ sealed class Controller {
             AutoOn = on;
             if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);
             else Settings.Auto = on;
-            if (on) ForgetHandSet();
+            if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; }
             await Tick("automatic " + (on ? "on" : "off"));
         } catch (Exception e) { Log.Write("set auto: " + e); }
     }
@@ -339,12 +348,13 @@ sealed class Controller {
             var m = Mons.FirstOrDefault(x => x.Key == d.Key);
             if (m == null) {
                 var fresh = new Mon(d, Mon.Match(d, Cfg.Monitors));
-                if (holds.Restore(d.Key, Now, Cfg.Tuned.ManualKeepHours * 3600) is var (ls, lt)) { fresh.LastSet = ls; fresh.LastTarget = lt; }
+                if (holds.Restore(d.Key, Now, Cfg.Tuned.ManualKeepHours * 3600) is Hold h) { fresh.LastSet = h.LastSet; fresh.LastTarget = h.LastTarget; fresh.Offset = h.Offset; fresh.OffsetSun = h.OffsetSun; fresh.OffsetAt = h.OffsetAt; }
                 return fresh;
             }
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
                 Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
+                m.Offset = null; m.OffsetSun = null; m.OffsetAt = null;   // and an offset on the old scale means nothing on the new one
             }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;
@@ -426,31 +436,49 @@ sealed class Controller {
         wasHere = here;
         if (here) UpdateLook(s, haDown || Source == Source.Sun);   // an idle PC leaves the theme alone too
 
-        // Sync: the first group member that is reporting drives the group; the others keep their offsets.
-        var synced = new Dictionary<string, int>();
+        // Sync: the first group member that is reporting leads, with its own target and hand-set offset;
+        // the others follow the level it lands on, each at its link offset (a hand-set level of theirs is
+        // part of that offset, so they keep none of their own).
         if (Settings.SyncMonitors && mons.Length > 1) AdoptSync();
-        if (Settings.SyncMonitors && mons.Length > 1 && Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) is int li && li >= 0) {
-            synced = syncOffsets.Targets(mons[li].Key, Rules.Target(s.Levels[li], s.Pos, s.Lights, sun, Cfg.Tuned, boost), mons.Select(x => x.Key));
-        }
+        int li = Settings.SyncMonitors && mons.Length > 1 ? Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) : -1;
+        int? groupBase = null;
         bool holdsChanged = false;
-        for (int i = 0; i < mons.Length; i++) {
+        var order = li >= 0 ? new[] { li }.Concat(Enumerable.Range(0, mons.Length).Where(j => j != li)) : Enumerable.Range(0, mons.Length);
+        foreach (int i in order) {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget), AutoOn, here, Cfg.Hold);
-            (m.RemoteSeen, m.LastSet, m.LastTarget) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget);
-            if (holds.Record(m.Key, m.LastSet, m.LastTarget, Now)) holdsChanged = true;
+            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
+            var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt);
+            bool follower = groupBase != null && syncOffsets.IsMember(m.Key);
+            if (groupBase is int b && follower) {
+                // Moved on its own (its buttons) since the last tick: that is its new place in the group.
+                if (here && AutoOn && m.LastSet is int last && c != last && (m.Touched || Math.Abs(c - last) > 1) && c != syncOffsets.Level(m.Key, b)) {
+                    syncOffsets.Move(m.Key, c, b); Settings.SyncOffsets = syncOffsets;
+                    Log.Write($"sync: {m.Label} moved by hand, now {(c - b >= 0 ? "+" : "")}{c - b} from the group");
+                }
+                target = syncOffsets.Level(m.Key, b) ?? target;
+                hold = hold with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
+            }
+            bool dragging = m.Dragging;   // the slider is in the user's hand
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, Now);
+            if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
+            if (i == li) groupBase = syncOffsets.Base(m.Key, step.Applied);
+            if (!dragging) m.Touched = false;
+            if (step.State.Offset != m.Offset && step.State.Offset is int o)
+                Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
+            (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget, step.State.Offset, step.State.OffsetSun, step.State.OffsetAt);
+            if (holds.Record(m.Key, step.State, Now)) holdsChanged = true;
             bool remote = step.Remote != null;
             if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
             else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");
             if (step.Write is int v) await Task.Run(() => m.Write(v));
             m.Cur = step.Current; m.Manual = step.Manual;
             int applied = step.Applied;
-            if ((here || remote) && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
+            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
-                    m.Published = applied;
+                    m.Published = applied; m.PublishedManual = m.Manual;
                     Log.Write($"publish: {m.Spec!.HomeAssistant!.Sensor} = {applied}" + (m.Manual ? " (manual)" : ""));
                 }
             }

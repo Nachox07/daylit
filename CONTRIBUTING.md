@@ -146,8 +146,8 @@ mac/build.sh /tmp/demo-build
 for m in light dark; do
   DAYLIT_DEMO=1 DAYLIT_APPEARANCE=$m DAYLIT_DEMO_SCREEN="part of a 2x screen's name" \
     /tmp/demo-build/Daylit.app/Contents/MacOS/Daylit > /tmp/demo.txt &
-  sleep 1; R=$(grep -o -- '-R[0-9,-]*' /tmp/demo.txt)    # it prints the area to capture
-  screencapture -x -v -V 14 $R /tmp/demo-$m.mov
+  sleep 2; R=$(grep -o -- '-R[0-9,-]*' /tmp/demo.txt)    # it prints the area to capture
+  rm -f /tmp/demo-$m.mov; screencapture -x -v -V 14 $R /tmp/demo-$m.mov   # an existing file can make it hang
   pkill -f demo-build/Daylit.app
   ffmpeg -i /tmp/demo-$m.mov -vf "crop=800:520:320:145,fps=12,palettegen=max_colors=128:stats_mode=diff" /tmp/pal.png
   ffmpeg -i /tmp/demo-$m.mov -i /tmp/pal.png \
