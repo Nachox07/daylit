@@ -83,7 +83,7 @@ public func offsetWeight(sun: Double, setAt: Double) -> Double? {
 ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
 ///   fades at dusk and ends at night (see offsetWeight); a new hand-set level replaces it.
 public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: HoldState,
-                   here: Bool, auto: Bool, dragging: Bool, sun: Double) -> Step {
+                   here: Bool, auto: Bool, dragging: Bool, sun: Double, touched: Bool = true) -> Step {
     var s = s0, c = c0, step = Step(state: s0, applied: c0)
     var fromRemote = false
     if let r = remote {
@@ -102,8 +102,12 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
 
     var applied = c
     if auto && !fromRemote && !dragging {
-        if let last = s.lastSet, c != last {   // moved by hand since the last tick
-            s.offset = c == want ? nil : c - want; s.offsetSun = sun
+        if let last = s.lastSet, c != last {
+            if touched || abs(c - last) > 1 {   // moved by hand since the last tick
+                s.offset = c == want ? nil : c - want; s.offsetSun = sun
+            } else {
+                c = last   // a reading 1 off what Daylit wrote, with no hand on it: the monitor rounding
+            }
         }
         var level = want
         if let o = s.offset {

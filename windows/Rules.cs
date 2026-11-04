@@ -63,7 +63,7 @@ static class Rules {
     ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
     ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
     /// - An idle PC (someone may be using the other machine on these monitors) writes nothing automatic.
-    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun) {
+    public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun, bool touched = true) {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
@@ -77,8 +77,11 @@ static class Rules {
         }
         int applied = c;
         if (auto && !fromRemote && here) {
-            if (s.LastSet is int last && c != last)   // moved by hand since the last tick
-                s = s with { Offset = c == target ? null : c - target, OffsetSun = sun };
+            if (s.LastSet is int last && c != last) {
+                if (touched || Math.Abs(c - last) > 1)   // moved by hand since the last tick
+                    s = s with { Offset = c == target ? null : c - target, OffsetSun = sun };
+                else c = last;   // a reading 1 off what Daylit wrote, with no hand on it: the monitor rounding
+            }
             int level = target;
             if (s.Offset is int o) {
                 if (OffsetWeight(sun, s.OffsetSun ?? sun) is double w)

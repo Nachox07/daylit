@@ -124,6 +124,8 @@ struct Mon: Identifiable {
     var manual = false
     var lastSet: Int? = nil, lastTarget: Int? = nil, published: Int? = nil
     var offset: Int? = nil, offsetSun: Double? = nil   // a hand-set level as a distance from the target (DaylitCore.decide)
+    var publishedManual = false   // the manual flag last sent to Home Assistant
+    var touched = false   // moved with the slider or keys since the last tick
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
 }

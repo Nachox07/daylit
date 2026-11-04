@@ -254,13 +254,13 @@ sealed class Controller {
     }
 
     public void UserSet(Mon m, int v) {
-        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.WriteSoon(v);
+        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.Touched = true; m.WriteSoon(v);
         if (!Settings.SyncMonitors || Mons.Count < 2) return;
         // Sync: the other monitors follow with the offsets captured when sync was switched on.
         AdoptSync();
         var follow = syncOffsets.Follow(m.Key, v, Mons.Select(x => x.Key));
         foreach (var o in Mons)
-            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.WriteSoon(lv); }
+            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.Touched = true; o.WriteSoon(lv); }
         panel.Sync();
     }
 
@@ -354,6 +354,7 @@ sealed class Controller {
             if (m.D.Hdr != d.Hdr) {   // HDR toggled: brightness now goes through the other control, on a different scale
                 Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
+                m.Offset = null; m.OffsetSun = null;   // and an offset on the old scale means nothing on the new one
             }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;
@@ -447,7 +448,8 @@ sealed class Controller {
             m.Manual = false;
             if (m.Cur is not int c) continue;
             int target = synced.TryGetValue(m.Key, out var st) ? st : Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost);
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun), AutoOn, here, sun);
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun), AutoOn, here, sun, m.Touched);
+            m.Touched = false;
             if (step.State.Offset != m.Offset && step.State.Offset is int o)
                 Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
             (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget, step.State.Offset, step.State.OffsetSun);
@@ -458,10 +460,10 @@ sealed class Controller {
             if (step.Write is int v) await Task.Run(() => m.Write(v));
             m.Cur = step.Current; m.Manual = step.Manual;
             int applied = step.Applied;
-            if ((here || remote) && !haDown && Source == Source.HomeAssistant && m.Published != applied &&
+            if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
-                    m.Published = applied;
+                    m.Published = applied; m.PublishedManual = m.Manual;
                     Log.Write($"publish: {m.Spec!.HomeAssistant!.Sensor} = {applied}" + (m.Manual ? " (manual)" : ""));
                 }
             }

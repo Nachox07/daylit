@@ -55,7 +55,9 @@ import DaylitCore
         // A cheap check every 5 s; the real work runs every 30 s (120 s on battery) or on an event.
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in Task { @MainActor in self.check() } }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in log("wake"); try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
+            Task { @MainActor in
+                log("wake"); for i in self.mons.indices { self.mons[i].lastSet = nil }   // as after idle
+                try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in self.screensChanged() }
@@ -165,7 +167,8 @@ import DaylitCore
         if here && !wasHere {
             // Back at this Mac: publish again even if nothing changed, in case another machine wrote meanwhile.
             Log.write("back: applying targets")
-            for i in mons.indices { mons[i].published = nil }
+            // Another machine may have changed the monitors meanwhile: that reading is not a hand-set level.
+            for i in mons.indices { mons[i].published = nil; mons[i].lastSet = nil }
             wasHere = here
             refresh(); return
         }
@@ -236,7 +239,7 @@ import DaylitCore
 
     func setLevel(_ i: Int, _ v: Double) {
         guard mons.indices.contains(i) else { return }
-        mons[i].level = v
+        mons[i].level = v; mons[i].touched = true
         let m = mons[i]
         if m.control == .native { Native.set(m.id, Int(v)); return }
         guard m.control == .ddc else { return }
@@ -445,7 +448,8 @@ import DaylitCore
             let want = synced[m.uuid] ?? ownTarget(m)
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]),
                               state: HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun),
-                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun)
+                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched)
+            mons[i].touched = false
             mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen
             if step.state.offset != m.offset, let o = step.state.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
@@ -460,14 +464,14 @@ import DaylitCore
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = step.applied, manual = step.manual
             mons[i].manual = manual
-            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied {
+            if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
                     "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
                 if case .success = r {   // retried next tick if the post failed
-                    mons[i].published = applied
+                    mons[i].published = applied; mons[i].publishedManual = manual
                     Log.write("publish: \(sensor) = \(applied)" + (manual ? " (manual)" : ""))
                 }
             }

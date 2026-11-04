@@ -81,8 +81,16 @@ final class TargetTests: XCTestCase {
 
 final class DecideTests: XCTestCase {
     func step(_ c: Int, want: Int, remote: RemoteSet? = nil, state: HoldState = HoldState(),
-              here: Bool = true, auto: Bool = true, dragging: Bool = false, sun: Double = 1) -> Step {
-        decide(current: c, want: want, remote: remote, state: state, here: here, auto: auto, dragging: dragging, sun: sun)
+              here: Bool = true, auto: Bool = true, dragging: Bool = false, sun: Double = 1, touched: Bool = true) -> Step {
+        decide(current: c, want: want, remote: remote, state: state, here: here, auto: auto, dragging: dragging, sun: sun, touched: touched)
+    }
+
+    func testAMonitorReadingOneOffIsNotAHandSetLevel() {
+        let st = HoldState(lastSet: 45, lastTarget: 45)
+        let s = step(46, want: 45, state: st, touched: false)   // Daylit wrote 45, the monitor reports 46
+        XCTAssertNil(s.write); XCTAssertNil(s.state.offset); XCTAssertFalse(s.manual)
+        XCTAssertEqual(step(46, want: 45, state: st, touched: true).state.offset, 1)   // one step with the keys counts
+        XCTAssertEqual(step(47, want: 45, state: st, touched: false).state.offset, 2)  // the monitor's own buttons count
     }
 
     func testAppliesTargetAndRemembersIt() {

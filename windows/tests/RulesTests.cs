@@ -44,8 +44,17 @@ public class TargetTests {
 }
 
 public class DecideTests {
-    static Step D(int c, int target, (double, double)? remote = null, Hold s = default, bool auto = true, bool here = true, double sun = 1) =>
-        Rules.Decide(c, target, remote, s, auto, here, sun);
+    static Step D(int c, int target, (double, double)? remote = null, Hold s = default, bool auto = true, bool here = true, double sun = 1, bool touched = true) =>
+        Rules.Decide(c, target, remote, s, auto, here, sun, touched);
+
+    [Fact]
+    public void AMonitorReadingOneOffIsNotAHandSetLevel() {
+        var st = new Hold(null, 45, 45);
+        var s = D(46, 45, s: st, touched: false);   // Daylit wrote 45, the monitor reports 46
+        Assert.Null(s.Write); Assert.Null(s.State.Offset); Assert.False(s.Manual);
+        Assert.Equal(1, D(46, 45, s: st, touched: true).State.Offset);    // one step with the keys counts
+        Assert.Equal(2, D(47, 45, s: st, touched: false).State.Offset);   // the monitor's own buttons count
+    }
 
     [Fact]
     public void AppliesTargetAndRemembersIt() {
