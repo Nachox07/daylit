@@ -238,6 +238,12 @@ public class ConfigTests {
         Assert.NotNull(c.Location);
     }
 
+    [Fact]
+    public void AnOldConfigWithManualHoldStillLoads() {
+        var (c, err) = Config.Load(Write("""{ "source": "sun", "manualHold": 5, "location": { "latitude": 51.48, "longitude": 0.0 } }"""));
+        Assert.Null(err);
+        Assert.Equal("Sun", c.Effective.ToString());
+    }
     [Theory]
     [InlineData("{}", "Off")]
     [InlineData("""{ "location": { "latitude": 1, "longitude": 2 } }""", "Sun")]

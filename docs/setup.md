@@ -29,7 +29,6 @@ in the same menu.
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights`, each optional. |
-| `manualHold` | No longer used: a level you set by hand now keeps its distance from the target until sunset (see README → *How it works*). Old configs that have it still load. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |

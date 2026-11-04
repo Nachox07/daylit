@@ -272,8 +272,13 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(c.source)
     }
     func testWrongTypeNamesTheKey() {
-        let (_, err) = Config.load(from: write(#"{ "manualHold": "five" }"#))
-        XCTAssertTrue(err?.contains("manualHold") ?? false, err ?? "")
+        let (_, err) = Config.load(from: write(#"{ "pauseOnBattery": "five" }"#))
+        XCTAssertTrue(err?.contains("pauseOnBattery") ?? false, err ?? "")
+    }
+    func testAnOldConfigWithManualHoldStillLoads() {
+        let (c, err) = Config.load(from: write(#"{ "source": "sun", "manualHold": 5, "location": { "latitude": 51.48, "longitude": 0.0 } }"#))
+        XCTAssertNil(err)
+        XCTAssertEqual(c.source, "sun")
     }
     func testExampleConfigLoads() throws {
         let example = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
