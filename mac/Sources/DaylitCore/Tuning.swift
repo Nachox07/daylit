@@ -8,6 +8,7 @@ public struct Tuning: Equatable, Decodable {
         public var sunDay: Double?              // elevation from which the full daytime level applies
         public var lightsBoost: Double?         // room lights on at dusk: at least night + this many points
         public var lightsBoostSunBelow: Double? // ...while the sun is below this elevation
+        public var cloudyDaylight: Double?      // with a light sensor: how much of the daylight part a fully overcast sky keeps (%)
         public init() {}
     }
     public struct Theme: Equatable, Decodable {
@@ -41,6 +42,7 @@ public struct Tuning: Equatable, Decodable {
     public var sunDay: Double { brightness?.sunDay ?? 12 }
     public var lightsBoost: Double { brightness?.lightsBoost ?? 5 }
     public var lightsBoostSunBelow: Double { brightness?.lightsBoostSunBelow ?? 1.5 }
+    public var cloudyDaylight: Double { brightness?.cloudyDaylight ?? 35 }
     public var lightSunAbove: Double { theme?.lightSunAbove ?? 4 }
     public var darkSunBelow: Double { theme?.darkSunBelow ?? 1 }
     public var lightBlindAbove: Double { theme?.lightBlindAbove ?? 55 }
@@ -65,6 +67,7 @@ public struct Tuning: Equatable, Decodable {
             range(sunNight, -18, 30, "brightness.sunNight"), range(sunDay, -18, 60, "brightness.sunDay"),
             sunDay > sunNight ? nil : "config.json: tuning.brightness.sunDay must be above sunNight",
             range(lightsBoost, 0, 100, "brightness.lightsBoost"), range(lightsBoostSunBelow, -18, 60, "brightness.lightsBoostSunBelow"),
+            range(cloudyDaylight, 0, 100, "brightness.cloudyDaylight"),
             range(lightSunAbove, -18, 60, "theme.lightSunAbove"), range(darkSunBelow, -18, 60, "theme.darkSunBelow"),
             lightSunAbove >= darkSunBelow ? nil : "config.json: tuning.theme.lightSunAbove must not be below darkSunBelow",
             range(lightBlindAbove, 0, 100, "theme.lightBlindAbove"), range(darkBlindBelow, 0, 100, "theme.darkBlindBelow"),
@@ -105,6 +108,7 @@ extension Tuning {
         .init(group: "brightness", key: "sunDay", label: "Full day level from", unit: "°", defaultValue: 12),
         .init(group: "brightness", key: "lightsBoost", label: "Room lights at dusk add", unit: "points", defaultValue: 5),
         .init(group: "brightness", key: "lightsBoostSunBelow", label: "…while the sun is below", unit: "°", defaultValue: 1.5),
+        .init(group: "brightness", key: "cloudyDaylight", label: "An overcast sky keeps this much daylight", unit: "%", defaultValue: 35),
         .init(group: "timing", key: "pollSeconds", label: "Check every", unit: "s", defaultValue: 30),
         .init(group: "timing", key: "batteryPollSeconds", label: "Check on battery every", unit: "s", defaultValue: 120),
         .init(group: "timing", key: "idleSeconds", label: "Idle (another computer may be in use) after", unit: "s", defaultValue: 300),
@@ -118,7 +122,7 @@ extension Tuning {
         let b = brightness, t = theme, m = timing
         let pairs: [(String, Double?)] = [
             ("brightness.sunNight", b?.sunNight), ("brightness.sunDay", b?.sunDay), ("brightness.lightsBoost", b?.lightsBoost),
-            ("brightness.lightsBoostSunBelow", b?.lightsBoostSunBelow),
+            ("brightness.lightsBoostSunBelow", b?.lightsBoostSunBelow), ("brightness.cloudyDaylight", b?.cloudyDaylight),
             ("theme.lightSunAbove", t?.lightSunAbove), ("theme.darkSunBelow", t?.darkSunBelow), ("theme.lightBlindAbove", t?.lightBlindAbove),
             ("theme.darkBlindBelow", t?.darkBlindBelow), ("theme.whiteLightsAbove", t?.whiteLightsAbove), ("theme.whiteLightsBelow", t?.whiteLightsBelow),
             ("theme.whiteSaturationMax", t?.whiteSaturationMax), ("theme.warmSaturationMin", t?.warmSaturationMin),

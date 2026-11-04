@@ -7,6 +7,8 @@ public struct HAState: Decodable {
     public let auto: Bool?                  // nil when there is no autoSwitch
     public let bri: Double                  // room light brightness 0-255 (0 = unknown)
     public let sat: Double                  // its hs colour saturation (0 = white, ~60+ = warm)
+    public let light: Double?               // the light sensor's reading; -1 / missing = none or not a number
+    public let lightAge: Double?            // seconds since it last reported
     /// Per display UUID: [day, blindDown, night, set, setChanged]; -1 = use the local value / no set helper;
     /// setChanged is the set helper's last_changed (Unix seconds).
     public let m: [String: [Double]]
@@ -24,7 +26,7 @@ public enum HATemplate {
         // Config.validate() already rejects bad ids; this second filter keeps any that slip through out of the Jinja.
         func ok(_ e: String?) -> String? { e.flatMap { Config.isEntityId($0) ? $0 : nil } }
         let ha = HAConfig(url: ha0.url, tokenName: ha0.tokenName, autoSwitch: ok(ha0.autoSwitch), sun: ok(ha0.sun),
-                          cover: ok(ha0.cover), lights: ok(ha0.lights))
+                          cover: ok(ha0.cover), lights: ok(ha0.lights), light: ok(ha0.light))
         let mons = mons0.map { m in (uuid: m.uuid, ha: m.ha.map { MonitorHA(sensor: ok($0.sensor), day: ok($0.day), blindDown: ok($0.blindDown),
                                                                               night: ok($0.night), set: ok($0.set)) }) }
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(100)" } ?? "100"
@@ -33,6 +35,7 @@ public enum HATemplate {
         let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"
         let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
+        let lightAge = ha.light.map { "{{ (now() - states.\($0).last_updated).total_seconds() | round(0) if states.\($0) else -1 }}" } ?? "-1"
         let m = mons.compactMap { mon -> String? in
             guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
             // states.domain.name is None when the entity is missing, so a typo gives "no set helper", not an error.
@@ -46,6 +49,8 @@ public enum HATemplate {
          "auto": \(auto),
          "bri": {{ \(bri) }},
          "sat": {{ \(sat) }},
+         "light": \(num(ha.light)),
+         "lightAge": \(lightAge),
          "m": {\(m)}}
         """
     }

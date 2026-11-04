@@ -63,6 +63,7 @@ public struct SettingsEdit: Equatable {
     public var latitude: Double?, longitude: Double?
     public var monitors: [Monitor]
     public var haURL, autoSwitch, sun, cover, lights: String
+    public var light = ""                     // homeAssistant.light: the daylight sensor
     /// Tuning values keyed "group.key"; a known key missing here is removed (back to its default).
     public var tuning: [String: Double] = [:]
     /// tuning.theme.room; nil or true removes the key (true is the default).
@@ -98,7 +99,7 @@ public enum ConfigPatch {
         }
 
         var ha = root["homeAssistant"] as? [String: Any] ?? [:]
-        for (k, v) in [("url", e.haURL), ("autoSwitch", e.autoSwitch), ("sun", e.sun), ("cover", e.cover), ("lights", e.lights)] {
+        for (k, v) in [("url", e.haURL), ("autoSwitch", e.autoSwitch), ("sun", e.sun), ("cover", e.cover), ("lights", e.lights), ("light", e.light)] {
             let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
             ha[k] = t.isEmpty ? nil : t
         }

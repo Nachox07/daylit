@@ -12,6 +12,7 @@ import DaylitCore
     @Published var source: Source = .off
     @Published var auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
     @Published var detail = ""          // one line under the Automatic switch
+    @Published var lightStatus: String?  // the daylight sensor's state, for the Settings window
     @Published var problem: String?     // config / connection problem, shown as a caption
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
@@ -377,8 +378,46 @@ import DaylitCore
     // MARK: tick
 
     struct Inputs {
-        let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; let line: String
+        let elev, pos: Double; let lights: Bool; let levels: [String: [Double]]; var line: String
         var fromHA = false, hasBlind = false, bri = 0.0, sat = 100.0
+        var light = 1.0                 // the daylight part's scale from the light sensor (1: clear or none)
+        var lightRatio: Double? = nil   // how clear the sky is, 0…1, when the sensor says
+    }
+
+    // MARK: light sensor
+
+    /// The light sensor's clear-sky reference, rebuilt from its Home Assistant history once a day.
+    var lightRef = LightReference()
+    var lightRefAt: Date?
+    var lightRefBusy = false
+    /// The scale in use, smoothed, and when it last moved.
+    var lightNow: Double?
+    var lightAt: Date?
+
+    func refreshLightReference(_ ha: HAConfig) async {
+        guard let e = ha.light, Config.isEntityId(e), let loc = config.location, !lightRefBusy else { return }
+        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty ? 3600 : 86400) { return }
+        lightRefBusy = true; defer { lightRefBusy = false }
+        lightRefAt = Date()
+        switch await HAClient.history(ha, e, days: 10) {
+        case .success(let d):
+            let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude) }.value
+            lightRef = LightReference(samples: samples)
+            Log.write("light: clear-sky reference from \(samples.count) readings, \(lightRef.bins.count) steps of the sky" +
+                      (lightRef.isEmpty ? " (not enough history yet, trying again in an hour)" : ""))
+            if lightRef.isEmpty { lightStatus = "Not enough history in Home Assistant yet: trying again in an hour." }
+        case .failure:
+            Log.write("light: could not read its history (\(HAClient.lastCause ?? "no answer")), trying again in an hour")
+            lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour."
+        }
+    }
+
+    /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
+    func stepLight(toward goal: Double) -> Double {
+        let now = Date()
+        lightNow = smoothLight(lightNow, toward: goal, dt: lightAt.map { now.timeIntervalSince($0) } ?? 0)
+        lightAt = now
+        return lightNow!
     }
 
     var lastHAError: String?
@@ -434,7 +473,8 @@ import DaylitCore
         let here = idleSeconds() < config.tuned.idleSeconds
         func ownTarget(_ m: Mon) -> Int {
             let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
-            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights, tuning: config.tuned)
+            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights,
+                          tuning: config.tuned, light: inp.light)
         }
         // Sync: the first group member that is reporting leads, with its own target and hand-set offset;
         // the others follow the level it lands on, each at its link offset (a hand-set level of theirs is
@@ -481,6 +521,7 @@ import DaylitCore
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
                     "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
+                    "light": inp.lightRatio.map { ($0 * 100).rounded() / 100 as Any } ?? NSNull(),   // how clear the sky is
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
                 if case .success = r {   // retried next tick if the post failed
@@ -520,8 +561,10 @@ import DaylitCore
             let e = solarElevation(latitude: l.latitude, longitude: l.longitude)
             let where_ = e >= 0 ? String(format: "%.1f° above the horizon", e) : String(format: "%.1f° below the horizon", -e)
             let keep = source == .homeAssistant   // a sun-only config uses its own levels
-            return Inputs(elev: e, pos: keep ? lastHAPos ?? 100 : 100, lights: false, levels: keep ? lastHALevels : [:],
-                          line: note ?? "Sun · " + where_, hasBlind: keep && lastHAPos != nil)
+            var i = Inputs(elev: e, pos: keep ? lastHAPos ?? 100 : 100, lights: false, levels: keep ? lastHALevels : [:],
+                           line: note ?? "Sun · " + where_, hasBlind: keep && lastHAPos != nil)
+            if lightNow != nil { i.light = stepLight(toward: 1) }   // no reading: back to the sun's rule, gently
+            return i
         }
         switch source {
         case .off: return nil
@@ -549,8 +592,28 @@ import DaylitCore
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
                 if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned) }
-                return Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
-                              hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
+                var i = Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                               hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
+                if let e = ha.light, Config.isEntityId(e), let loc = config.location {
+                    Task { await self.refreshLightReference(ha) }   // off the tick: the history call can take seconds
+                    // A sensor that has not reported for 15 minutes is stuck, not dark.
+                    let reading = (s.light ?? -1) >= 0 && (s.lightAge ?? 0) < 900 ? s.light : nil
+                    let ratio = lightRatio(value: reading, elev: s.elev,
+                                           morning: sunRising(latitude: loc.latitude, longitude: loc.longitude, at: Date()), reference: lightRef)
+                    i.lightRatio = ratio
+                    i.light = stepLight(toward: lightScale(ratio: ratio, elev: s.elev, floor: config.tuned.cloudyDaylight / 100))
+                    if let r = ratio {
+                        i.line += " · light \(Int((r * 100).rounded()))%"
+                        lightStatus = "Now \(Int((r * 100).rounded()))% of a clear sky, so daylight counts \(Int((i.light * 100).rounded()))%."
+                    } else if !lightRef.isEmpty {
+                        lightStatus = reading == nil ? "No reading from the sensor right now: the sun's height alone decides."
+                                                     : "Too little sun to compare right now: the sun's height alone decides."
+                    }
+                } else {
+                    lightStatus = nil
+                    if lightNow != nil { i.light = stepLight(toward: 1) }
+                }
+                return i
             case .failure(let f):
                 let message = HAClient.describe(f, ha)
                 Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? ""))

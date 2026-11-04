@@ -32,17 +32,20 @@ enum HAClient {
     /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
     nonisolated(unsafe) static var lastCause: String?
 
-    static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]) async -> Result<Data, Failure> {
+    /// A POST with `body`, or a GET without one.
+    static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6) async -> Result<Data, Failure> {
         let name = ha.tokenName ?? "daylit-home-assistant"
         guard let token = token(name) else { return .failure(.noToken) }
         var base = ha.url ?? ""
         while base.hasSuffix("/") { base.removeLast() }
         guard let url = URL(string: base + path) else { return .failure(.unreachable) }
-        var r = URLRequest(url: url, timeoutInterval: 6)
-        r.httpMethod = "POST"
+        var r = URLRequest(url: url, timeoutInterval: timeout)
+        r.httpMethod = body == nil ? "GET" : "POST"
         r.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        if let body {
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
         let d: Data, resp: URLResponse
         do { (d, resp) = try await URLSession.shared.data(for: r) }
         catch {
@@ -63,6 +66,18 @@ enum HAClient {
             guard let s = HAState.parse(d) else { return .failure(.badAnswer) }
             return .success(s)
         }
+    }
+    /// The last `days` of a sensor's history, as Home Assistant returns it.
+    static func history(_ ha: HAConfig, _ entity: String, days: Double) async -> Result<Data, Failure> {
+        let iso = ISO8601DateFormatter()
+        let end = Date(), start = end.addingTimeInterval(-days * 86400)
+        var q = URLComponents()
+        q.queryItems = [.init(name: "end_time", value: iso.string(from: end)), .init(name: "filter_entity_id", value: entity),
+                        .init(name: "minimal_response", value: nil), .init(name: "no_attributes", value: nil)]
+        // "+" in a time would read as a space, so the query is percent-encoded with it escaped.
+        let query = (q.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B")
+        let path = "/api/history/period/" + iso.string(from: start).replacingOccurrences(of: "+", with: "%2B") + "?" + query
+        return await call(ha, path, nil, timeout: 60)
     }
     static func describe(_ f: Failure, _ ha: HAConfig) -> String {
         switch f {
