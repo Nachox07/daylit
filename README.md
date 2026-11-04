@@ -116,6 +116,9 @@ back to automatic at once. The sun's position is computed locally; the tests che
   schedule. On a Mac with the lid open, the panel still shows its slider for quick manual changes
   (on Windows, the quick-settings slider covers it).
 - **Light and dark mode** can follow the same daylight and lights ([details](docs/setup.md#light-and-dark-mode)).
+- **Contrast**, optional: a fixed value per monitor in the config (`"contrast": 60`), set over DDC/CI
+  at start and after a display change, wake or config reload. It is never automated
+  ([details](docs/setup.md#contrast)).
 
 ## Contributing
 

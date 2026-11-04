@@ -347,3 +347,16 @@ public enum HAErrorRule {
         return now - since >= showAfter
     }
 }
+
+/// A fixed contrast per monitor (config `contrast`, DDC/CI VCP 0x12). It is written once at start and
+/// again after a display change, wake or config reload; never on the regular tick and never automated.
+/// Only over DDC: with HDR on (macOS's own brightness control) monitors usually ignore it.
+public enum ContrastRule {
+    /// The value to write now, or nil: not configured, not a DDC monitor, or already written since the
+    /// last display change. Out-of-range values are clamped to 0…100, like the brightness levels.
+    public static func toWrite(configured: Double?, ddc: Bool, written: Int?) -> Int? {
+        guard let c = configured, c.isFinite, ddc else { return nil }
+        let v = Int(min(100, max(0, c)).rounded())
+        return v == written ? nil : v
+    }
+}

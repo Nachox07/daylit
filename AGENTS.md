@@ -104,7 +104,8 @@ optional; [`config.example.json`](config.example.json) shows them all.
 An optional `tuning` block holds every threshold (sun elevations, light/dark switch points, timing);
 see [docs/setup.md → Tuning](docs/setup.md#tuning). Leave it out unless the user asks for a change.
 
-Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `night` (0–100), and with
+Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `night` (0–100), an
+optional fixed `contrast` (0–100, DDC monitors only, set at start and after a display change), and with
 Home Assistant a `homeAssistant` block naming three `input_number` entities, an optional `sensor`
 to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
 

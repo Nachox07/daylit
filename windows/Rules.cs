@@ -347,6 +347,19 @@ public static class HaErrorRule {
         !transient || (downSince is double since && now - since >= ShowAfter);
 }
 
+/// A fixed contrast per monitor (config `contrast`, DDC/CI VCP 0x12). It is written once at start and
+/// again after a display change, wake or config reload; never on the regular tick and never automated.
+/// Only over DDC: with HDR on (the SDR white level) monitors usually ignore it.
+static class ContrastRule {
+    /// The value to write now, or null: not configured, not a DDC monitor, or already written since the
+    /// last display change. Out-of-range values are clamped to 0…100, like the brightness levels.
+    public static int? ToWrite(double? configured, bool ddc, int? written) {
+        if (configured is not double c || !double.IsFinite(c) || !ddc) return null;
+        int v = (int)Math.Round(Math.Clamp(c, 0, 100), MidpointRounding.AwayFromZero);
+        return v == written ? null : v;
+    }
+}
+
 static class Layout {
     /// Label centres for lines drawn at `ys` (top = 0), moved apart so labels `gap` tall never overlap
     /// and stay inside 0…height. The upper label stays on its line when it can; the lower one moves down.

@@ -17,6 +17,7 @@
       "label": "Left monitor",
       "control": "ddc",
       "day": 70, "blindDown": 40, "night": 20,
+      "contrast": 60,
       "homeAssistant": {
         "sensor": "sensor.daylit_left_monitor",
         "day": "input_number.daylit_left_day",

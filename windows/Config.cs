@@ -39,6 +39,7 @@ sealed class MonitorConfig {
     public double? Day { get; set; }
     public double? BlindDown { get; set; }
     public double? Night { get; set; }
+    public double? Contrast { get; set; }     // fixed contrast 0–100 over DDC/CI (VCP 0x12), set at start and after a display change
     public MonitorHa? HomeAssistant { get; set; }
 }
 
