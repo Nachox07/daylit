@@ -75,7 +75,7 @@ struct SunCurve: View {
                     let nowE = solarElevation(latitude: latitude, longitude: longitude, at: now)
                     Circle().fill(Color.yellow).overlay(Circle().stroke(Color.orange, lineWidth: 1.5))
                         .frame(width: 12, height: 12).position(x: fraction(of: now) * w, y: y(nowE)).allowsHitTesting(false)
-                    let labels = spreadLabels(markers.map { Double(y($0.value)) }, gap: 24, height: Double(h))
+                    let labels = spreadLabels(markers.map { Double(y($0.value)) }, gap: 24, height: Double(h) - 14)   // clear of the hour labels
                     ForEach(Array(markers.enumerated()), id: \.element.id) { i, m in
                         markerLine(m, w: w, y: y(m.value), labelY: CGFloat(labels[i]), h: h, top: top, bottom: bottom)
                     }

@@ -88,7 +88,7 @@ sealed class SunCurve : FrameworkElement {
             dc.DrawText(ft, new Point(Fraction(hr) * w - ft.Width / 2, ChartH - ft.Height - 2));
         }
         handles.Clear();
-        var labelYs = Layout.SpreadLabels(markers.Select(m => Y(get(m.Id))).ToArray(), 24, ChartH);
+        var labelYs = Layout.SpreadLabels(markers.Select(m => Y(get(m.Id))).ToArray(), 24, ChartH - 18);   // clear of the hour labels
         foreach (var (m, idx) in markers.Select((m, i) => (m, i))) {
             double v = get(m.Id), y = Y(v);
             var pen = new Pen(Solid(m.Color), 1.5) { DashStyle = new DashStyle([4, 3], 0) };
