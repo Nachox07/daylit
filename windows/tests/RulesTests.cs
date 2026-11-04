@@ -377,8 +377,16 @@ public class TemplateTests {
         Assert.Contains("state_attr('cover.blind','current_position')", t);
         Assert.Contains("state_attr('light.room','brightness')", t);
         Assert.Contains("[{{ states('input_number.d') | float(-1) }}, -1, -1, ", t);
-        Assert.Contains("states.input_number.s.last_changed", t);
+        Assert.Contains("states['input_number.s'].last_changed", t);
         Assert.Contains("[-1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
+    }
+
+    [Fact]
+    public void SetHelperWithDigitFirstNameAvoidsTheDottedForm() {
+        // Home Assistant can't parse states.input_number.1st…, and one syntax error fails the whole template.
+        var t = HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { Set = "input_number.1st_monitor" }]);
+        Assert.Contains("states['input_number.1st_monitor'].last_changed) if states['input_number.1st_monitor']", t);
+        Assert.DoesNotContain("states.input_number", t);
     }
 }
 
