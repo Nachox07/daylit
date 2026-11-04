@@ -289,8 +289,8 @@ sealed class Tuning {
     public double DarkSunBelow => Theme?.DarkSunBelow ?? 1;
     public double LightBlindAbove => Theme?.LightBlindAbove ?? 55;
     public double DarkBlindBelow => Theme?.DarkBlindBelow ?? 35;
-    public double WhiteLightsAbove => Theme?.WhiteLightsAbove ?? 78;
-    public double WhiteLightsBelow => Theme?.WhiteLightsBelow ?? 67;
+    public double WhiteLightsAbove => Theme?.WhiteLightsAbove ?? 78.4;
+    public double WhiteLightsBelow => Theme?.WhiteLightsBelow ?? 66.6;
     public double WhiteSaturationMax => Theme?.WhiteSaturationMax ?? 35;
     public double WarmSaturationMin => Theme?.WarmSaturationMin ?? 45;
     public bool Room => Theme?.Room ?? true;
@@ -335,8 +335,8 @@ sealed record TuningField(string Group, string Key, string Label, string Unit, d
         new("theme", "darkSunBelow", "Dark again below", "°", 1),
         new("theme", "lightBlindAbove", "Light needs the blind open at least", "%", 55),
         new("theme", "darkBlindBelow", "Dark at or below", "%", 35),
-        new("theme", "whiteLightsAbove", "White lights count as daylight from", "%", 78),
-        new("theme", "whiteLightsBelow", "…and stop counting below", "%", 67),
+        new("theme", "whiteLightsAbove", "White lights count as daylight from", "%", 78.4),
+        new("theme", "whiteLightsBelow", "…and stop counting below", "%", 66.6),
         new("theme", "whiteSaturationMax", "White: colour saturation up to", "", 35),
         new("theme", "warmSaturationMin", "Warm: colour saturation above", "", 45),
     ];

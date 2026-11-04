@@ -121,6 +121,14 @@ public class LookTests {
     [Fact] public void NightIsDark() => Assert.True(new LookRule().WantDark(-10, 100, true, false, 0, 0));
     [Fact] public void ClosedBlindIsDark() => Assert.True(new LookRule().WantDark(20, 20, true, false, 0, 0));
     [Fact] public void BrightWhiteLightsAtNightAreLight() => Assert.False(new LookRule().WantDark(-10, 0, true, true, 230, 10));
+    [Fact]
+    public void WhiteLightsSwitchAtTheSameBrightnessAsBefore() {
+        var r = new LookRule();
+        Assert.True(r.WantDark(-10, 0, true, true, 199, 10));    // not bright enough yet
+        Assert.False(r.WantDark(-10, 0, true, true, 200, 10));   // 200 of 255: light
+        Assert.False(r.WantDark(-10, 0, true, true, 170, 10));   // still counts
+        Assert.True(r.WantDark(-10, 0, true, true, 169, 10));    // below 170: dark
+    }
     [Fact] public void WarmLightsAtNightStayDark() => Assert.True(new LookRule().WantDark(-10, 0, true, true, 230, 70));
     [Fact] public void WithoutBlindOnlyTheSunCounts() => Assert.False(new LookRule().WantDark(10, 0, false, false, 0, 0));
 

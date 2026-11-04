@@ -23,14 +23,29 @@ struct SunCurve: View {
     var level: ((Double) -> Int)? = nil
     var levelTitle = ""
 
-    // Today's elevations every 10 minutes, local midnight to midnight.
-    var samples: [(t: Double, e: Double)] {
+    /// Today from local midnight to the next one: 23 or 25 hours on the days the clocks change.
+    var day: (start: Date, length: TimeInterval) {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = timeZone
         let start = cal.startOfDay(for: now)
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86400)
+        return (start, end.timeIntervalSince(start))
+    }
+
+    // Today's elevations at 145 even steps (every 10 minutes on a normal day).
+    var samples: [(t: Double, e: Double)] {
+        let (start, length) = day
         return (0...144).map { i in
-            let d = start.addingTimeInterval(Double(i) * 600)
+            let d = start.addingTimeInterval(Double(i) / 144 * length)
             return (Double(i) / 144, solarElevation(latitude: latitude, longitude: longitude, at: d))
         }
+    }
+
+    /// Where a local clock hour of today sits on the chart (0…1).
+    func fraction(hour: Int) -> Double {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = timeZone
+        let (start, length) = day
+        guard let d = cal.date(bySettingHour: hour, minute: 0, second: 0, of: start) else { return Double(hour) / 24 }
+        return d.timeIntervalSince(start) / length
     }
 
     var body: some View {
@@ -65,7 +80,7 @@ struct SunCurve: View {
                     }
                     ForEach([6, 12, 18], id: \.self) { hr in
                         Text(String(format: "%02d:00", hr)).font(.caption2).foregroundStyle(.secondary)
-                            .position(x: Double(hr) / 24 * w, y: h - 7).allowsHitTesting(false)
+                            .position(x: fraction(hour: hr) * w, y: h - 7).allowsHitTesting(false)
                     }
                 }
             }
@@ -121,19 +136,19 @@ struct SunCurve: View {
     }
 
     func fraction(of d: Date) -> Double {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = timeZone
-        return d.timeIntervalSince(cal.startOfDay(for: d)) / 86400
+        let (start, length) = day
+        return d.timeIntervalSince(start) / length
     }
 
     /// Today's times for this elevation: "06:52 – 21:14" while the sun is above it, or for a state that
     /// applies below it, "until 06:52 · from 21:14".
     func crossings(_ e: Double, below: Bool = false) -> String {
-        let s = samples
+        let s = samples, (start, length) = day
+        let clock = DateFormatter(); clock.dateFormat = "HH:mm"; clock.timeZone = timeZone
         func time(_ i: Int) -> String {
             let a = s[i - 1], b = s[i]
             let t = a.t + (b.t - a.t) * (e - a.e) / (b.e - a.e)
-            let mins = Int((t * 1440).rounded())
-            return String(format: "%02d:%02d", (mins / 60) % 24, mins % 60)
+            return clock.string(from: start.addingTimeInterval((t * length / 60).rounded() * 60))
         }
         let up = (1..<s.count).first { s[$0 - 1].e < e && s[$0].e >= e }
         let down = (1..<s.count).last { s[$0 - 1].e >= e && s[$0].e < e }

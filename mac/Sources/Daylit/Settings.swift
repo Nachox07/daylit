@@ -257,8 +257,8 @@ struct SettingsView: View {
                 Text(sourceHint).font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                TextField("Latitude", text: $lat, prompt: Text("36.72"))
-                TextField("Longitude", text: $lon, prompt: Text("-4.42"))
+                TextField("Latitude", text: $lat, prompt: Text("51.48"))
+                TextField("Longitude", text: $lon, prompt: Text("0.00"))
                 HStack {
                     Button(action: locate) { Label(locating ? "Locating…" : "Locate Me", systemImage: "location") }.disabled(locating)
                     Spacer()
@@ -494,7 +494,7 @@ struct SettingsView: View {
 
     func edit() -> SettingsEdit? {
         let blank = lat.trimmingCharacters(in: .whitespaces).isEmpty && lon.trimmingCharacters(in: .whitespaces).isEmpty
-        if !blank && coords == nil { error = "Latitude is −90 to 90 and longitude −180 to 180, like 36.72 and -4.42."; return nil }
+        if !blank && coords == nil { error = "Latitude is −90 to 90 and longitude −180 to 180, like 51.48 and 0.00."; return nil }
         if source == "sun" && coords == nil { error = "The sun needs a location: type it or use Locate Me."; return nil }
         if source == "homeAssistant" && haURL.trimmingCharacters(in: .whitespaces).isEmpty { error = "Home Assistant needs its URL."; return nil }
         var values: [String: Double] = [:]

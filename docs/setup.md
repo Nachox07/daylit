@@ -159,7 +159,7 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 | `brightness.lightsBoostSunBelow` | 1.5 | …while the sun is below this elevation |
 | `theme.lightSunAbove` / `darkSunBelow` | 4 / 1 | light mode above, dark below (in between, no change) |
 | `theme.lightBlindAbove` / `darkBlindBelow` | 55 / 35 | blind open (%) needed for light mode / dark at or below |
-| `theme.whiteLightsAbove` / `whiteLightsBelow` | 78 / 67 | lights this bright (%) and white count as daylight / stop counting |
+| `theme.whiteLightsAbove` / `whiteLightsBelow` | 78.4 / 66.6 | lights this bright (%) and white count as daylight / stop counting (HA brightness 200 / 170 of 255) |
 | `theme.whiteSaturationMax` / `warmSaturationMin` | 35 / 45 | colour saturation for "white" / "warm" (0 white … 100 deep colour) |
 | `theme.room` | true | false: light/dark follows the sun only |
 | `timing.pollSeconds` / `batteryPollSeconds` | 30 / 120 | how often automatic mode checks |

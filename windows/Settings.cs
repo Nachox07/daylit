@@ -64,7 +64,7 @@ sealed class SettingsWindow : Window {
         // Panes, one per sidebar entry, the same as on the Mac: Displays, Automatic, Home Assistant, App.
         var displaysPane = Pane(monitors);
         var automaticPane = Pane(Card(null, Field("Brightness follows", source), sourceHint),
-            Card("Location", Field("Latitude", lat, "36.72"), Field("Longitude", lon, "-4.42"), Row(locate, sunNow),
+            Card("Location", Field("Latitude", lat, "51.48"), Field("Longitude", lon, "0.00"), Row(locate, sunNow),
                  Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
         token.Click += (_, _) => AskToken();
@@ -437,7 +437,7 @@ sealed class SettingsWindow : Window {
 
     void Save() {
         bool blank = lat.Text.Trim() == "" && lon.Text.Trim() == "";
-        if (!blank && Coords == null) { Say("Latitude is −90 to 90 and longitude −180 to 180, like 36.72 and -4.42.", true); return; }
+        if (!blank && Coords == null) { Say("Latitude is −90 to 90 and longitude −180 to 180, like 51.48 and 0.00.", true); return; }
         if (SourceTag == "sun" && Coords == null) { Say("The sun needs a location: type it or use Locate me.", true); return; }
         if (SourceTag == "homeAssistant" && haUrl.Text.Trim() == "") { Say("Home Assistant needs its URL.", true); return; }
         var values = new Dictionary<string, double>();

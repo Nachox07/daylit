@@ -33,11 +33,25 @@ sealed class SunCurve : FrameworkElement {
         System.Windows.Automation.AutomationProperties.SetName(this, "Today's sun");
     }
 
-    /// Today's elevations every 10 minutes, local midnight to midnight.
+    /// Today from local midnight to the next one: 23 or 25 hours on the days the clocks change.
+    (DateTimeOffset start, double hours) Day() {
+        var date = TimeZoneInfo.ConvertTime(now, tz).Date;
+        DateTimeOffset At(DateTime d) => new(d, tz.GetUtcOffset(d));
+        var start = At(date);
+        return (start, (At(date.AddDays(1)) - start).TotalHours);
+    }
+
+    /// Today's elevations at 145 even steps (every 10 minutes on a normal day).
     List<(double t, double e)> Samples() {
-        var local = TimeZoneInfo.ConvertTime(now, tz);
-        var start = new DateTimeOffset(local.Date, local.Offset);
-        return Enumerable.Range(0, 145).Select(i => (i / 144.0, Sun.Elevation(start.AddMinutes(i * 10), lat, lon))).ToList();
+        var (start, hours) = Day();
+        return Enumerable.Range(0, 145).Select(i => (i / 144.0, Sun.Elevation(start.AddHours(i / 144.0 * hours), lat, lon))).ToList();
+    }
+
+    /// Where a local time of today sits on the chart (0…1).
+    double Fraction(DateTimeOffset at) { var (start, hours) = Day(); return (at - start).TotalHours / hours; }
+    double Fraction(int hour) {
+        var d = TimeZoneInfo.ConvertTime(now, tz).Date.AddHours(hour);
+        return Fraction(new DateTimeOffset(d, tz.GetUtcOffset(d)));
     }
 
     double Y(double e) => (top - e) / (top - bottom) * ChartH;
@@ -67,19 +81,18 @@ sealed class SunCurve : FrameworkElement {
         }
         curve.Freeze();
         dc.DrawGeometry(null, new Pen(Solid(Color.FromRgb(0xF5, 0xB0, 0x1A)), 2.5), curve);
-        var local = TimeZoneInfo.ConvertTime(now, tz);
-        double nowT = local.TimeOfDay.TotalDays;
+        double nowT = Fraction(now);
         dc.DrawEllipse(Solid(Colors.Gold), new Pen(Solid(Colors.DarkOrange), 1.5), new Point(nowT * w, Y(Sun.Elevation(now, lat, lon))), 6, 6);
         foreach (int hr in new[] { 6, 12, 18 }) {
             var ft = Text($"{hr:00}:00", 11, Palette.Secondary);
-            dc.DrawText(ft, new Point(hr / 24.0 * w - ft.Width / 2, ChartH - ft.Height - 2));
+            dc.DrawText(ft, new Point(Fraction(hr) * w - ft.Width / 2, ChartH - ft.Height - 2));
         }
         handles.Clear();
         foreach (var m in markers) {
             double v = get(m.Id), y = Y(v);
             var pen = new Pen(Solid(m.Color), 1.5) { DashStyle = new DashStyle([4, 3], 0) };
             dc.DrawLine(pen, new Point(0, y), new Point(w, y));
-            var label = Text($"{m.Title} · {Crossings(s, v, m.Below)}", 12, Palette.Text, bold: true);
+            var label = Text($"{m.Title} · {Crossings(s, v, m.Below, Day(), tz)}", 12, Palette.Text, bold: true);
             double hy = Math.Clamp(y, 12, ChartH - 12);
             var pill = new Rect(16, hy - 11, label.Width + 34, 22);
             dc.DrawRoundedRectangle(Palette.Solid, new Pen(Solid(m.Color, 160), 1), pill, 11, 11);
@@ -114,12 +127,12 @@ sealed class SunCurve : FrameworkElement {
 
     /// Today's times for an elevation: "06:52 – 21:14" while the sun is above it, or for a state that
     /// applies below it, "until 06:52 · from 21:14".
-    static string Crossings(List<(double t, double e)> s, double e, bool below) {
+    static string Crossings(List<(double t, double e)> s, double e, bool below, (DateTimeOffset start, double hours) day, TimeZoneInfo tz) {
         string Time(int i) {
             var (a, b) = (s[i - 1], s[i]);
             double t = a.t + (b.t - a.t) * (e - a.e) / (b.e - a.e);
-            int mins = (int)Math.Round(t * 1440);
-            return $"{mins / 60 % 24:00}:{mins % 60:00}";
+            var at = day.start.AddMinutes(Math.Round(t * day.hours * 60));
+            return TimeZoneInfo.ConvertTime(at, tz).ToString("HH:mm", CultureInfo.InvariantCulture);
         }
         int? up = Enumerable.Range(1, s.Count - 1).Cast<int?>().FirstOrDefault(i => s[i!.Value - 1].e < e && s[i.Value].e >= e);
         int? down = Enumerable.Range(1, s.Count - 1).Cast<int?>().LastOrDefault(i => s[i!.Value - 1].e >= e && s[i.Value].e < e);

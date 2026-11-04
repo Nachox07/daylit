@@ -45,8 +45,8 @@ public struct Tuning: Equatable, Decodable {
     public var darkSunBelow: Double { theme?.darkSunBelow ?? 1 }
     public var lightBlindAbove: Double { theme?.lightBlindAbove ?? 55 }
     public var darkBlindBelow: Double { theme?.darkBlindBelow ?? 35 }
-    public var whiteLightsAbove: Double { theme?.whiteLightsAbove ?? 78 }
-    public var whiteLightsBelow: Double { theme?.whiteLightsBelow ?? 67 }
+    public var whiteLightsAbove: Double { theme?.whiteLightsAbove ?? 78.4 }
+    public var whiteLightsBelow: Double { theme?.whiteLightsBelow ?? 66.6 }
     public var whiteSaturationMax: Double { theme?.whiteSaturationMax ?? 35 }
     public var warmSaturationMin: Double { theme?.warmSaturationMin ?? 45 }
     public var room: Bool { theme?.room ?? true }
@@ -95,8 +95,8 @@ extension Tuning {
         .init(group: "theme", key: "darkSunBelow", label: "Dark again below", unit: "°", defaultValue: 1),
         .init(group: "theme", key: "lightBlindAbove", label: "Light needs the blind open at least", unit: "%", defaultValue: 55),
         .init(group: "theme", key: "darkBlindBelow", label: "Dark at or below", unit: "%", defaultValue: 35),
-        .init(group: "theme", key: "whiteLightsAbove", label: "White lights count as daylight from", unit: "%", defaultValue: 78),
-        .init(group: "theme", key: "whiteLightsBelow", label: "…and stop counting below", unit: "%", defaultValue: 67),
+        .init(group: "theme", key: "whiteLightsAbove", label: "White lights count as daylight from", unit: "%", defaultValue: 78.4),
+        .init(group: "theme", key: "whiteLightsBelow", label: "…and stop counting below", unit: "%", defaultValue: 66.6),
         .init(group: "theme", key: "whiteSaturationMax", label: "White: colour saturation up to", unit: "", defaultValue: 35),
         .init(group: "theme", key: "warmSaturationMin", label: "Warm: colour saturation above", unit: "", defaultValue: 45),
     ]

@@ -168,6 +168,13 @@ final class LookTests: XCTestCase {
         var r = LookRule()
         XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 10))
     }
+    func testWhiteLightsSwitchAtTheSameBrightnessAsBefore() {
+        var r = LookRule()
+        XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 199, sat: 10))    // not bright enough yet
+        XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 200, sat: 10))   // 200 of 255: light
+        XCTAssertFalse(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 170, sat: 10))   // still counts
+        XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 169, sat: 10))    // below 170: dark
+    }
     func testWarmLightsAtNightStayDark() {
         var r = LookRule()
         XCTAssertTrue(r.wantDark(elev: -10, pos: 0, hasBlind: true, lightsOn: true, bri: 230, sat: 70))
