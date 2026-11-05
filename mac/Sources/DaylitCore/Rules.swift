@@ -85,9 +85,15 @@ public struct Step: Equatable {
 /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
 /// (offsetExpired), so tomorrow starts clean. One set at night ends as the sun comes up. Either way the
 /// change is gradual, over 0.3 of the daylight fraction (about half an hour around sunrise or sunset).
-public func offsetWeight(sun: Double, setAt: Double) -> Double? {
-    let edge = 0.3
-    if setAt > 0 { return min(1, max(0, sun) / min(edge, setAt)) }
+/// A daytime one never fades faster than that half hour from when it was set (`age`, seconds): one set
+/// in the last light would otherwise be gone in minutes.
+public func offsetWeight(sun: Double, setAt: Double, age: Double? = nil) -> Double? {
+    let edge = 0.3, fade = 1800.0
+    if setAt > 0 {
+        let w = min(1, max(0, sun) / min(edge, setAt))
+        guard let a = age, a >= 0, a < fade else { return w }
+        return max(w, 1 - a / fade)
+    }
     if sun >= edge { return nil }
     return 1 - sun / edge
 }
@@ -98,6 +104,12 @@ public func offsetExpired(_ s: HoldState, now: Double, dayOf: (Double) -> Int) -
     guard s.offset != nil, let at = s.offsetAt, now > 0 else { return false }
     if (s.offsetSun ?? 0) > 0 { return dayOf(now) != dayOf(at) }
     return now - at > 18 * 3600   // longer than any night
+}
+
+/// Seconds since the hand-set offset was set; nil when unknown.
+func offsetAge(_ s: HoldState, _ now: Double) -> Double? {
+    guard now > 0, let at = s.offsetAt else { return nil }
+    return now - at
 }
 
 /// The local calendar day of a Unix time.
@@ -144,7 +156,7 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         }
         var level = want
         if let o = s.offset {
-            if let w = offsetWeight(sun: sun, setAt: s.offsetSun ?? sun) {
+            if let w = offsetWeight(sun: sun, setAt: s.offsetSun ?? sun, age: offsetAge(s, now)) {
                 level = min(max(want + Int((Double(o) * w).rounded()), 0), 100)
             } else {
                 s.offset = nil; s.offsetSun = nil; s.offsetAt = nil
@@ -154,7 +166,7 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         applied = level; s.lastSet = level; s.lastTarget = want
     }
     // The badge shows only while the offset changes something (a daytime one rests at night).
-    let w = s.offset == nil ? 0 : offsetWeight(sun: sun, setAt: s.offsetSun ?? sun) ?? 0
+    let w = s.offset == nil ? 0 : offsetWeight(sun: sun, setAt: s.offsetSun ?? sun, age: offsetAge(s, now)) ?? 0
     step.state = s; step.applied = applied; step.manual = s.offset != nil && (fromRemote || (auto && w > 0))
     return step
 }

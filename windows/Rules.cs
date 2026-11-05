@@ -84,10 +84,14 @@ static class Rules {
     /// How much of a hand-set offset applies (0…1) for the sun now, or null once it is over.
     /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
     /// (OffsetExpired), so tomorrow starts clean. One set at night ends as the sun comes up. Either way
-    /// over 0.3 of the daylight fraction (about half an hour).
-    public static double? OffsetWeight(double sun, double setAt) {
-        const double edge = 0.3;
-        if (setAt > 0) return Math.Min(1, Math.Max(0, sun) / Math.Min(edge, setAt));
+    /// over 0.3 of the daylight fraction (about half an hour). A daytime one never fades faster than that
+    /// half hour from when it was set (`age`, seconds): one set in the last light would otherwise be gone in minutes.
+    public static double? OffsetWeight(double sun, double setAt, double? age = null) {
+        const double edge = 0.3, fade = 1800;
+        if (setAt > 0) {
+            double w = Math.Min(1, Math.Max(0, sun) / Math.Min(edge, setAt));
+            return age is double a && a >= 0 && a < fade ? Math.Max(w, 1 - a / fade) : w;
+        }
         return sun >= edge ? null : 1 - sun / edge;
     }
 
@@ -98,6 +102,9 @@ static class Rules {
         if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at);
         return now - at > 18 * 3600;   // longer than any night
     }
+
+    /// Seconds since the hand-set offset was set; null when unknown.
+    static double? OffsetAge(Hold s, double now) => now > 0 && s.OffsetAt is double at ? now - at : null;
 
     /// The local calendar day of a Unix time.
     public static int LocalDay(double t) => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).LocalDateTime).DayNumber;
@@ -132,7 +139,7 @@ static class Rules {
             }
             int level = target;
             if (s.Offset is int o) {
-                if (OffsetWeight(sun, s.OffsetSun ?? sun) is double w)
+                if (OffsetWeight(sun, s.OffsetSun ?? sun, OffsetAge(s, now)) is double w)
                     level = Math.Clamp(target + (int)Math.Round(o * w, MidpointRounding.AwayFromZero), 0, 100);
                 else s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
             }
@@ -141,7 +148,7 @@ static class Rules {
             s = s with { LastSet = level, LastTarget = target };
         }
         // The badge shows only while the offset changes something (a daytime one rests at night).
-        double weight = s.Offset == null ? 0 : OffsetWeight(sun, s.OffsetSun ?? sun) ?? 0;
+        double weight = s.Offset == null ? 0 : OffsetWeight(sun, s.OffsetSun ?? sun, OffsetAge(s, now)) ?? 0;
         return new Step(s, c, write, remoteValue, applied, s.Offset != null && (fromRemote || (auto && weight > 0)));
     }
 

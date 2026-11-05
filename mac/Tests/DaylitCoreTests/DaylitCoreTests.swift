@@ -247,6 +247,23 @@ final class DecideTests: XCTestCase {
         XCTAssertNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
                             now: at(101, 20), dayOf: utcDay).state.offset)       // the next evening
     }
+    func testALevelSetInTheLastLightFadesOverHalfAnHour() {
+        // Replays an evening: the user turned the screen 30 up with little light left.
+        var st = HoldState(lastSet: 55, lastTarget: 55)
+        var s = decide(current: 85, want: 55, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.04,
+                       now: at(100, 18.4), dayOf: utcDay); st = s.state
+        XCTAssertNil(s.write)
+        s = decide(current: 85, want: 55, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.01,
+                   now: at(100, 18.4 + 4.0 / 60), dayOf: utcDay); st = s.state
+        XCTAssertEqual(s.write, 81)                                              // 4 minutes on: most of it, not a quarter
+        s = decide(current: 81, want: 55, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                   now: at(100, 18.4 + 15.0 / 60), dayOf: utcDay); st = s.state
+        XCTAssertEqual(s.write, 70)                                              // half way
+        s = decide(current: 70, want: 55, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                   now: at(100, 19), dayOf: utcDay)
+        XCTAssertEqual(s.write, 55)                                              // gone at night, as a daytime one
+        XCTAssertFalse(s.manual)
+    }
     func testANightDistanceEndsAfterSunrise() {
         let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0)
         XCTAssertNil(step(30, want: 50, state: st, sun: 0).write)                // kept through the night

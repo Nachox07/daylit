@@ -492,6 +492,21 @@ public class TemplateTests {
     }
 
     [Fact]
+    public void ALevelSetInTheLastLightFadesOverHalfAnHour() {
+        static double At(double hour) => 100 * 86400 + hour * 3600;
+        static int Day(double t) => (int)Math.Floor(t / 86400);
+        var s = Rules.Decide(85, 55, null, new Hold(null, 55, 55, null, null, null), true, true, 0.04, true, false, At(18.4), Day);
+        Assert.Null(s.Write);
+        s = Rules.Decide(85, 55, null, s.State, true, true, 0.01, true, false, At(18.4 + 4.0 / 60), Day);
+        Assert.Equal(81, s.Write);                                   // 4 minutes on: most of it, not a quarter
+        s = Rules.Decide(81, 55, null, s.State, true, true, 0, true, false, At(18.4 + 15.0 / 60), Day);
+        Assert.Equal(70, s.Write);                                   // half way
+        s = Rules.Decide(70, 55, null, s.State, true, true, 0, true, false, At(19), Day);
+        Assert.Equal(55, s.Write);                                   // gone at night, as a daytime one
+        Assert.False(s.Manual);
+    }
+
+    [Fact]
     public void EntitiesAppearOneRowPerMonitor() {
         var h = new HaConfig { Url = "http://x", AutoSwitch = "input_boolean.auto", Cover = "cover.blind", Lights = "light.room" };
         var t = HaTemplate.Build(h, [new MonitorHa { Day = "input_number.d", Set = "input_number.s" }, null]);
