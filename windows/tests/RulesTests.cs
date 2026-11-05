@@ -355,6 +355,8 @@ public class ConfigTests {
         Assert.Equal(Source.HomeAssistant, c.Effective);
         Assert.Equal(2, c.Monitors!.Length);
         Assert.NotNull(c.Location);
+        Assert.Equal(60, c.Monitors![0].Contrast);
+        Assert.Null(c.Monitors![1].Contrast);
     }
 
     [Fact]
@@ -451,6 +453,31 @@ public class TemplateTests {
         var t = HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { Set = "input_number.1st_monitor" }]);
         Assert.Contains("states['input_number.1st_monitor'].last_changed) if states['input_number.1st_monitor']", t);
         Assert.DoesNotContain("states.input_number", t);
+    }
+}
+
+public class ContrastTests {
+    [Fact] public void ConfiguredContrastIsWrittenOverDdc() =>
+        Assert.Equal(60, ContrastRule.ToWrite(60, true, null));
+    [Fact] public void NothingIsWrittenWithoutAConfiguredValue() =>
+        Assert.Null(ContrastRule.ToWrite(null, true, null));
+    [Fact] public void HdrMonitorsAreLeftAlone() =>
+        Assert.Null(ContrastRule.ToWrite(60, false, null));
+    [Fact] public void TheSameValueIsNotWrittenTwiceUntilForgotten() {
+        Assert.Null(ContrastRule.ToWrite(60, true, 60));
+        Assert.Equal(70, ContrastRule.ToWrite(70, true, 60));   // a reloaded config with a new value
+    }
+    [Fact] public void OutOfRangeValuesAreClampedAndRounded() {
+        Assert.Equal(100, ContrastRule.ToWrite(150, true, null));
+        Assert.Equal(0, ContrastRule.ToWrite(-5, true, null));
+        Assert.Equal(63, ContrastRule.ToWrite(62.5, true, null));
+    }
+    [Fact] public void ContrastIsReadFromAMonitorEntry() {
+        var p = Path.Combine(Path.GetTempPath(), $"daylit-test-{Guid.NewGuid()}.json");
+        File.WriteAllText(p, "{\"monitors\":[{\"match\":\"U2723QE\",\"contrast\":55}]}");
+        var (c, err) = Config.Load(p);
+        Assert.Null(err);
+        Assert.Equal(55, c.Monitors![0].Contrast);
     }
 }
 
@@ -619,13 +646,45 @@ public class ConfigPatchTests {
     static System.Text.Json.Nodes.JsonObject Json(string s) => (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(s)!;
 
     [Fact]
+    public void ContrastBoxWritesAndRemovesTheKeyAndKeepsTheRest() {
+        const string original = """{ "monitors": [ { "match": "U2723QE", "control": "ddc", "contrast": 40, "future": 1 } ] }""";
+        var m = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { Contrast = 70, ContrastEditable = true }]), original))["monitors"]![0]!;
+        Assert.Equal(70, (int)m["contrast"]!);
+        Assert.Equal("ddc", (string)m["control"]!); Assert.Equal(1, (int)m["future"]!);
+        var saved = ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { Contrast = null, ContrastEditable = true }]), original);
+        m = Json(saved)["monitors"]![0]!;
+        Assert.Null(m["contrast"]);   // an empty box removes the key
+        Assert.Equal(1, (int)m["future"]!);
+        var p = Path.Combine(Path.GetTempPath(), $"daylit-test-{Guid.NewGuid()}.json");
+        File.WriteAllText(p, saved);
+        Assert.Null(Config.Load(p).cfg.Monitors![0].Contrast);
+    }
+
+    [Fact]
+    public void ContrastWithoutABoxIsKept() {
+        var m = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell]), """{ "monitors": [ { "match": "U2723QE", "contrast": 40 } ] }"""))["monitors"]![0]!;
+        Assert.Equal(40, (int)m["contrast"]!);   // an HDR monitor has no box: its contrast stays
+    }
+
+    [Fact]
+    public void ContrastBoxText() {
+        Assert.True(ContrastRule.ParseField("").ok); Assert.Null(ContrastRule.ParseField("  ").value);
+        Assert.Equal(60, ContrastRule.ParseField("60").value);
+        Assert.Equal(63, ContrastRule.ParseField("62,5").value);
+        Assert.Equal(0, ContrastRule.ParseField("0").value);
+        Assert.False(ContrastRule.ParseField("101").ok);
+        Assert.False(ContrastRule.ParseField("-1").ok);
+        Assert.False(ContrastRule.ParseField("high").ok);
+    }
+
+    [Fact]
     public void KeepsWhatTheWindowDoesNotOwn() {
         const string original = """
             { // a comment
               "manualHold": 7, "futureKey": [1, 2],
               "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc", "cover": "cover.blind" },
               "monitors": [
-                { "match": "U2723QE", "control": "ddc", "day": 70, "homeAssistant": { "day": "input_number.left_day" } },
+                { "match": "U2723QE", "control": "ddc", "day": 70, "contrast": 60, "homeAssistant": { "day": "input_number.left_day" } },
                 { "match": "Unplugged", "day": 33 }, ],
             }
             """;
@@ -643,6 +702,7 @@ public class ConfigPatchTests {
         var mons = o["monitors"]!.AsArray();
         Assert.Equal(2, mons.Count);
         Assert.Equal("ddc", (string)mons[0]!["control"]!);
+        Assert.Equal(60, (int)mons[0]!["contrast"]!);
         Assert.Equal("Left", (string)mons[0]!["label"]!);
         Assert.Equal(80, (int)mons[0]!["day"]!);
         Assert.NotNull(mons[0]!["homeAssistant"]);

@@ -132,7 +132,7 @@ sealed class Controller {
         HAClient.LastError = null;
         AutoOn = Settings.Auto;
         lookDark = null; look.Reset();
-        foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; }
+        foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; m.ContrastSet = null; }
         Log.Write($"config: source {Source}" + (ConfigError != null ? $" — {ConfigError}" : ""));
     }
 
@@ -191,7 +191,7 @@ sealed class Controller {
 
     // SystemEvents may raise on another thread: always hop to the UI thread.
     void OnPower(object? s, PowerModeChangedEventArgs e) => ui.BeginInvoke(() => {
-        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); _ = Later(5000, "wake"); }   // DDC needs a moment after wake
+        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
         else if (e.Mode == PowerModes.StatusChange) {   // plugged in / unplugged
             bool was = timer.IsEnabled;
             StartTimers();
@@ -200,14 +200,17 @@ sealed class Controller {
             else if (panel.IsVisible) panel.Sync();
         }
     });
-    void OnDisplays(object? s, EventArgs e) => ui.BeginInvoke(() => _ = Later(1500, "displays changed"));
+    void OnDisplays(object? s, EventArgs e) => ui.BeginInvoke(() => _ = Later(1500, "displays changed", ForgetContrast));
+    /// The configured contrast is written again on the next tick. Called when the delayed tick after a
+    /// display change or wake runs, so a tick in between can't use up the write before DDC is ready.
+    void ForgetContrast() { foreach (var m in Mons) m.ContrastSet = null; }
     void OnPrefs(object? s, UserPreferenceChangedEventArgs e) => ui.BeginInvoke(() => {
         if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color or UserPreferenceCategory.VisualStyle) {
             tray.Icon = Theme.SunIcon();
             panel.ApplyTheme();
         }
     });
-    async Task Later(int ms, string why) { await Task.Delay(ms); await Tick(why); }
+    async Task Later(int ms, string why, Action? first = null) { await Task.Delay(ms); first?.Invoke(); await Tick(why); }
 
     // After wake or idle the monitor may have been changed elsewhere: its reading is not a hand-set level.
     // A distance set by hand here is kept.
@@ -359,6 +362,7 @@ sealed class Controller {
                 Log.Write($"hdr {(d.Hdr ? "on" : "off")}: {m.Label} now uses {(d.Hdr ? "the SDR white level" : "DDC/CI")}");
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
                 m.Offset = null; m.OffsetSun = null; m.OffsetAt = null;   // and an offset on the old scale means nothing on the new one
+                m.ContrastSet = null;   // back on DDC: write the configured contrast again
             }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;
@@ -484,9 +488,29 @@ sealed class Controller {
     static int? Tenths(double? r) => r is double v ? (int)Math.Round(v * 10, MidpointRounding.AwayFromZero) : null;
     static int Pct(double v) => (int)Math.Round(v * 100, MidpointRounding.AwayFromZero);
 
+    /// The configured contrast, once per monitor until the next display change, wake or reload. A refused
+    /// write is logged and not retried every tick. An idle PC leaves it for when the user is back: the
+    /// monitor may be showing another computer.
+    async Task ApplyContrast(Mon[] mons) {
+        if (Win.IdleSeconds() >= Cfg.Tuned.IdleSeconds) {
+            // Pending: the idle watcher ticks when the user is back, also with no source or paused on battery.
+            if (mons.Any(m => ContrastRule.ToWrite(m.Spec?.Contrast, !m.D.Hdr, m.ContrastSet) != null)) idleWatch.Start();
+            return;
+        }
+        foreach (var m in mons) {
+            if (ContrastRule.ToWrite(m.Spec?.Contrast, !m.D.Hdr, m.ContrastSet) is not int v) continue;
+            m.ContrastSet = v;
+            var gdi = m.D.Gdi;
+            bool ok = await Task.Run(() => { try { return Ddc.Set(gdi, v, Ddc.Contrast); } catch { return false; } });
+            Log.Write(ok ? $"contrast: {m.Label} set to {v}"
+                         : $"display: {m.Label} did not take contrast {v}; trying again after the next display change, wake or reload");
+        }
+    }
+
     async Task TickOnce() {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
+        await ApplyContrast(mons);
         var cur = await Task.Run(() => mons.Select(m => { try { return m.Read(); } catch { return (int?)null; } }).ToArray());
         for (int i = 0; i < mons.Length; i++) {
             var r = cur[i];

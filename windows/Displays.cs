@@ -113,10 +113,11 @@ static class Ddc {
     public static int? Get(string gdi) => With<int?>(gdi, h =>
         GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out uint c, out uint m) && m > 0 ? (int)Math.Round(c * 100.0 / m) : null, null);
     /// True when the monitor acknowledged the write. Without a readable maximum, 100 is assumed (the usual VCP 0x10 range).
-    public static bool Set(string gdi, int v) => With(gdi, h => {
-        uint m = GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out _, out uint max) && max > 0 ? max : 100;
-        return SetVCPFeature(h, 0x10, (uint)Math.Round(v * m / 100.0));
+    public static bool Set(string gdi, int v, byte code = Brightness) => With(gdi, h => {
+        uint m = GetVCPFeatureAndVCPFeatureReply(h, code, IntPtr.Zero, out _, out uint max) && max > 0 ? max : 100;
+        return SetVCPFeature(h, code, (uint)Math.Round(v * m / 100.0));
     }, false);
+    public const byte Brightness = 0x10, Contrast = 0x12;
 }
 
 /// A detected external monitor plus its settings from config.json (if any entry matches).
@@ -134,6 +135,7 @@ sealed class Mon {
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
     public ReadState Reads = ReadState.Unknown; // DDC only: does it report its level (Rules.cs)
     public bool WriteFailing;                  // the last automatic write was refused (logged once, retried each tick)
+    public int? ContrastSet;                    // contrast written since the last display change, wake or reload (ContrastRule)
     /// A DDC monitor that has not reported its level yet can still be tried with the slider.
     public bool Untried => !D.Hdr && Reads == ReadState.Unknown && Cur == null;
     public bool Usable => (Cur != null || Untried) && Reads.Usable();

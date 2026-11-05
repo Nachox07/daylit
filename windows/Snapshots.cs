@@ -57,7 +57,7 @@ static class Snapshots {
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
           "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
-                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ],
+                        { "match": "U2723QE", "contrast": 60, "homeAssistant": { "day": "input_number.dell_day" } } ],
           "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """;
 

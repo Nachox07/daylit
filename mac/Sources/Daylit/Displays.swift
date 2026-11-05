@@ -86,6 +86,13 @@ enum DDC {
     static func get(_ uuid: String) -> Int? { run(["display", uuid, "get", "luminance"]).flatMap { Int($0) } }
     /// True when m1ddc reports success (the monitor acknowledged the write).
     @discardableResult static func set(_ uuid: String, _ v: Int) -> Bool { run(["display", uuid, "set", "luminance", String(v)]) != nil }
+    /// Contrast (VCP 0x12), 0–100 scaled to the monitor's reported maximum (100 when it reports none),
+    /// as on Windows. True when the monitor acknowledged the write.
+    static func setContrast(_ uuid: String, _ v: Int) -> Bool {
+        let max = run(["display", uuid, "max", "contrast"]).flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil } ?? 100
+        let raw = Int((Double(v * max) / 100).rounded(.toNearestOrEven))
+        return run(["display", uuid, "set", "contrast", String(raw)]) != nil
+    }
 }
 
 enum Power {
@@ -119,6 +126,8 @@ struct Mon: Identifiable {
     let control: Control
     let day, blindDown, night: Double
     let ha: MonitorHA?
+    var contrast: Double? = nil   // config: fixed DDC contrast, written by Daylit.applyContrast
+    var contrastSet: Int? = nil   // written since this monitor was (re)detected (ContrastRule)
     var level: Double = 0
     var available = true
     var readState: ReadState = .unknown   // DDC only: does it report its level (DaylitCore)

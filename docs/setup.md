@@ -27,7 +27,7 @@ in the same menu.
 |---|---|
 | `source` | `off`, `sun` or `homeAssistant`. Default: `homeAssistant` when a `homeAssistant.url` is set, else `sun` when a `location` is set, else `off`. |
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
-| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20) and, on macOS, `control` (`native` or `ddc`). |
+| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
@@ -152,6 +152,21 @@ When you turn it on, Daylit remembers how far apart they are (say the Dell at 40
   applies to its own monitor only. The built-in Mac screen is never part of the group.
 
 Turn the switch off and on again to capture new offsets.
+
+## Contrast
+
+Optional and manual: the *Contrast* box under a monitor in Settings → Displays, or `"contrast": 60` in a
+monitor's entry, sets its contrast (DDC/CI VCP code `0x12`)
+once at start, and again after a display change, a wake from sleep or a config reload. Daylit never
+changes it on its own and the panel has no contrast slider. The box is shown only for monitors driven
+over DDC/CI; leaving it empty removes the key.
+
+- Only monitors driven over DDC/CI get it: with HDR on (macOS's own brightness control, Windows's SDR
+  content brightness) it is skipped, and HDR monitors usually ignore contrast anyway.
+- Values are 0–100; outside that range they are clamped. Removing the key leaves the monitor at the
+  last contrast it was given; set it in the monitor's menu or type the value you want.
+- An idle computer leaves it for when you are back, like brightness, in case the monitor is showing
+  another computer. A monitor that refuses it is noted in the log (`display: … did not take contrast`).
 
 ## Light and dark mode
 

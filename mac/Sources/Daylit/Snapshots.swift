@@ -12,8 +12,8 @@ import DaylitCore
 
     /// Every scene: a name and the view to render.
     static func scenes() -> [(String, AnyView)] {
-        func mon(_ id: CGDirectDisplayID, _ label: String, _ level: Double, manual: Bool = false) -> Mon {
-            var m = Mon(id: id, uuid: "00000000-0000-0000-0000-00000000000\(id)", name: label, label: label, control: .native,
+        func mon(_ id: CGDirectDisplayID, _ label: String, _ level: Double, manual: Bool = false, control: Control = .native) -> Mon {
+            var m = Mon(id: id, uuid: "00000000-0000-0000-0000-00000000000\(id)", name: label, label: label, control: control,
                         day: 70, blindDown: 40, night: 20, ha: nil)
             m.level = level; m.available = true; m.readState = .readable; m.manual = manual
             return m
@@ -28,6 +28,7 @@ import DaylitCore
         }
         let two = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48)]
         let three = two + [mon(3, "LG 27UK850", 60)]
+        let settingsMons = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48, control: .ddc)]   // the Dell over DDC: its contrast box shows
         return [
             ("panel-two", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon")))),
             ("panel-two-linked", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon", sync: true)))),
@@ -42,11 +43,11 @@ import DaylitCore
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
-            ("settings-displays", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
-            ("settings-automatic", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
-            ("settings-homeassistant", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
-            ("settings-appearance", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
-            ("settings-app", AnyView(SettingsView(m: model(two, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
+            ("settings-displays", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
+            ("settings-automatic", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
+            ("settings-homeassistant", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
+            ("settings-appearance", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
+            ("settings-app", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
         ]
     }
 
@@ -57,7 +58,7 @@ import DaylitCore
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
           "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
-                        { "match": "U2723QE", "homeAssistant": { "day": "input_number.dell_day" } } ],
+                        { "match": "U2723QE", "contrast": 60, "homeAssistant": { "day": "input_number.dell_day" } } ],
           "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """.utf8).write(to: u)
         return u

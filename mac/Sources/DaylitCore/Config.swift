@@ -35,6 +35,7 @@ public struct MonitorConfig: Decodable {
     public var day: Double?             // daytime level, blind open (default 70)
     public var blindDown: Double?       // daytime level, blind closed (default 40)
     public var night: Double?           // night level (default 20)
+    public var contrast: Double?        // fixed contrast 0–100 over DDC (VCP 0x12), set at start and after a display change
     public var homeAssistant: MonitorHA?
 }
 

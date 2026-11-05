@@ -402,6 +402,8 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.resolvedSource().0, .homeAssistant)
         XCTAssertEqual(c.monitors?.count, 2)
         XCTAssertNotNil(c.location)
+        XCTAssertEqual(c.monitors?.first?.contrast, 60)
+        XCTAssertNil(c.monitors?.last?.contrast)
     }
     func testSourceDefaults() {
         XCTAssertEqual(Config().resolvedSource().0, .off)
@@ -497,6 +499,32 @@ final class TemplateTests: XCTestCase {
         let short = #"{"elev": 1, "pos": 1, "lights": false, "auto": true, "bri": 0, "sat": 0, "m": {"U": [80, 40, 20]}}"#
         XCTAssertNil(HAState.parse(Data(short.utf8)))
         XCTAssertNil(HAState.parse(Data("not json".utf8)))
+    }
+}
+
+final class ContrastTests: XCTestCase {
+    func testConfiguredContrastIsWrittenOverDDC() {
+        XCTAssertEqual(ContrastRule.toWrite(configured: 60, ddc: true, written: nil), 60)
+    }
+    func testNothingIsWrittenWithoutAConfiguredValue() {
+        XCTAssertNil(ContrastRule.toWrite(configured: nil, ddc: true, written: nil))
+    }
+    func testHDROrNativeMonitorsAreLeftAlone() {
+        XCTAssertNil(ContrastRule.toWrite(configured: 60, ddc: false, written: nil))
+    }
+    func testTheSameValueIsNotWrittenTwiceUntilForgotten() {
+        XCTAssertNil(ContrastRule.toWrite(configured: 60, ddc: true, written: 60))
+        XCTAssertEqual(ContrastRule.toWrite(configured: 70, ddc: true, written: 60), 70, "a reloaded config with a new value")
+    }
+    func testOutOfRangeValuesAreClampedAndRounded() {
+        XCTAssertEqual(ContrastRule.toWrite(configured: 150, ddc: true, written: nil), 100)
+        XCTAssertEqual(ContrastRule.toWrite(configured: -5, ddc: true, written: nil), 0)
+        XCTAssertEqual(ContrastRule.toWrite(configured: 62.5, ddc: true, written: nil), 63)
+    }
+    func testContrastIsReadFromAMonitorEntry() throws {
+        let c = try JSONDecoder().decode(Config.self, from: Data(#"{"monitors":[{"match":"U2723QE","contrast":55}]}"#.utf8))
+        XCTAssertEqual(c.monitors?.first?.contrast, 55)
+        XCTAssertNil(c.validate())
     }
 }
 
@@ -656,6 +684,35 @@ final class ConfigEditTests: XCTestCase {
     func json(_ d: Data) -> [String: Any] { try! JSONSerialization.jsonObject(with: d) as! [String: Any] }
     let dell = SettingsEdit.Monitor(name: "DELL U2723QE", suggestedMatch: "U2723QE", label: "Left", day: 80, blindDown: 45, night: 15)
 
+    func testContrastBoxWritesAndRemovesTheKeyAndKeepsTheRest() throws {
+        let original = #"{ "monitors": [ { "match": "U2723QE", "control": "ddc", "contrast": 40, "future": 1 } ] }"#
+        var e = SettingsEdit(source: "off", monitors: [dell])
+        e.monitors[0].contrastEditable = true; e.monitors[0].contrast = 70
+        var m = (json(try ConfigPatch.apply(e, to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["contrast"] as? Int, 70)
+        XCTAssertEqual(m["control"] as? String, "ddc"); XCTAssertEqual(m["future"] as? Int, 1)
+        e.monitors[0].contrast = nil
+        m = (json(try ConfigPatch.apply(e, to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertNil(m["contrast"], "an empty box removes the key")
+        XCTAssertEqual(m["future"] as? Int, 1)
+        let saved = try ConfigPatch.apply(e, to: Data(original.utf8))
+        XCTAssertNil(try JSONDecoder().decode(Config.self, from: saved).monitors?[0].contrast)
+    }
+    func testContrastWithoutABoxIsKept() throws {
+        let original = #"{ "monitors": [ { "match": "U2723QE", "contrast": 40 } ] }"#
+        let m = (json(try ConfigPatch.apply(SettingsEdit(source: "off", monitors: [dell]), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["contrast"] as? Int, 40, "an HDR or native monitor has no box: its contrast stays")
+    }
+    func testContrastBoxText() {
+        XCTAssertTrue(ContrastRule.parseField("").ok); XCTAssertNil(ContrastRule.parseField("  ").value)
+        XCTAssertEqual(ContrastRule.parseField("60").value, 60)
+        XCTAssertEqual(ContrastRule.parseField("62,5").value, 63)
+        XCTAssertEqual(ContrastRule.parseField("0").value, 0)
+        XCTAssertFalse(ContrastRule.parseField("101").ok)
+        XCTAssertFalse(ContrastRule.parseField("-1").ok)
+        XCTAssertFalse(ContrastRule.parseField("high").ok)
+    }
+
     func testCommentsAndTrailingCommasAreIgnored() throws {
         let text = """
         { // where
@@ -675,7 +732,7 @@ final class ConfigEditTests: XCTestCase {
         { "manualHold": 7, "futureKey": [1, 2],
           "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc", "cover": "cover.blind" },
           "monitors": [
-            { "match": "U2723QE", "control": "ddc", "day": 70, "homeAssistant": { "day": "input_number.left_day" } },
+            { "match": "U2723QE", "control": "ddc", "day": 70, "contrast": 60, "homeAssistant": { "day": "input_number.left_day" } },
             { "match": "Unplugged", "day": 33 } ] }
         """
         var e = SettingsEdit(source: "homeAssistant", latitude: 51.4769, longitude: -0.0005, monitors: [dell],
@@ -695,6 +752,7 @@ final class ConfigEditTests: XCTestCase {
         let mons = o["monitors"] as! [[String: Any]]
         XCTAssertEqual(mons.count, 2)
         XCTAssertEqual(mons[0]["control"] as? String, "ddc")
+        XCTAssertEqual(mons[0]["contrast"] as? Int, 60)
         XCTAssertEqual(mons[0]["label"] as? String, "Left")
         XCTAssertEqual(mons[0]["day"] as? Int, 80)
         XCTAssertNotNil(mons[0]["homeAssistant"])

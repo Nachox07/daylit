@@ -39,6 +39,7 @@ sealed class MonitorConfig {
     public double? Day { get; set; }
     public double? BlindDown { get; set; }
     public double? Night { get; set; }
+    public double? Contrast { get; set; }     // fixed contrast 0–100 over DDC/CI (VCP 0x12), set at start and after a display change
     public MonitorHa? HomeAssistant { get; set; }
 }
 
@@ -171,7 +172,10 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
                            string HaUrl = "", string AutoSwitch = "", string Sun = "", string Cover = "", string Lights = "",
                            IReadOnlyDictionary<string, double>? Tuning = null, bool? ThemeRoom = null) {
     /// `Name` is the connected display's name; `SuggestedMatch` is used only when no entry matches it yet.
-    public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night);
+    /// `ContrastEditable`: the window shows a contrast box for it (DDC only); otherwise `contrast` in the file is kept.
+    /// `Contrast` null = not set: the key is removed.
+    public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night,
+                                 int? Contrast = null, bool ContrastEditable = false);
     /// homeAssistant.light: the daylight sensor.
     public string Light { get; init; } = "";
 }
@@ -196,7 +200,7 @@ static class ConfigPatch {
         name.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(t => t.Any(char.IsDigit) && t.Any(char.IsLetter)) ?? name;
 
     /// The file with the edit applied. Unknown keys, unplugged monitors and per-monitor settings the window
-    /// does not show (Home Assistant helpers, control) are kept; comments are not. Throws when the result
+    /// does not show (Home Assistant helpers, control, contrast where it has no box) are kept; comments are not. Throws when the result
     /// would not load, or when the file is not a JSON object.
     public static string Apply(SettingsEdit e, string? original) {
         var root = string.IsNullOrWhiteSpace(original) ? new JsonObject()
@@ -231,6 +235,9 @@ static class ConfigPatch {
             var label = m.Label.Trim();
             if (label == "" || label == m.Name) entry.Remove("label"); else entry["label"] = label;
             entry["day"] = Math.Clamp(m.Day, 0, 100); entry["blindDown"] = Math.Clamp(m.BlindDown, 0, 100); entry["night"] = Math.Clamp(m.Night, 0, 100);
+            if (m.ContrastEditable) {
+                if (m.Contrast is int ct) entry["contrast"] = Math.Clamp(ct, 0, 100); else entry.Remove("contrast");
+            }
         }
         if (list.Count > 0) root["monitors"] = list;
 

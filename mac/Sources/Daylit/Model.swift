@@ -107,6 +107,7 @@ import DaylitCore
             }
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
+            m.contrast = cfg?.contrast
             if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
             if control == .native && !nativeOK {
                 m.noControl = "No brightness control right now. Turn on HDR for this display, or DDC/CI in its menu."
@@ -137,7 +138,26 @@ import DaylitCore
         }
         if mons.isEmpty { log("no external displays") }
         builtIn = config.builtIn == false ? nil : builtInScreen()
+        applyContrast()
         refresh()
+    }
+
+    /// The configured contrast, written once per redetect (start, reload, display change, wake), ahead
+    /// of the tick's brightness read on the same serial DDC queue. Never on the regular tick. An idle Mac
+    /// leaves it for when the user is back: the monitor may be showing another computer.
+    func applyContrast() {
+        guard idleSeconds() < config.tuned.idleSeconds else { return }
+        for i in mons.indices {
+            let m = mons[i]
+            guard let v = ContrastRule.toWrite(configured: m.contrast, ddc: m.control == .ddc, written: m.contrastSet) else { continue }
+            mons[i].contrastSet = v   // a refused write is logged, and tried again at the next redetect
+            let uuid = m.uuid, label = m.label
+            ddcQ.async {
+                let ok = DDC.setContrast(uuid, v)
+                Log.write(ok ? "contrast: \(label) set to \(v)"
+                             : "display: \(label) did not take contrast \(v); trying again after the next display change, wake or reload")
+            }
+        }
     }
 
     // MARK: actions
@@ -154,6 +174,7 @@ import DaylitCore
         // does not always post a screen-change notification: re-probe cheaply and re-detect on a change.
         let probe = externalScreens().map { "\($0.uuid)=\(Native.usable($0.id))" }.joined(separator: ",")
         if probe != lastProbe { let first = lastProbe == nil; lastProbe = probe; if !first { redetect(); return } }
+        applyContrast()   // one left pending while idle, also with no source or paused on battery
         let battery = Power.onBattery
         if battery != onBattery {
             onBattery = battery

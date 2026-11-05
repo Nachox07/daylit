@@ -347,6 +347,28 @@ public static class HaErrorRule {
         !transient || (downSince is double since && now - since >= ShowAfter);
 }
 
+/// A fixed contrast per monitor (config `contrast`, DDC/CI VCP 0x12). It is written once at start and
+/// again after a display change, wake or config reload; never on the regular tick and never automated.
+/// Only over DDC: with HDR on (the SDR white level) monitors usually ignore it.
+static class ContrastRule {
+    /// The value to write now, or null: not configured, not a DDC monitor, or already written since the
+    /// last display change. Out-of-range values are clamped to 0…100, like the brightness levels.
+    public static int? ToWrite(double? configured, bool ddc, int? written) {
+        if (configured is not double c || !double.IsFinite(c) || !ddc) return null;
+        int v = (int)Math.Round(Math.Clamp(c, 0, 100), MidpointRounding.AwayFromZero);
+        return v == written ? null : v;
+    }
+    /// The Settings window's contrast box: empty = not set (null), else a whole number 0–100 (a decimal comma
+    /// is fine, halves round up). `ok` is false for anything else, so the window can say what is wrong.
+    public static (bool ok, int? value) ParseField(string text) {
+        var t = text.Trim().Replace(',', '.');
+        if (t == "") return (true, null);
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)
+            || !double.IsFinite(v) || v < 0 || v > 100) return (false, null);
+        return (true, (int)Math.Round(v, MidpointRounding.AwayFromZero));
+    }
+}
+
 static class Layout {
     /// Label centres for lines drawn at `ys` (top = 0), moved apart so labels `gap` tall never overlap
     /// and stay inside 0…height. The upper label stays on its line when it can; the lower one moves down.

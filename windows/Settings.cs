@@ -34,7 +34,7 @@ sealed class SettingsWindow : Window {
     CheckBox? lookBox;
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-    readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock now, TextBlock caption, bool haLevels)> rows = new();
+    readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock now, TextBlock caption, bool haLevels, TextBox? contrast)> rows = new();
     string? opened;
 
     static readonly (string tag, string text, string hint)[] Sources = [
@@ -349,6 +349,27 @@ sealed class SettingsWindow : Window {
         return g;
     }
 
+    /// The contrast box: empty shows "Not set" in grey and leaves the key out of config.json.
+    static FrameworkElement Contrast(TextBox box) {
+        box.TextAlignment = TextAlignment.Right;
+        var hint = new TextBlock { Text = "Not set", Opacity = 0.45, IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Right,
+                                   VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0),
+                                   Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed };
+        box.TextChanged += (_, _) => hint.Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+        System.Windows.Automation.AutomationProperties.SetName(box, "Contrast");
+        System.Windows.Automation.AutomationProperties.SetHelpText(box, "0 to 100; empty leaves it to the monitor");
+        var cell = new Grid { Width = 90, Children = { box, hint } };
+        var g = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        var l = new TextBlock { Text = "Contrast", VerticalAlignment = VerticalAlignment.Center };
+        var unit = new TextBlock { Text = "%", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75, Margin = new Thickness(8, 0, 0, 0) };
+        Grid.SetColumn(cell, 1); Grid.SetColumn(unit, 2);
+        g.Children.Add(l); g.Children.Add(cell); g.Children.Add(unit);
+        return g;
+    }
+
     FrameworkElement Level(string title, Slider s) {
         var pct = new TextBlock { MinWidth = 44, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75 };
         Typography.SetNumeralAlignment(pct, FontNumeralAlignment.Tabular);
@@ -404,8 +425,13 @@ sealed class SettingsWindow : Window {
             nowRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(now, 1);
             nowRow.Children.Add(new TextBlock { Text = "Right now", VerticalAlignment = VerticalAlignment.Center }); nowRow.Children.Add(now);
-            rows.Add((m, label, day, blind, night, now, caption, haLevels));
-            monitors.Children.Add(Card("\uE7F4  " + m.D.Friendly, Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), nowRow, caption));
+            // Contrast goes over DDC/CI only: no box for a monitor in HDR (SDR white level).
+            TextBox? contrast = m.D.Hdr ? null : new TextBox { Text = spec?.Contrast is double ct ? Fmt(ct) : "" };
+            rows.Add((m, label, day, blind, night, now, caption, haLevels, contrast));
+            var card = new List<UIElement> { Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night) };
+            if (contrast != null) card.Add(Contrast(contrast));
+            card.Add(nowRow); card.Add(caption);
+            monitors.Children.Add(Card("\uE7F4  " + m.D.Friendly, card.ToArray()));
         }
         status.Text = opened != null && ConfigPatch.HasComments(opened) ? "Saving removes the comments in config.json." : "";
         status.Foreground = Palette.Secondary;
@@ -437,6 +463,7 @@ sealed class SettingsWindow : Window {
             r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
             var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
+            if (r.contrast != null) text += " Contrast is set when the monitor is detected; empty leaves it to the monitor.";
             r.caption.Text = text;
         }
     }
@@ -464,9 +491,18 @@ sealed class SettingsWindow : Window {
             if (Num(text) is not double v) { Say($"{f.Label} {f.Unit}: \"{text}\" is not a number.", true); return; }
             values[f.Id] = v;
         }
-        var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon,
-            rows.Select(r => new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
-                                                      (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value)).ToList(),
+        var mons = new List<SettingsEdit.Monitor>();
+        foreach (var r in rows) {
+            int? contrast = null;
+            if (r.contrast != null) {
+                var (ok, v) = ContrastRule.ParseField(r.contrast.Text);
+                if (!ok) { Say($"Contrast for {r.label.Text} is 0 to 100, or empty to leave it unset.", true); return; }
+                contrast = v;
+            }
+            mons.Add(new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
+                                              (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value, contrast, r.contrast != null));
+        }
+        var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon, mons,
             haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) { Light = daylightSensor.Text };
         try {
             string? now = File.Exists(path) ? File.ReadAllText(path) : null;
