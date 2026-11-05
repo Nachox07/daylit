@@ -139,7 +139,10 @@ sealed class Mon {
     /// A DDC monitor that has not reported its level yet can still be tried with the slider.
     public bool Untried => !D.Hdr && Reads == ReadState.Unknown && Cur == null;
     public bool Usable => (Cur != null || Untried) && Reads.Usable();
-    CancellationTokenSource? pending;
+    // Slider and hotkey values: the newest one waiting, and whether a write is under way. One write at a time,
+    // always the newest value, so the screen follows a drag as fast as DDC allows.
+    readonly object writeLock = new();
+    int? want; bool writing;
 
     public Mon(Display d, MonitorConfig? spec) { D = d; Spec = spec; }
     public string Key => D.Key;
@@ -153,24 +156,28 @@ sealed class Mon {
     public int? Read() => D.Hdr ? Native.GetSdr(D) : Ddc.Get(D.Gdi);
     /// An automatic level; false when the monitor did not take it.
     public bool Write(int v) => D.Hdr ? Native.SetSdr(D, v) : Ddc.Set(D.Gdi, v);
-    /// For sliders and hotkeys: HDR applies at once; DDC is slow, so it is debounced.
+    /// For sliders and hotkeys: HDR applies at once; DDC is slow, so a value that arrives during a write waits
+    /// for it and only the newest waiting value is sent.
     public void WriteSoon(int v) {
         var d = D;
         if (d.Hdr) { Native.SetSdr(d, v); return; }
-        pending?.Cancel(); var cts = pending = new CancellationTokenSource();
         var ui = SynchronizationContext.Current;   // the answer is recorded on the UI thread
-        Task.Delay(150, cts.Token).ContinueWith(t => {
-            if (t.IsCanceled) return;
-            bool ok = Ddc.Set(d.Gdi, v);
-            void Record() {
-                var after = Reads.AfterUserWrite(ok);
-                if (after == Reads) return;
-                Reads = after;
-                Log.Write(after == ReadState.WriteOnly ? $"display: {Label} accepts brightness but doesn't report it (write-only)"
-                                                       : $"display: {Label} did not accept a brightness change");
+        lock (writeLock) { want = v; if (writing) return; writing = true; }
+        Task.Run(() => {
+            while (true) {
+                int x;
+                lock (writeLock) { if (want is not int w) { writing = false; return; } x = w; want = null; }
+                bool ok = Ddc.Set(d.Gdi, x);
+                if (ui != null) ui.Post(_ => Record(ok), null); else Record(ok);
             }
-            if (ui != null) ui.Post(_ => Record(), null); else Record();
-        }, TaskScheduler.Default);
+        });
+        void Record(bool ok) {
+            var after = Reads.AfterUserWrite(ok);
+            if (after == Reads) return;
+            Reads = after;
+            Log.Write(after == ReadState.WriteOnly ? $"display: {Label} accepts brightness but doesn't report it (write-only)"
+                                                   : $"display: {Label} did not accept a brightness change");
+        }
     }
 
     public static MonitorConfig? Match(Display d, MonitorConfig[]? specs) =>

@@ -39,7 +39,10 @@ import DaylitCore
     var configProblem: String?
     var dragging: Set<CGDirectDisplayID> = []
     let ddcQ = DispatchQueue(label: "ddc")
-    var pending: [CGDirectDisplayID: DispatchWorkItem] = [:]
+    /// Slider and key values for DDC monitors: the newest one waiting, and the monitors with a write under way.
+    /// One write at a time per monitor, always the newest value, so the screen follows a drag as fast as DDC allows.
+    var ddcWant: [CGDirectDisplayID: Int] = [:]
+    var ddcBusy: Set<CGDirectDisplayID> = []
     var busy = false, again = false, wasHere = true
     var generation = 0
     var lastTick = Date.distantPast
@@ -265,13 +268,22 @@ import DaylitCore
         let m = mons[i]
         if m.control == .native { Native.set(m.id, Int(v)); return }
         guard m.control == .ddc else { return }
-        pending[m.id]?.cancel()   // DDC is slow: only send the last value of a quick series
-        let uuid = m.uuid, val = Int(v), id = m.id
-        let w = DispatchWorkItem {
+        ddcWant[m.id] = Int(v)
+        sendDDC(m.id, m.uuid)
+    }
+
+    /// Sends the newest waiting value unless a write to this monitor is still under way; that write sends it when done.
+    func sendDDC(_ id: CGDirectDisplayID, _ uuid: String) {
+        guard !ddcBusy.contains(id), let val = ddcWant.removeValue(forKey: id) else { return }
+        ddcBusy.insert(id)
+        ddcQ.async {
             let ok = DDC.set(uuid, val)
-            Task { @MainActor in self.userWrote(id, ok: ok) }
+            Task { @MainActor in
+                self.ddcBusy.remove(id)
+                self.userWrote(id, ok: ok)
+                self.sendDDC(id, uuid)
+            }
         }
-        pending[m.id] = w; ddcQ.asyncAfter(deadline: .now() + 0.15, execute: w)
     }
 
     /// A slider or key write reached (or didn't reach) a DDC monitor that has never reported its level.
