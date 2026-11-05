@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: Nachox07.Daylit
-PackageVersion: 1.1.0
+PackageVersion: 1.2.0
 MinimumOSVersion: 10.0.17763.0
 InstallerType: zip
 NestedInstallerType: portable
@@ -13,10 +13,10 @@ ArchiveBinariesDependOnPath: true
 Dependencies:
   PackageDependencies:
   - PackageIdentifier: Microsoft.DotNet.DesktopRuntime.10
-ReleaseDate: 2026-11-03
+ReleaseDate: 2026-11-05
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/Nachox07/daylit/releases/download/v1.1.0/Daylit-windows-1.1.0.zip
-  InstallerSha256: C0A352F1E370D573ABB685AB3AC2DBBAA7AD338D9827E22A7B80449D9104B762
+  InstallerUrl: https://github.com/Nachox07/daylit/releases/download/v1.2.0/Daylit-windows-1.2.0.zip
+  InstallerSha256: 02358B5A3AC4EBD86B0507310418BE8B9AFDCC5BB2A0265D149CC05734D34908
 ManifestType: installer
 ManifestVersion: 1.12.0
