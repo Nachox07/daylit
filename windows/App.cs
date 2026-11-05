@@ -481,8 +481,10 @@ sealed class Controller {
         if (ratio is double r)
             LightStatus = $"Now {Pct(r)}% of a clear sky, so daylight counts at most {Pct(light)}%.";
         else if (!lightRef.IsEmpty)
-            LightStatus = reading == null ? "No reading from the sensor right now: going back to the sun's height alone."
-                                          : "Too little sun to compare right now: the sun's height alone decides.";
+            // A solar sensor sits at 0 and stops reporting after sunset: that is night, not a stuck sensor.
+            LightStatus = here <= 0 ? "The sun is down: the sensor counts again in the morning."
+                : reading == null ? "No reading from the sensor right now: going back to the sun's height alone."
+                : "Too little sun to compare right now: the sun's height alone decides.";
         return s with { LightRatio = ratio };
     }
     static int? Tenths(double? r) => r is double v ? (int)Math.Round(v * 10, MidpointRounding.AwayFromZero) : null;
