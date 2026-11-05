@@ -130,6 +130,8 @@ struct MonitorDraft: Identifiable {
     var label: String
     var day, blindDown, night: Double
     let haLevels: Bool             // Home Assistant helpers set these levels
+    let contrastApplies: Bool      // DDC monitor: the contrast box is shown
+    var contrast = ""              // empty = not set
 }
 
 struct SettingsView: View {
@@ -231,6 +233,15 @@ struct SettingsView: View {
                     level("Day", "sun.max", $d.day)
                     level("Blind closed", "blinds.horizontal.closed", $d.blindDown)
                     level("Night", "moon", $d.night)
+                    if d.contrastApplies {
+                        LabeledContent {
+                            HStack(spacing: 6) {
+                                TextField("Contrast", text: $d.contrast, prompt: Text("Not set"))
+                                    .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
+                                Text("%").foregroundStyle(.secondary).frame(width: 16, alignment: .leading)
+                            }
+                        } label: { Row("Contrast", "circle.lefthalf.filled") }
+                    }
                     if let now = rightNow(d) {
                         LabeledContent("Right now") {
                             Text("\(now)%").font(.title3.weight(.semibold)).monospacedDigit()
@@ -469,6 +480,7 @@ struct SettingsView: View {
     func caption(_ d: MonitorDraft) -> String {
         var s = coords == nil ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save."
         if d.haLevels { s += " Home Assistant helpers set these levels; these apply only when it cannot be reached." }
+        if d.contrastApplies { s += " Contrast is set when the monitor is detected; empty leaves it to the monitor." }
         return s
     }
 
@@ -487,7 +499,8 @@ struct SettingsView: View {
             let ha = cfg?.homeAssistant
             return MonitorDraft(id: mon.uuid, name: mon.name, label: cfg?.label ?? mon.name,
                                 day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20,
-                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil)
+                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil,
+                                contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "")
         }
         error = nil
         note = opened.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
@@ -505,9 +518,19 @@ struct SettingsView: View {
             guard let v = Double(text) else { error = "\(f.label) \(f.unit): \"\(text)\" is not a number."; return nil }
             values[f.id] = v
         }
+        var mons: [SettingsEdit.Monitor] = []
+        for d in monitors {
+            var me = SettingsEdit.Monitor(name: d.name, suggestedMatch: CLI.suggestMatch(d.name), label: d.label,
+                                         day: Int(d.day.rounded()), blindDown: Int(d.blindDown.rounded()), night: Int(d.night.rounded()))
+            if d.contrastApplies {
+                let (ok, v) = ContrastRule.parseField(d.contrast)
+                if !ok { error = "Contrast for \(d.label) is 0 to 100, or empty to leave it unset."; return nil }
+                me.contrastEditable = true; me.contrast = v
+            }
+            mons.append(me)
+        }
         var e = SettingsEdit(source: source, latitude: coords?.0, longitude: coords?.1,
-                            monitors: monitors.map { .init(name: $0.name, suggestedMatch: CLI.suggestMatch($0.name), label: $0.label,
-                                                           day: Int($0.day.rounded()), blindDown: Int($0.blindDown.rounded()), night: Int($0.night.rounded())) },
+                            monitors: mons,
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
         e.light = daylightSensor
         e.tuning = values

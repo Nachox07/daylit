@@ -646,6 +646,38 @@ public class ConfigPatchTests {
     static System.Text.Json.Nodes.JsonObject Json(string s) => (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(s)!;
 
     [Fact]
+    public void ContrastBoxWritesAndRemovesTheKeyAndKeepsTheRest() {
+        const string original = """{ "monitors": [ { "match": "U2723QE", "control": "ddc", "contrast": 40, "future": 1 } ] }""";
+        var m = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { Contrast = 70, ContrastEditable = true }]), original))["monitors"]![0]!;
+        Assert.Equal(70, (int)m["contrast"]!);
+        Assert.Equal("ddc", (string)m["control"]!); Assert.Equal(1, (int)m["future"]!);
+        var saved = ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { Contrast = null, ContrastEditable = true }]), original);
+        m = Json(saved)["monitors"]![0]!;
+        Assert.Null(m["contrast"]);   // an empty box removes the key
+        Assert.Equal(1, (int)m["future"]!);
+        var p = Path.Combine(Path.GetTempPath(), $"daylit-test-{Guid.NewGuid()}.json");
+        File.WriteAllText(p, saved);
+        Assert.Null(Config.Load(p).cfg.Monitors![0].Contrast);
+    }
+
+    [Fact]
+    public void ContrastWithoutABoxIsKept() {
+        var m = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell]), """{ "monitors": [ { "match": "U2723QE", "contrast": 40 } ] }"""))["monitors"]![0]!;
+        Assert.Equal(40, (int)m["contrast"]!);   // an HDR monitor has no box: its contrast stays
+    }
+
+    [Fact]
+    public void ContrastBoxText() {
+        Assert.True(ContrastRule.ParseField("").ok); Assert.Null(ContrastRule.ParseField("  ").value);
+        Assert.Equal(60, ContrastRule.ParseField("60").value);
+        Assert.Equal(63, ContrastRule.ParseField("62,5").value);
+        Assert.Equal(0, ContrastRule.ParseField("0").value);
+        Assert.False(ContrastRule.ParseField("101").ok);
+        Assert.False(ContrastRule.ParseField("-1").ok);
+        Assert.False(ContrastRule.ParseField("high").ok);
+    }
+
+    [Fact]
     public void KeepsWhatTheWindowDoesNotOwn() {
         const string original = """
             { // a comment

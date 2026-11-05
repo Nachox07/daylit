@@ -684,6 +684,35 @@ final class ConfigEditTests: XCTestCase {
     func json(_ d: Data) -> [String: Any] { try! JSONSerialization.jsonObject(with: d) as! [String: Any] }
     let dell = SettingsEdit.Monitor(name: "DELL U2723QE", suggestedMatch: "U2723QE", label: "Left", day: 80, blindDown: 45, night: 15)
 
+    func testContrastBoxWritesAndRemovesTheKeyAndKeepsTheRest() throws {
+        let original = #"{ "monitors": [ { "match": "U2723QE", "control": "ddc", "contrast": 40, "future": 1 } ] }"#
+        var e = SettingsEdit(source: "off", monitors: [dell])
+        e.monitors[0].contrastEditable = true; e.monitors[0].contrast = 70
+        var m = (json(try ConfigPatch.apply(e, to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["contrast"] as? Int, 70)
+        XCTAssertEqual(m["control"] as? String, "ddc"); XCTAssertEqual(m["future"] as? Int, 1)
+        e.monitors[0].contrast = nil
+        m = (json(try ConfigPatch.apply(e, to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertNil(m["contrast"], "an empty box removes the key")
+        XCTAssertEqual(m["future"] as? Int, 1)
+        let saved = try ConfigPatch.apply(e, to: Data(original.utf8))
+        XCTAssertNil(try JSONDecoder().decode(Config.self, from: saved).monitors?[0].contrast)
+    }
+    func testContrastWithoutABoxIsKept() throws {
+        let original = #"{ "monitors": [ { "match": "U2723QE", "contrast": 40 } ] }"#
+        let m = (json(try ConfigPatch.apply(SettingsEdit(source: "off", monitors: [dell]), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["contrast"] as? Int, 40, "an HDR or native monitor has no box: its contrast stays")
+    }
+    func testContrastBoxText() {
+        XCTAssertTrue(ContrastRule.parseField("").ok); XCTAssertNil(ContrastRule.parseField("  ").value)
+        XCTAssertEqual(ContrastRule.parseField("60").value, 60)
+        XCTAssertEqual(ContrastRule.parseField("62,5").value, 63)
+        XCTAssertEqual(ContrastRule.parseField("0").value, 0)
+        XCTAssertFalse(ContrastRule.parseField("101").ok)
+        XCTAssertFalse(ContrastRule.parseField("-1").ok)
+        XCTAssertFalse(ContrastRule.parseField("high").ok)
+    }
+
     func testCommentsAndTrailingCommasAreIgnored() throws {
         let text = """
         { // where

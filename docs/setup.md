@@ -155,14 +155,16 @@ Turn the switch off and on again to capture new offsets.
 
 ## Contrast
 
-Optional and manual: `"contrast": 60` in a monitor's entry sets its contrast (DDC/CI VCP code `0x12`)
+Optional and manual: the *Contrast* box under a monitor in Settings → Displays, or `"contrast": 60` in a
+monitor's entry, sets its contrast (DDC/CI VCP code `0x12`)
 once at start, and again after a display change, a wake from sleep or a config reload. Daylit never
-changes it on its own and the panel has no contrast slider.
+changes it on its own and the panel has no contrast slider. The box is shown only for monitors driven
+over DDC/CI; leaving it empty removes the key.
 
 - Only monitors driven over DDC/CI get it: with HDR on (macOS's own brightness control, Windows's SDR
   content brightness) it is skipped, and HDR monitors usually ignore contrast anyway.
 - Values are 0–100; outside that range they are clamped. Removing the key leaves the monitor at the
-  last contrast it was given; set it in the monitor's menu or write the value you want.
+  last contrast it was given; set it in the monitor's menu or type the value you want.
 - An idle computer leaves it for when you are back, like brightness, in case the monitor is showing
   another computer. A monitor that refuses it is noted in the log (`contrast: … did not accept`).
 

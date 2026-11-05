@@ -54,6 +54,9 @@ public struct SettingsEdit: Equatable {
         public var suggestedMatch: String    // used only when no config entry matches it yet
         public var label: String
         public var day, blindDown, night: Int
+        /// The window shows a contrast box for this monitor (DDC only). When false, `contrast` in the file is kept as it is.
+        public var contrastEditable = false
+        public var contrast: Int? = nil       // nil = not set: the key is removed
         public init(name: String, suggestedMatch: String, label: String, day: Int, blindDown: Int, night: Int) {
             self.name = name; self.suggestedMatch = suggestedMatch; self.label = label
             self.day = day; self.blindDown = blindDown; self.night = night
@@ -79,7 +82,7 @@ public enum ConfigEditError: Error, Equatable { case notAnObject, invalid(String
 
 public enum ConfigPatch {
     /// The file with the edit applied. Unknown keys, unplugged monitors and per-monitor settings the
-    /// window does not show (control, Home Assistant helpers) are kept. Comments are not: the file is
+    /// window does not show (control, Home Assistant helpers, contrast where it has no box) are kept. Comments are not: the file is
     /// written back as plain JSON. Throws when the result would not load.
     public static func apply(_ e: SettingsEdit, to original: Data?) throws -> Data {
         var root: [String: Any] = [:]
@@ -121,6 +124,9 @@ public enum ConfigPatch {
             let label = m.label.trimmingCharacters(in: .whitespacesAndNewlines)
             entry["label"] = label.isEmpty || label == m.name ? nil : label
             entry["day"] = clamp(m.day); entry["blindDown"] = clamp(m.blindDown); entry["night"] = clamp(m.night)
+            if m.contrastEditable {
+                if let c = m.contrast { entry["contrast"] = clamp(c) } else { entry["contrast"] = nil }
+            }
             if let i { list[i] = entry } else { list.append(entry) }
         }
         root["monitors"] = list.isEmpty ? nil : list

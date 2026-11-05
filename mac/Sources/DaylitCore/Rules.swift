@@ -359,4 +359,12 @@ public enum ContrastRule {
         let v = Int(min(100, max(0, c)).rounded())
         return v == written ? nil : v
     }
+    /// The Settings window's contrast box: empty = not set (nil), else a whole number 0–100 (a decimal comma
+    /// is fine, halves round up). `ok` is false for anything else, so the window can say what is wrong.
+    public static func parseField(_ text: String) -> (ok: Bool, value: Int?) {
+        let t = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        if t.isEmpty { return (true, nil) }
+        guard let v = Double(t), v.isFinite, (0...100).contains(v) else { return (false, nil) }
+        return (true, Int(v.rounded()))
+    }
 }
