@@ -502,7 +502,8 @@ sealed class Controller {
             m.ContrastSet = v;
             var gdi = m.D.Gdi;
             bool ok = await Task.Run(() => { try { return Ddc.Set(gdi, v, Ddc.Contrast); } catch { return false; } });
-            Log.Write(ok ? $"contrast: {m.Label} set to {v}" : $"contrast: {m.Label} did not accept contrast {v}");
+            Log.Write(ok ? $"contrast: {m.Label} set to {v}"
+                         : $"display: {m.Label} did not take contrast {v}; trying again after the next display change, wake or reload");
         }
     }
 

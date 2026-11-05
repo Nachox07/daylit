@@ -154,7 +154,8 @@ import DaylitCore
             let uuid = m.uuid, label = m.label
             ddcQ.async {
                 let ok = DDC.setContrast(uuid, v)
-                Log.write(ok ? "contrast: \(label) set to \(v)" : "contrast: \(label) did not accept contrast \(v)")
+                Log.write(ok ? "contrast: \(label) set to \(v)"
+                             : "display: \(label) did not take contrast \(v); trying again after the next display change, wake or reload")
             }
         }
     }

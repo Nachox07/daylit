@@ -166,7 +166,7 @@ over DDC/CI; leaving it empty removes the key.
 - Values are 0–100; outside that range they are clamped. Removing the key leaves the monitor at the
   last contrast it was given; set it in the monitor's menu or type the value you want.
 - An idle computer leaves it for when you are back, like brightness, in case the monitor is showing
-  another computer. A monitor that refuses it is noted in the log (`contrast: … did not accept`).
+  another computer. A monitor that refuses it is noted in the log (`display: … did not take contrast`).
 
 ## Light and dark mode
 
