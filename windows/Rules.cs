@@ -165,20 +165,33 @@ sealed class LookRule {
     public void Reset() { daylight = whiteLights = null; }
 
     /// lightsOn: the room lights are on and come from Home Assistant (bri 0-255, hs saturation 0 white … ~60+ warm).
-    public bool WantDark(double elev, double pos, bool hasBlind, bool lightsOn, double bri, double sat, Tuning? t = null) {
+    /// previous: what the OS shows now (dark = true), passed while there is no earlier answer (start,
+    /// config reload, feature switched on). Inside a gap it fills the missing answer so the result
+    /// keeps the OS as it is; outside a gap it is ignored. null: a point inside each gap decides.
+    public bool WantDark(double elev, double pos, bool hasBlind, bool lightsOn, double bri, double sat, Tuning? t = null, bool? previous = null) {
         t ??= new Tuning();
         hasBlind &= t.Room; lightsOn &= t.Room;
-        // Before any answer, the middle of each gap decides (3° and 50% with the defaults).
+        // Each condition's answer when the sample is outside its gap; null inside it.
+        bool? dayNow = hasBlind
+            ? elev > t.LightSunAbove && pos >= t.LightBlindAbove ? true : elev < t.DarkSunBelow || pos <= t.DarkBlindBelow ? false : null
+            : elev > t.LightSunAbove ? true : elev < t.DarkSunBelow ? false : null;
+        bool lit = lightsOn && bri > 0; double pct = bri / 2.55;
+        bool? whiteNow = lit && pct >= t.WhiteLightsAbove && sat <= t.WhiteSaturationMax ? true
+                       : !lit || pct < t.WhiteLightsBelow || sat > t.WarmSaturationMin ? false : null;
+        // In a gap with no earlier answer, take the one that keeps the OS as it is (light: true, dark: false).
+        // A condition is left to the default below when the other one already decides the result.
+        if (previous is bool dark) {
+            bool fillDay = dayNow == null && daylight == null, fillWhite = whiteNow == null && whiteLights == null;
+            if (fillDay && (!dark || fillWhite || (whiteNow ?? whiteLights) == false)) daylight = !dark;
+            if (fillWhite && (!dark || fillDay || (dayNow ?? daylight) == false)) whiteLights = !dark;
+        }
         // Before any answer, a point inside each gap decides (3° and 50% with the defaults).
         double midSun = (t.LightSunAbove + t.DarkSunBelow) / 2 + Math.Min(0.5, (t.LightSunAbove - t.DarkSunBelow) / 4);
         double midBlind = (t.LightBlindAbove + t.DarkBlindBelow) / 2 + Math.Min(5, (t.LightBlindAbove - t.DarkBlindBelow) / 4);
-        daylight = hasBlind
-            ? elev > t.LightSunAbove && pos >= t.LightBlindAbove ? true : elev < t.DarkSunBelow || pos <= t.DarkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)
-            : elev > t.LightSunAbove ? true : elev < t.DarkSunBelow ? false : daylight ?? elev > midSun;
-        bool lit = lightsOn && bri > 0; double pct = bri / 2.55;
-        whiteLights = lit && pct >= t.WhiteLightsAbove && sat <= t.WhiteSaturationMax ? true
-                    : !lit || pct < t.WhiteLightsBelow || sat > t.WarmSaturationMin ? false : whiteLights ?? false;
-        return !(daylight.Value || whiteLights.Value);
+        bool day = dayNow ?? daylight ?? (elev > midSun && (!hasBlind || pos >= midBlind));
+        bool white = whiteNow ?? whiteLights ?? false;
+        daylight = day; whiteLights = white;
+        return !(day || white);
     }
 }
 

@@ -173,11 +173,21 @@ static class Look {
     [DllImport("user32", CharSet = CharSet.Unicode)]
     static extern IntPtr SendMessageTimeoutW(IntPtr h, uint msg, IntPtr w, string l, uint flags, uint timeout, out IntPtr r);
 
+    /// Whether Windows already shows this mode: apps, taskbar and (a stock) wallpaper.
+    public static bool Shows(bool dark) {
+        using var k = Registry.CurrentUser.OpenSubKey(Pers);
+        return ThemeIs(k, dark) && WallpaperToSet(dark) == null;
+    }
+    static bool ThemeIs(RegistryKey? k, bool dark) {
+        int v = dark ? 0 : 1;
+        return k?.GetValue("AppsUseLightTheme") is int a && a == v && k.GetValue("SystemUsesLightTheme") is int b && b == v;
+    }
+
     public static void SetDark(bool dark) {
         SetWallpaper(dark);
         using var k = Registry.CurrentUser.CreateSubKey(Pers);
         int v = dark ? 0 : 1;
-        if (k.GetValue("AppsUseLightTheme") is int a && a == v && k.GetValue("SystemUsesLightTheme") is int b && b == v) return;
+        if (ThemeIs(k, dark)) return;
         k.SetValue("AppsUseLightTheme", v, RegistryValueKind.DWord);
         k.SetValue("SystemUsesLightTheme", v, RegistryValueKind.DWord);
         SendMessageTimeoutW((IntPtr)0xFFFF, 0x1A /* WM_SETTINGCHANGE */, IntPtr.Zero, "ImmersiveColorSet", 2, 1000, out _);
@@ -187,13 +197,18 @@ static class Look {
     // Only swaps between those two, so a custom wallpaper is never replaced.
     static readonly string WallDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"Web\Wallpaper\Windows");
     [DllImport("user32", CharSet = CharSet.Unicode)] static extern bool SystemParametersInfoW(uint action, uint param, string value, uint flags);
-    static void SetWallpaper(bool dark) {
+    /// The stock wallpaper to switch to, or null when there is nothing to swap.
+    static string? WallpaperToSet(bool dark) {
         string light = Path.Combine(WallDir, "img0.jpg"), darkImg = Path.Combine(WallDir, "img19.jpg");
-        var cur = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop")?.GetValue("WallPaper") as string ?? "";
+        using var desk = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop");
+        var cur = desk?.GetValue("WallPaper") as string ?? "";
         bool isStock = cur.Equals(light, StringComparison.OrdinalIgnoreCase) || cur.Equals(darkImg, StringComparison.OrdinalIgnoreCase);
         string want = dark ? darkImg : light;
-        if (!isStock || cur.Equals(want, StringComparison.OrdinalIgnoreCase) || !File.Exists(want)) return;
-        SystemParametersInfoW(0x14 /* SPI_SETDESKWALLPAPER */, 0, want, 3 /* update ini + broadcast */);
+        return !isStock || cur.Equals(want, StringComparison.OrdinalIgnoreCase) || !File.Exists(want) ? null : want;
+    }
+    static void SetWallpaper(bool dark) {
+        if (WallpaperToSet(dark) is string want)
+            SystemParametersInfoW(0x14 /* SPI_SETDESKWALLPAPER */, 0, want, 3 /* update ini + broadcast */);
     }
 }
 

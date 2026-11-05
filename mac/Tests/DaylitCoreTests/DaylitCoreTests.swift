@@ -352,6 +352,49 @@ final class LookTests: XCTestCase {
         XCTAssertTrue(r.wantDark(elev: 0.5, pos: 100, hasBlind: true, lightsOn: false, bri: 0, sat: 0))   // below 1°: dark
         XCTAssertTrue(r.wantDark(elev: 2, pos: 100, hasBlind: true, lightsOn: false, bri: 0, sat: 0))     // gap: stays dark
     }
+    // Sun 16°, blind 40% (inside the default 35–55 gap), lights off: only the daylight condition is undecided.
+    func testAFreshRuleInTheGapKeepsALightScreen() {
+        var r = LookRule()
+        XCTAssertFalse(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: false))
+        XCTAssertFalse(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0), "stays light")
+    }
+    func testAFreshRuleInTheGapKeepsADarkScreen() {
+        var r = LookRule()
+        XCTAssertTrue(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: true))
+        XCTAssertTrue(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0), "stays dark")
+    }
+    func testAFreshRuleInTheGapWithoutTheScreenStateUsesTheMidpoint() {
+        var r = LookRule()
+        XCTAssertTrue(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: nil), "40% is under the 50% midpoint")
+        var open = LookRule()
+        XCTAssertFalse(open.wantDark(elev: 16, pos: 52, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: nil), "52% is over it")
+    }
+    func testOutsideTheGapTheScreenStateIsIgnored() {
+        var a = LookRule(), b = LookRule(), c = LookRule()
+        XCTAssertFalse(a.wantDark(elev: 16, pos: 80, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: true), "blind open: light")
+        XCTAssertTrue(b.wantDark(elev: 16, pos: 20, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: false), "blind closed: dark")
+        XCTAssertTrue(c.wantDark(elev: -10, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: false), "night: dark")
+    }
+    func testBothConditionsInTheGapFollowTheScreenState() {
+        // Lights at 185 of 255 (about 73%, between 66.6 and 78.4) and white: also inside their gap.
+        var light = LookRule(), dark = LookRule(), unknown = LookRule()
+        XCTAssertFalse(light.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: true, bri: 185, sat: 10, previous: false))
+        XCTAssertFalse(light.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: true, bri: 185, sat: 10), "stays light")
+        XCTAssertTrue(dark.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: true, bri: 185, sat: 10, previous: true))
+        XCTAssertTrue(dark.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: true, bri: 185, sat: 10), "stays dark")
+        XCTAssertTrue(unknown.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: true, bri: 185, sat: 10, previous: nil))
+    }
+    func testAfterKeepingALightScreenSunsetStillTurnsItDark() {
+        var r = LookRule()
+        XCTAssertFalse(r.wantDark(elev: 16, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0, previous: false))
+        XCTAssertTrue(r.wantDark(elev: 0.5, pos: 40, hasBlind: true, lightsOn: false, bri: 0, sat: 0), "sun below 1°: dark")
+    }
+    func testADarkScreenUnderBrightWhiteLightsLeavesDaylightToTheMidpoint() {
+        // Bright white lights decide light on their own, so the dark screen says nothing about daylight.
+        var r = LookRule()
+        XCTAssertFalse(r.wantDark(elev: 16, pos: 52, hasBlind: true, lightsOn: true, bri: 230, sat: 10, previous: true))
+        XCTAssertFalse(r.wantDark(elev: 16, pos: 52, hasBlind: true, lightsOn: false, bri: 0, sat: 0), "52% blind is over the midpoint: light")
+    }
     func testWithoutBlindOnlyTheSunCounts() {
         var r = LookRule()
         XCTAssertFalse(r.wantDark(elev: 10, pos: 0, hasBlind: false, lightsOn: false, bri: 0, sat: 0))

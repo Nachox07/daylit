@@ -162,22 +162,33 @@ public struct LookRule: Equatable {
     public init() {}
 
     /// - lightsOn: the room lights are on and come from Home Assistant (bri 0-255, hs saturation 0 white ... ~60+ warm).
+    /// - previous: what the OS shows now (dark = true), passed while there is no earlier answer (start,
+    ///   config reload, feature switched on). Inside a gap it fills the missing answer so the result
+    ///   keeps the OS as it is; outside a gap it is ignored. nil: a point inside each gap decides.
     public mutating func wantDark(elev: Double, pos: Double, hasBlind: Bool, lightsOn: Bool, bri: Double, sat: Double,
-                                  tuning t: Tuning = Tuning()) -> Bool {
+                                  tuning t: Tuning = Tuning(), previous: Bool? = nil) -> Bool {
         let hasBlind = hasBlind && t.room, lightsOn = lightsOn && t.room
+        // Each condition's answer when the sample is outside its gap; nil inside it.
+        let dayNow: Bool? = hasBlind
+            ? (elev > t.lightSunAbove && pos >= t.lightBlindAbove ? true : elev < t.darkSunBelow || pos <= t.darkBlindBelow ? false : nil)
+            : (elev > t.lightSunAbove ? true : elev < t.darkSunBelow ? false : nil)
+        let lit = lightsOn && bri > 0, pct = bri / 2.55
+        let whiteNow: Bool? = lit && pct >= t.whiteLightsAbove && sat <= t.whiteSaturationMax ? true
+                            : !lit || pct < t.whiteLightsBelow || sat > t.warmSaturationMin ? false : nil
+        // In a gap with no earlier answer, take the one that keeps the OS as it is (light: true, dark: false).
+        // A condition is left to the default below when the other one already decides the result.
+        if let dark = previous {
+            let fillDay = dayNow == nil && daylight == nil, fillWhite = whiteNow == nil && whiteLights == nil
+            if fillDay && (!dark || fillWhite || (whiteNow ?? whiteLights) == false) { daylight = !dark }
+            if fillWhite && (!dark || fillDay || (dayNow ?? daylight) == false) { whiteLights = !dark }
+        }
         // Before any answer, a point inside each gap decides (3° and 50% with the defaults).
         let midSun = (t.lightSunAbove + t.darkSunBelow) / 2 + min(0.5, (t.lightSunAbove - t.darkSunBelow) / 4)
         let midBlind = (t.lightBlindAbove + t.darkBlindBelow) / 2 + min(5, (t.lightBlindAbove - t.darkBlindBelow) / 4)
-        if hasBlind {
-            daylight = elev > t.lightSunAbove && pos >= t.lightBlindAbove ? true
-                     : elev < t.darkSunBelow || pos <= t.darkBlindBelow ? false : daylight ?? (elev > midSun && pos >= midBlind)
-        } else {
-            daylight = elev > t.lightSunAbove ? true : elev < t.darkSunBelow ? false : daylight ?? (elev > midSun)
-        }
-        let lit = lightsOn && bri > 0, pct = bri / 2.55
-        whiteLights = lit && pct >= t.whiteLightsAbove && sat <= t.whiteSaturationMax ? true
-                    : !lit || pct < t.whiteLightsBelow || sat > t.warmSaturationMin ? false : whiteLights ?? false
-        return !(daylight! || whiteLights!)
+        let day = dayNow ?? daylight ?? (elev > midSun && (!hasBlind || pos >= midBlind))
+        let white = whiteNow ?? whiteLights ?? false
+        daylight = day; whiteLights = white
+        return !(day || white)
     }
 }
 

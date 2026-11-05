@@ -174,7 +174,9 @@ Optional, with the sun or Home Assistant source: on by default on Windows, off b
 Light mode when daylight comes in (sun above 4°, and with Home Assistant the blind at least 55 %
 open) or when the room lights are bright and white; dark otherwise, including night with dim or
 orange lights. Each condition has a gap between its on and off thresholds so it does not flip back
-and forth, and a manual switch stays until the automatic decision next changes.
+and forth, and a manual switch stays until the automatic decision next changes. After a start, a
+config reload or turning the feature on, a reading inside a gap keeps the mode the computer already
+shows; only a reading past a threshold switches it.
 
 - Windows: if the wallpaper is one of Windows 11's stock light/dark pair, it is swapped too; a
   custom wallpaper is never touched.

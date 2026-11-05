@@ -308,6 +308,54 @@ public class LookTests {
     [Fact] public void WarmLightsAtNightStayDark() => Assert.True(new LookRule().WantDark(-10, 0, true, true, 230, 70));
     [Fact] public void WithoutBlindOnlyTheSunCounts() => Assert.False(new LookRule().WantDark(10, 0, false, false, 0, 0));
 
+    // Sun 16°, blind 40% (inside the default 35–55 gap), lights off: only the daylight condition is undecided.
+    [Fact]
+    public void AFreshRuleInTheGapKeepsALightScreen() {
+        var r = new LookRule();
+        Assert.False(r.WantDark(16, 40, true, false, 0, 0, previous: false));
+        Assert.False(r.WantDark(16, 40, true, false, 0, 0));   // stays light
+    }
+    [Fact]
+    public void AFreshRuleInTheGapKeepsADarkScreen() {
+        var r = new LookRule();
+        Assert.True(r.WantDark(16, 40, true, false, 0, 0, previous: true));
+        Assert.True(r.WantDark(16, 40, true, false, 0, 0));    // stays dark
+    }
+    [Fact]
+    public void AFreshRuleInTheGapWithoutTheScreenStateUsesTheMidpoint() {
+        Assert.True(new LookRule().WantDark(16, 40, true, false, 0, 0, previous: null));    // 40% is under the 50% midpoint
+        Assert.False(new LookRule().WantDark(16, 52, true, false, 0, 0, previous: null));   // 52% is over it
+    }
+    [Fact]
+    public void OutsideTheGapTheScreenStateIsIgnored() {
+        Assert.False(new LookRule().WantDark(16, 80, true, false, 0, 0, previous: true));   // blind open: light
+        Assert.True(new LookRule().WantDark(16, 20, true, false, 0, 0, previous: false));   // blind closed: dark
+        Assert.True(new LookRule().WantDark(-10, 40, true, false, 0, 0, previous: false));  // night: dark
+    }
+    [Fact]
+    public void BothConditionsInTheGapFollowTheScreenState() {
+        // Lights at 185 of 255 (about 73%, between 66.6 and 78.4) and white: also inside their gap.
+        var light = new LookRule(); var dark = new LookRule();
+        Assert.False(light.WantDark(16, 40, true, true, 185, 10, previous: false));
+        Assert.False(light.WantDark(16, 40, true, true, 185, 10));   // stays light
+        Assert.True(dark.WantDark(16, 40, true, true, 185, 10, previous: true));
+        Assert.True(dark.WantDark(16, 40, true, true, 185, 10));     // stays dark
+        Assert.True(new LookRule().WantDark(16, 40, true, true, 185, 10, previous: null));
+    }
+    [Fact]
+    public void AfterKeepingALightScreenSunsetStillTurnsItDark() {
+        var r = new LookRule();
+        Assert.False(r.WantDark(16, 40, true, false, 0, 0, previous: false));
+        Assert.True(r.WantDark(0.5, 40, true, false, 0, 0));   // sun below 1°: dark
+    }
+    [Fact]
+    public void ADarkScreenUnderBrightWhiteLightsLeavesDaylightToTheMidpoint() {
+        // Bright white lights decide light on their own, so the dark screen says nothing about daylight.
+        var r = new LookRule();
+        Assert.False(r.WantDark(16, 52, true, true, 230, 10, previous: true));
+        Assert.False(r.WantDark(16, 52, true, false, 0, 0));   // 52% blind is over the midpoint: light
+    }
+
     [Fact]
     public void InTheGapThePreviousAnswerStays() {
         var r = new LookRule();
