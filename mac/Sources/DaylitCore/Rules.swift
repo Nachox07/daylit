@@ -52,6 +52,18 @@ public struct HoldState: Equatable {
     }
 }
 
+extension HoldState {
+    /// After a tick sent a level to the monitor (`before`: the state that tick started from). A refused
+    /// write applied nothing, so forget it: otherwise the next tick reads the old level, takes the gap
+    /// for a hand-set change and stops retrying. A Home Assistant "set" it carried stays pending, so
+    /// the next tick applies it again too.
+    public func afterWrite(ok: Bool, before: HoldState) -> HoldState {
+        var s = self
+        if !ok { s.lastSet = nil; s.remoteSeen = before.remoteSeen }
+        return s
+    }
+}
+
 /// The outcome of one tick for one monitor.
 public struct Step: Equatable {
     public var state: HoldState

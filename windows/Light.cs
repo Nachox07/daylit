@@ -41,6 +41,23 @@ sealed class LightReference {
     public bool IsEmpty => Bins.Count == 0;
 }
 
+/// The unit the sensor reports in, and since when its history is all in that unit. Changing it in Home
+/// Assistant (W to kW, lx to klx) leaves older readings 1000 times off, so the reference learns again
+/// from that moment instead of mixing the two for the next ten days.
+/// Unit: "" until the sensor has reported one. Since: Unix seconds; 0 = all of its history.
+sealed record LightUnit(string Sensor, string Unit, double Since) {
+    /// After a tick read `unit` for `sensor`. A missing unit (the sensor briefly unavailable) changes nothing.
+    public static LightUnit Update(LightUnit? saved, string sensor, string? unit, double now) {
+        string u = unit ?? "";
+        if (saved == null || saved.Sensor != sensor) return new(sensor, u, 0);
+        if (u == "" || u == saved.Unit) return saved;
+        if (saved.Unit == "") return new(sensor, u, saved.Since);   // the first unit seen
+        return new(sensor, u, now);
+    }
+    /// How many days of history to learn from: `days`, or fewer since the unit changed.
+    public double HistoryDays(double days, double now) => Math.Min(days, Math.Max(0, (now - Since) / 86400));
+}
+
 static class LightRules {
     /// How clear the sky is now, 0…1, or null when the reading tells nothing: no reference for this part of
     /// the sky, a reference too small to compare with (the sun barely up on the panels), or a reading of
@@ -70,7 +87,9 @@ static class LightRules {
 
     /// The readings in a Home Assistant history answer (GET /api/history/period, minimal_response), each
     /// with the sun's elevation and direction at that moment. Readings that are not numbers are skipped.
-    public static List<LightSample> Samples(string history, double lat, double lon) {
+    /// With `since` (LightUnit.Since) everything up to that moment is skipped too: Home Assistant starts the
+    /// answer with the state at the start time, which can still be in the old unit.
+    public static List<LightSample> Samples(string history, double lat, double lon, double since = 0) {
         var r = new List<LightSample>();
         try {
             using var doc = JsonDocument.Parse(history);
@@ -82,7 +101,8 @@ static class LightRules {
                     || !row.TryGetProperty("state", out var st) || st.ValueKind != JsonValueKind.String
                     || !double.TryParse(st.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
                     || !row.TryGetProperty("last_changed", out var ts) || ts.ValueKind != JsonValueKind.String
-                    || !DateTimeOffset.TryParse(ts.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d)) continue;
+                    || !DateTimeOffset.TryParse(ts.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d)
+                    || (since > 0 && d.ToUnixTimeMilliseconds() / 1000.0 <= since)) continue;
                 double e = Sun.Elevation(d, lat, lon);
                 if (e <= 0) continue;
                 r.Add(new LightSample(e, SunRising(lat, lon, d), v));

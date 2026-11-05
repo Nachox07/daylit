@@ -388,8 +388,10 @@ sealed class Controller {
     LightReference lightRef = new();
     DateTime? lightRefAt;
     bool lightRefBusy;
-    /// Which sensor and place the reference belongs to: a new one starts learning again.
+    /// Which sensor, unit and place the reference belongs to: a new one starts learning again.
     string lightRefFor = "";
+    /// The sensor's unit and since when its history is in it, kept across restarts.
+    LightUnit? lightUnit = Settings.LightUnit;
     /// The scale in use, smoothed, and when it last moved.
     double? lightNow;
     /// The cap in use now (1 without a sensor), for the Settings window's "right now" preview.
@@ -399,15 +401,18 @@ sealed class Controller {
     /// Runs beside the tick (the history call can take seconds); its state changes land on the UI thread.
     async Task RefreshLightReference(string entity, Location loc) {
         if (lightRefBusy) return;
-        string key = $"{entity} {loc.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)} {loc.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        var unit = lightUnit is { } lu && lu.Sensor == entity ? lu : new LightUnit(entity, "", 0);
+        string key = $"{entity} {unit.Unit} {loc.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture)} {loc.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
-        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty ? 3600 : 86400)) return;
+        // Hourly while there is no reference, or only hours of it since a unit change; then daily.
+        bool young = unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0) < 1;
+        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty || young ? 3600 : 86400)) return;
         lightRefBusy = true;
         try {
             lightRefAt = DateTime.UtcNow;
-            var (body, cause) = await HAClient.History(Cfg, entity, 10);
+            var (body, cause) = await HAClient.History(Cfg, entity, unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0));
             if (body != null) {
-                var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude));
+                var samples = await Task.Run(() => LightRules.Samples(body, loc.Latitude, loc.Longitude, unit.Since));
                 if (key != lightRefFor) return;   // the config changed meanwhile
                 var fresh = new LightReference(samples);
                 Log.Write($"light: clear-sky reference from {samples.Count} readings, {fresh.Bins.Count} steps of the sky" +
@@ -422,6 +427,16 @@ sealed class Controller {
             }
         } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(); }
         finally { lightRefBusy = false; }
+    }
+
+    /// Keeps the sensor's unit; a change (W to kW) makes the reference learn again from now.
+    void NoteLightUnit(string e, string? unit) {
+        var next = LightUnit.Update(lightUnit, e, unit, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+        if (next == lightUnit) return;
+        if (lightUnit is { } was && was.Sensor == e && was.Unit != "" && next.Unit != was.Unit)
+            Log.Write($"light: {e} now reports in {next.Unit} (was {was.Unit}), learning its clear sky again from now");
+        lightUnit = next;
+        Settings.LightUnit = next;
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
@@ -450,12 +465,13 @@ sealed class Controller {
             if (lightNow != null) light = StepLight(1);
             return s;
         }
+        NoteLightUnit(e, s.LightUnit);
         _ = RefreshLightReference(e, loc);
         // A sensor that has not reported for 15 minutes is stuck, not dark.
         double? reading = s.Light >= 0 && s.LightAge < 900 ? s.Light : null;
         // The sun here, as the reference was learned (Home Assistant's sun may be set elsewhere).
         double here = Sun.Elevation(DateTimeOffset.UtcNow, loc.Latitude, loc.Longitude);
-        double? ratio = lightRefFor.StartsWith(e + " ", StringComparison.Ordinal)
+        double? ratio = lightRefFor.StartsWith($"{e} {lightUnit?.Unit ?? ""} ", StringComparison.Ordinal)
             ? LightRules.Ratio(reading, here, LightRules.SunRising(loc.Latitude, loc.Longitude, DateTimeOffset.UtcNow), lightRef) : null;
         light = StepLight(LightRules.Cap(ratio, Cfg.Tuned.CloudyDaylight / 100));
         if (ratio is double r)
@@ -554,18 +570,27 @@ sealed class Controller {
             bool dragging = m.Dragging;   // the slider is in the user's hand
             var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, Now);
             if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
-            if (i == li) groupBase = syncOffsets.Base(m.Key, step.Applied);
             if (!dragging) m.Touched = false;
-            if (step.State.Offset != m.Offset && step.State.Offset is int o)
-                Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
-            (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (step.State.RemoteSeen, step.State.LastSet, step.State.LastTarget, step.State.Offset, step.State.OffsetSun, step.State.OffsetAt);
-            if (holds.Record(m.Key, step.State, Now)) holdsChanged = true;
             bool remote = step.Remote != null;
-            if (remote) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
-            else if (step.Write is int w) Log.Write($"auto: {m.Label} {c}% → {w}%");
-            if (step.Write is int v) await Task.Run(() => m.Write(v));
-            m.Cur = step.Current; m.Manual = step.Manual;
-            int applied = step.Applied;
+            if (remote && !m.WriteFailing) Log.Write($"remote: {m.Label} {c}% → {step.Remote}% from Home Assistant");
+            else if (step.Write is int w && !m.WriteFailing) Log.Write($"auto: {m.Label} {c}% → {w}%");
+            bool ok = true;
+            if (step.Write is int v) {
+                ok = await Task.Run(() => m.Write(v));
+                // Logged once when it starts and once when it ends, not every tick while it lasts.
+                if (ok == m.WriteFailing)
+                    Log.Write(ok ? $"display: {m.Label} takes brightness changes again"
+                                 : $"display: {m.Label} did not take brightness {v}%; trying again each tick");
+                m.WriteFailing = !ok;
+            }
+            var st = Rules.AfterWrite(step.State, ok, hold);   // a refused write is retried next tick
+            if (i == li) groupBase = syncOffsets.Base(m.Key, ok ? step.Applied : c);   // followers go where the leader really is
+            if (st.Offset != m.Offset && st.Offset is int o)
+                Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
+            (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (st.RemoteSeen, st.LastSet, st.LastTarget, st.Offset, st.OffsetSun, st.OffsetAt);
+            if (holds.Record(m.Key, st, Now)) holdsChanged = true;
+            m.Cur = ok ? step.Current : c; m.Manual = step.Manual;
+            int applied = ok ? step.Applied : c;
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed

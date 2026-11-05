@@ -98,6 +98,8 @@ shrinks, so the monitors stay dimmer.
   and again once a day. For each 2° step of the sun's height, mornings and afternoons apart, it takes what
   the sensor read on the clearest days (the 90th percentile). Panels that face east or sit in a morning
   shadow are fine: that becomes their normal. Needs a `location`, to know where the sun was at each reading.
+  Changing the sensor's unit in Home Assistant (W to kW, lx to klx) starts the learning again from that
+  moment, because older readings are in the other unit; until then the sun's height alone decides.
 - **The effect.** Now ÷ clear sky gives how clear the sky is (0–1). That caps how much daylight counts:
   at most 35% under a fully overcast sky (`tuning.brightness.cloudyDaylight`), all of it under a clear one.
   At dawn and dusk the sun gives less than the cap anyway, so nothing changes there, and the level only

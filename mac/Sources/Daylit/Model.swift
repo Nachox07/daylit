@@ -390,22 +390,27 @@ import DaylitCore
     var lightRef = LightReference()
     var lightRefAt: Date?
     var lightRefBusy = false
-    /// Which sensor and place the reference belongs to: a new one starts learning again.
+    /// Which sensor, unit and place the reference belongs to: a new one starts learning again.
     var lightRefFor = ""
+    /// The sensor's unit and since when its history is in it, kept across restarts.
+    var lightUnit: LightUnit? = UserDefaults.standard.data(forKey: "lightUnit").flatMap { try? JSONDecoder().decode(LightUnit.self, from: $0) }
     /// The scale in use, smoothed, and when it last moved.
     var lightNow: Double?
     var lightAt: Date?
 
     func refreshLightReference(_ ha: HAConfig) async {
         guard let e = ha.light, Config.isEntityId(e), let loc = config.location, !lightRefBusy else { return }
-        let key = "\(e) \(loc.latitude) \(loc.longitude)"
+        let unit = lightUnit?.sensor == e ? lightUnit! : LightUnit(sensor: e, unit: "", since: 0)
+        let key = "\(e) \(unit.unit) \(loc.latitude) \(loc.longitude)"
         if key != lightRefFor { lightRef = LightReference(); lightRefAt = nil; lightRefFor = key }
-        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty ? 3600 : 86400) { return }
+        // Hourly while there is no reference, or only hours of it since a unit change; then daily.
+        let young = unit.historyDays(10, now: Date().timeIntervalSince1970) < 1
+        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty || young ? 3600 : 86400) { return }
         lightRefBusy = true; defer { lightRefBusy = false }
         lightRefAt = Date()
-        switch await HAClient.history(ha, e, days: 10) {
+        switch await HAClient.history(ha, e, days: unit.historyDays(10, now: Date().timeIntervalSince1970)) {
         case .success(let d):
-            let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude) }.value
+            let samples = await Task.detached { lightSamples(history: d, latitude: loc.latitude, longitude: loc.longitude, since: unit.since) }.value
             guard key == lightRefFor else { return }   // the config changed meanwhile
             let fresh = LightReference(samples: samples)
             Log.write("light: clear-sky reference from \(samples.count) readings, \(fresh.bins.count) steps of the sky" +
@@ -418,6 +423,17 @@ import DaylitCore
             if lightRef.isEmpty { lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour." }
             retryLightSoon()
         }
+    }
+
+    /// Keeps the sensor's unit; a change (W to kW) makes the reference learn again from now.
+    func noteLightUnit(_ e: String, _ unit: String?) {
+        let next = LightUnit.update(lightUnit, sensor: e, unit: unit, now: Date().timeIntervalSince1970)
+        guard next != lightUnit else { return }
+        if let was = lightUnit, was.sensor == e, !was.unit.isEmpty, next.unit != was.unit {
+            Log.write("light: \(e) now reports in \(next.unit) (was \(was.unit)), learning its clear sky again from now")
+        }
+        lightUnit = next
+        if let d = try? JSONEncoder().encode(next) { UserDefaults.standard.set(d, forKey: "lightUnit") }
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
@@ -512,21 +528,30 @@ import DaylitCore
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
                               here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
             if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
-            if i == leader { base = syncOffsets.base(key: m.uuid, level: step.applied) }
             if !dragging.contains(m.id) { mons[i].touched = false }
-            mons[i].lastSet = step.state.lastSet; mons[i].lastTarget = step.state.lastTarget; mons[i].remoteSeen = step.state.remoteSeen
-            if step.state.offset != m.offset, let o = step.state.offset {
+            if let v = step.remote, !m.writeFailing { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
+            var ok = true
+            if let v = step.write {
+                if step.remote == nil && !m.writeFailing { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
+                ok = await write(m, v)
+                guard gen == generation else { return }
+                // Logged once when it starts and once when it ends, not every tick while it lasts.
+                if ok == mons[i].writeFailing {
+                    Log.write(ok ? "display: \(m.label) takes brightness changes again"
+                                 : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
+                }
+                mons[i].writeFailing = !ok
+            }
+            let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
+            mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen
+            if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }
-            mons[i].offset = step.state.offset; mons[i].offsetSun = step.state.offsetSun; mons[i].offsetAt = step.state.offsetAt
-            if let v = step.remote { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
-            if let v = step.write {
-                if step.remote == nil { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
-                write(m, v)
-            }
-            if let v = step.level { mons[i].level = Double(v) }
+            mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
+            if ok, let v = step.level { mons[i].level = Double(v) }
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
-            let applied = step.applied, manual = step.manual
+            let applied = ok ? step.applied : c0, manual = step.manual
             mons[i].manual = manual
             if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual
                 || mons[i].publishedLight != inp.lightRatio.map({ Int(($0 * 10).rounded()) }) {
@@ -561,10 +586,14 @@ import DaylitCore
         if holds != before, let d = try? JSONEncoder().encode(holds) { UserDefaults.standard.set(d, forKey: "holds") }
     }
 
-    func write(_ m: Mon, _ v: Int) {
+    /// Sends an automatic level; false when the monitor did not take it.
+    func write(_ m: Mon, _ v: Int) async -> Bool {
         log("set \"\(m.label)\" → \(v)")
-        if m.control == .native { Native.set(m.id, v) }
-        else if m.control == .ddc { let u = m.uuid; ddcQ.async { DDC.set(u, v) } }
+        switch m.control {
+        case .native: return Native.set(m.id, v)
+        case .ddc: let u = m.uuid; return await withCheckedContinuation { c in ddcQ.async { c.resume(returning: DDC.set(u, v)) } }
+        case .none: return false
+        }
     }
 
     /// Sun, blind, lights and levels from the configured source; nil when there is nothing to act on.
@@ -611,12 +640,13 @@ import DaylitCore
                 var i = Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                                hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
                 if let e = ha.light, Config.isEntityId(e), let loc = config.location {
+                    noteLightUnit(e, s.lightUnit)
                     Task { await self.refreshLightReference(ha) }   // off the tick: the history call can take seconds
                     // A sensor that has not reported for 15 minutes is stuck, not dark.
                     let reading = (s.light ?? -1) >= 0 && (s.lightAge ?? 0) < 900 ? s.light : nil
                     // The sun here, as the reference was learned (Home Assistant's sun may be set elsewhere).
                     let here = solarElevation(latitude: loc.latitude, longitude: loc.longitude)
-                    let ratio = lightRefFor.hasPrefix(e + " ") ? lightRatio(value: reading, elev: here,
+                    let ratio = lightRefFor.hasPrefix("\(e) \(lightUnit?.unit ?? "") ") ? lightRatio(value: reading, elev: here,
                                            morning: sunRising(latitude: loc.latitude, longitude: loc.longitude, at: Date()), reference: lightRef) : nil
                     i.lightRatio = ratio
                     i.light = stepLight(toward: lightCap(ratio: ratio, floor: config.tuned.cloudyDaylight / 100))

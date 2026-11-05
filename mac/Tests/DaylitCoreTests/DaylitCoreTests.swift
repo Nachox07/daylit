@@ -39,6 +39,48 @@ final class SunTests: XCTestCase {
     }
 }
 
+final class SunSpanTests: XCTestCase {
+    /// A day's elevations every 10 minutes from local midnight, as the sun curve samples them.
+    func day(_ lat: Double, _ lon: Double, from start: String) -> [(t: Double, e: Double)] {
+        let d = utc(start)
+        return (0...144).map { i in (Double(i) / 144, solarElevation(latitude: lat, longitude: lon, at: d.addingTimeInterval(Double(i) * 600))) }
+    }
+    func clock(_ t: Double) -> String {
+        let m = Int((t * 1440).rounded()); return String(format: "%02d:%02d", m / 60, m % 60)
+    }
+    func label(_ s: [(t: Double, e: Double)], _ e: Double, below: Bool = false) -> String {
+        sunSpanLabel(sunSpans(s, line: e, below: below), clock: clock)
+    }
+
+    func testAnOrdinaryDayRisesAndSets() {
+        let s = day(51.48, 0, from: "2026-03-20T00:00:00Z")   // Greenwich, equinox, UTC
+        XCTAssertEqual(label(s, 0), "06:08 – 18:08")
+        XCTAssertEqual(label(s, 0, below: true), "until 06:08 · from 18:08")
+        XCTAssertEqual(label(s, 60), "not today")
+        XCTAssertEqual(label(s, 60, below: true), "all day")
+    }
+
+    func testAMidnightSunDipIsLabelledInTheOrderItHappens() {
+        // Tromsø at midsummer, local time UTC+2: the sun never sets, and its lowest point is about 00:45,
+        // after local midnight. A line between the midnight height and that minimum is crossed going
+        // down first and coming back up later, so "above" is everything but a short dip.
+        let s = day(69.65, 18.96, from: "2026-06-20T22:00:00Z")
+        let low = s.map(\.e).min()!, line = (s[0].e + low) / 2
+        let above = sunSpans(s, line: line)
+        XCTAssertEqual(above.count, 2)
+        XCTAssertEqual(above.first?.from, 0); XCTAssertEqual(above.last?.to, 1)
+        XCTAssertLessThan(above[0].to, above[1].from)
+        let dip = sunSpans(s, line: line, below: true)
+        XCTAssertEqual(dip.count, 1)
+        XCTAssertEqual(label(s, line), "until \(clock(dip[0].from)) · from \(clock(dip[0].to))")
+        XCTAssertEqual(label(s, line, below: true), "\(clock(dip[0].from)) – \(clock(dip[0].to))")
+        XCTAssertLessThan(dip[0].from, dip[0].to)
+        // Polar day: above the horizon all day.
+        XCTAssertEqual(label(s, 0), "all day")
+        XCTAssertEqual(label(s, 0, below: true), "not today")
+    }
+}
+
 final class TargetTests: XCTestCase {
     func testNightUsesNightLevel() {
         XCTAssertEqual(target(day: 80, blindDown: 40, night: 20, elev: -20, pos: 100, lights: false), 20)
@@ -91,6 +133,28 @@ final class DecideTests: XCTestCase {
         XCTAssertNil(s.write); XCTAssertNil(s.state.offset); XCTAssertFalse(s.manual)
         XCTAssertEqual(step(46, want: 45, state: st, touched: true).state.offset, 1)   // one step with the keys counts
         XCTAssertEqual(step(47, want: 45, state: st, touched: false).state.offset, 2)  // the monitor's own buttons count
+    }
+
+    func testARefusedWriteIsRetriedAndNotMistakenForAHandSetLevel() {
+        let first = step(40, want: 70, touched: false)
+        XCTAssertEqual(first.write, 70)
+        // The monitor refused the write and still reads 40 on the next tick.
+        let next = step(40, want: 70, state: first.state.afterWrite(ok: false, before: HoldState()), touched: false)
+        XCTAssertEqual(next.write, 70)
+        XCTAssertNil(next.state.offset); XCTAssertFalse(next.manual)
+        // A write that went through is remembered as usual.
+        XCTAssertEqual(first.state.afterWrite(ok: true, before: HoldState()), first.state)
+    }
+
+    func testARefusedHomeAssistantSetStaysPending() {
+        // Automatic mode off: only the "set" helper writes. It changed to 70; the monitor refused it.
+        let st = HoldState(remoteSeen: 100)
+        let first = step(40, want: 50, remote: RemoteSet(value: 70, changed: 200), state: st, auto: false)
+        XCTAssertEqual(first.write, 70)
+        let next = step(40, want: 50, remote: RemoteSet(value: 70, changed: 200), state: first.state.afterWrite(ok: false, before: st), auto: false)
+        XCTAssertEqual(next.write, 70)   // tried again
+        // Once it went through, the same "set" is not applied twice.
+        XCTAssertNil(step(70, want: 50, remote: RemoteSet(value: 70, changed: 200), state: next.state.afterWrite(ok: true, before: st), auto: false).write)
     }
 
     func testAppliesTargetAndRemembersIt() {

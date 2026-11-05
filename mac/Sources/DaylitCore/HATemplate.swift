@@ -9,6 +9,7 @@ public struct HAState: Decodable {
     public let sat: Double                  // its hs colour saturation (0 = white, ~60+ = warm)
     public let light: Double?               // the light sensor's reading; -1 / missing = none or not a number
     public let lightAge: Double?            // seconds since it last reported
+    public let lightUnit: String?           // its unit_of_measurement (W, kW, lx…); nil when unknown
     /// Per display UUID: [day, blindDown, night, set, setChanged]; -1 = use the local value / no set helper;
     /// setChanged is the set helper's last_changed (Unix seconds).
     public let m: [String: [Double]]
@@ -36,6 +37,7 @@ public enum HATemplate {
         let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
         // states['…'], not states.domain.name: an object id may start with a digit, which the dotted form can't parse.
+        let lightUnit = ha.light.map { "{{ state_attr('\($0)','unit_of_measurement') | tojson }}" } ?? "null"
         let lightAge = ha.light.map { "{{ (now() - states['\($0)'].last_updated).total_seconds() | round(0) if states['\($0)'] else -1 }}" } ?? "-1"
         let m = mons.compactMap { mon -> String? in
             guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
@@ -52,6 +54,7 @@ public enum HATemplate {
          "sat": {{ \(sat) }},
          "light": \(num(ha.light)),
          "lightAge": \(lightAge),
+         "lightUnit": \(lightUnit),
          "m": {\(m)}}
         """
     }
