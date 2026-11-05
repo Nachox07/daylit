@@ -79,7 +79,7 @@ plain background so they look the same on every macOS version.
 ## Rules for every change
 
 - **Tests pass and 0 errors before you push**, and on macOS 0 warnings too. CI tests and builds both apps on every push
-  (`.github/workflows/build.yml`). The macOS job runs on `macos-14` with an older Swift than a
+  (`.github/workflows/build.yml`). The macOS job runs on `macos-15`, which can have an older Swift than a
   current Mac, and it is stricter about the main actor: don't give a SwiftUI `@State` a default
   value that reads `@MainActor` state; pass it in from the caller instead.
 - **Keep the two apps in step.** A behaviour change lands in both, or the README says why not
