@@ -549,6 +549,7 @@ sealed class Controller {
         } else s = SunInputs(mons);
         if (!haDown) haDownSince = null;
         if (!haDown && Source == Source.HomeAssistant && s != null) {
+            if (s.HasBlind) s = s with { Pos = Rules.BlindPosition(s.Pos, lastHaPos) };
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
         }

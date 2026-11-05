@@ -655,13 +655,14 @@ import DaylitCore
                 haDownSince = nil
                 if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
                 lastHALevels = s.m.mapValues(fallbackLevels)
-                lastHAPos = ha.cover != nil ? s.pos : nil
+                let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
+                lastHAPos = ha.cover != nil ? pos : nil
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
                 let sun = Int((daylightFraction(elevation: s.elev, tuning: config.tuned) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
-                if ha.cover != nil { line += " · blind \(Int(s.pos))%" }
+                if ha.cover != nil { line += " · blind \(Int(pos))%" }
                 if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned) }
-                var i = Inputs(elev: s.elev, pos: s.pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                var i = Inputs(elev: s.elev, pos: pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                                hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
                 if let e = ha.light, Config.isEntityId(e), let loc = config.location {
                     noteLightUnit(e, s.lightUnit)
