@@ -44,7 +44,10 @@ With Home Assistant and a location, Daylit uses the sun when Home Assistant is u
 
 ## Install
 
-**Download** the latest build from [Releases](https://github.com/Nachox07/daylit/releases/latest).
+**With Homebrew** (macOS): `brew install --cask nachox07/tap/daylit` (also installs `m1ddc` on Apple
+silicon). The first open still needs **Open Anyway** in System Settings → Privacy & Security.
+
+**Or download** the latest build from [Releases](https://github.com/Nachox07/daylit/releases/latest).
 
 - **macOS** (`Daylit-mac-<version>.zip`, Apple silicon and Intel): unzip and move `Daylit.app` to
   Applications. The app is not notarized by Apple, so the first open is blocked: open System
