@@ -638,14 +638,18 @@ sealed class Controller {
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
     // dark otherwise. Each condition has a gap between its on and off thresholds so it doesn't flip
     // back and forth. Only acts when the decision changes, so a manual switch stays until then.
+    // With no earlier decision (start, reload, switched on) the current theme settles a reading
+    // inside a gap, so a restart doesn't undo a manual switch.
     void UpdateLook(Inputs s, bool sunOnly) {
         if (!Settings.AutoLook) { lookDark = null; look.Reset(); return; }
-        bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat, Cfg.Tuned);
+        bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat, Cfg.Tuned, lookDark == null ? Theme.Dark : null);
         if (dark != lookDark) {
-            Log.Write("theme: " + (dark ? "dark" : "light"));
-            Look.SetDark(dark);
+            if (!Look.Shows(dark)) {   // already showing it (apps, taskbar, stock wallpaper): nothing to switch
+                Log.Write("theme: " + (dark ? "dark" : "light"));
+                Look.SetDark(dark);
+                tray.Icon = Theme.SunIcon();
+            }
             lookDark = dark;
-            tray.Icon = Theme.SunIcon();
         }
     }
 }

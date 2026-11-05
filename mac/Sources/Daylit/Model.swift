@@ -359,13 +359,16 @@ import DaylitCore
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
     // dark otherwise. Same rule as Windows, with a gap between on and off thresholds so it does not
     // flip back and forth. Only acts when the decision changes, so a manual switch stays until then.
+    // With no earlier decision (start, reload, switched on) the current appearance settles a reading
+    // inside a gap, so a restart does not undo a manual switch.
     func updateLook(_ s: Inputs) {
         guard lookOn else { lookDark = nil; look = LookRule(); return }
-        let wantDark = look.wantDark(elev: s.elev, pos: s.pos, hasBlind: s.hasBlind, lightsOn: s.fromHA && s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned)
+        let wantDark = look.wantDark(elev: s.elev, pos: s.pos, hasBlind: s.hasBlind, lightsOn: s.fromHA && s.lights, bri: s.bri, sat: s.sat,
+                                     tuning: config.tuned, previous: lookDark == nil ? Appearance.isDark : nil)
         if wantDark != lookDark {
-            Log.write("theme: " + (wantDark ? "dark" : "light"))
-            if wantDark != Appearance.isDark, let e = Appearance.setDark(wantDark) {
-                problem = e; Log.write("theme: " + e)
+            if wantDark != Appearance.isDark {
+                Log.write("theme: " + (wantDark ? "dark" : "light"))
+                if let e = Appearance.setDark(wantDark) { problem = e; Log.write("theme: " + e) }
             }
             lookDark = wantDark
             dark = Appearance.isDark
