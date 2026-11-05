@@ -691,8 +691,10 @@ import DaylitCore
                         i.line += " · light \(Int((r * 100).rounded()))%"
                         lightStatus = "Now \(Int((r * 100).rounded()))% of a clear sky, so daylight counts at most \(Int((i.light * 100).rounded()))%."
                     } else if !lightRef.isEmpty {
-                        lightStatus = reading == nil ? "No reading from the sensor right now: going back to the sun's height alone."
-                                                     : "Too little sun to compare right now: the sun's height alone decides."
+                        // A solar sensor sits at 0 and stops reporting after sunset: that is night, not a stuck sensor.
+                        lightStatus = here <= 0 ? "The sun is down: the sensor counts again in the morning."
+                            : reading == nil ? "No reading from the sensor right now: going back to the sun's height alone."
+                            : "Too little sun to compare right now: the sun's height alone decides."
                     }
                 } else {
                     lightStatus = nil
