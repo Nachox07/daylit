@@ -70,6 +70,10 @@ static class Rules {
     /// `boost`: room lights may lift the night level now (the sun is below tuning's lightsBoostSunBelow);
     /// without it, the default rule (daylight under 30%).
     /// `light` (0…1, see LightRules.Cap) is the most daylight can count under a cloudy sky; 1 without a sensor.
+    /// The blind position to use: a blind that drops off Home Assistant for a moment keeps its last
+    /// known position instead of counting as fully open; with none seen yet it counts as open.
+    public static double BlindPosition(double reported, double? last) => reported >= 0 ? Math.Min(reported, 100) : last ?? 100;
+
     public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
         double x = v[2] + (daytime - v[2]) * Math.Min(sun, light);
@@ -208,7 +212,7 @@ static class HaTemplate {
         var h = new HaConfig { Url = h0.Url, TokenName = h0.TokenName, AutoSwitch = Ok(h0.AutoSwitch), Sun = Ok(h0.Sun), Cover = Ok(h0.Cover), Lights = Ok(h0.Lights), Light = Ok(h0.Light) };
         var monitors = monitors0.Select(m => m == null ? null : new MonitorHa {
             Sensor = Ok(m.Sensor), Day = Ok(m.Day), BlindDown = Ok(m.BlindDown), Night = Ok(m.Night), Set = Ok(m.Set) });
-        string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(100)" : "100";
+        string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(-1)" : "100";
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
         string sat = h.Lights is { Length: > 0 } l3 ? $"(state_attr('{l3}','hs_color') or [0, 100])[1] | float(100)" : "100";

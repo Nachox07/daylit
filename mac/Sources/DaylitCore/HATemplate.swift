@@ -2,7 +2,8 @@
 import Foundation
 
 public struct HAState: Decodable {
-    public let elev, pos: Double
+    public let elev: Double
+    public let pos: Double                  // the blind's position; -1 when Home Assistant has none (blind unavailable)
     public let lights: Bool
     public let auto: Bool?                  // nil when there is no autoSwitch
     public let bri: Double                  // room light brightness 0-255 (0 = unknown)
@@ -30,7 +31,7 @@ public enum HATemplate {
                           cover: ok(ha0.cover), lights: ok(ha0.lights), light: ok(ha0.light))
         let mons = mons0.map { m in (uuid: m.uuid, ha: m.ha.map { MonitorHA(sensor: ok($0.sensor), day: ok($0.day), blindDown: ok($0.blindDown),
                                                                               night: ok($0.night), set: ok($0.set)) }) }
-        let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(100)" } ?? "100"
+        let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(-1)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
         let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null
         let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"

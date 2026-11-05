@@ -484,11 +484,19 @@ public class TemplateTests {
     }
 
     [Fact]
+    public void UnavailableBlindKeepsItsLastPosition() {
+        Assert.Equal(40, Rules.BlindPosition(40, 70));
+        Assert.Equal(40, Rules.BlindPosition(-1, 40));    // dropped off Home Assistant for a moment
+        Assert.Equal(100, Rules.BlindPosition(-1, null)); // never seen: counts as open
+        Assert.Equal(0, Rules.BlindPosition(0, 40));      // closed is a real position
+    }
+
+    [Fact]
     public void EntitiesAppearOneRowPerMonitor() {
         var h = new HaConfig { Url = "http://x", AutoSwitch = "input_boolean.auto", Cover = "cover.blind", Lights = "light.room" };
         var t = HaTemplate.Build(h, [new MonitorHa { Day = "input_number.d", Set = "input_number.s" }, null]);
         Assert.Contains("is_state('input_boolean.auto','on') | tojson", t);
-        Assert.Contains("state_attr('cover.blind','current_position')", t);
+        Assert.Contains("state_attr('cover.blind','current_position') | float(-1)", t);   // unavailable is not "open"
         Assert.Contains("state_attr('light.room','brightness')", t);
         Assert.Contains("[{{ states('input_number.d') | float(-1) }}, -1, -1, ", t);
         Assert.Contains("states['input_number.s'].last_changed", t);

@@ -515,12 +515,19 @@ final class TemplateTests: XCTestCase {
         XCTAssertTrue(t.contains(#""pos": {{ 100 }}"#))
         XCTAssertTrue(t.contains(#""lights": {{ false | tojson }}"#))
     }
+    func testUnavailableBlindKeepsItsLastPosition() {
+        XCTAssertEqual(blindPosition(reported: 40, last: 70), 40)
+        XCTAssertEqual(blindPosition(reported: -1, last: 40), 40)    // dropped off Home Assistant for a moment
+        XCTAssertEqual(blindPosition(reported: -1, last: nil), 100)  // never seen: counts as open
+        XCTAssertEqual(blindPosition(reported: 0, last: 40), 0)      // closed is a real position
+    }
+
     func testEntitiesAppear() {
         let ha = HAConfig(url: "http://x", autoSwitch: "input_boolean.auto", cover: "cover.blind", lights: "light.room")
         let mon = MonitorHA(day: "input_number.d", set: "input_number.s")
         let t = HATemplate.build(ha, [("UUID-1", mon), ("UUID-2", nil)])
         XCTAssertTrue(t.contains("is_state('input_boolean.auto','on') | tojson"))
-        XCTAssertTrue(t.contains("state_attr('cover.blind','current_position')"))
+        XCTAssertTrue(t.contains("state_attr('cover.blind','current_position') | float(-1)"))   // unavailable is not "open"
         XCTAssertTrue(t.contains("state_attr('light.room','brightness')"))
         XCTAssertTrue(t.contains(#""UUID-1": [{{ states('input_number.d') | float(-1) }}, -1, -1, "#))
         XCTAssertTrue(t.contains("states['input_number.s'].last_changed"))

@@ -5,6 +5,12 @@ import Foundation
 /// position; the sun then blends it with the night value (0 below -3°, full daytime from 12°).
 /// Room lights on at night add a little.
 /// `light` (0…1, see lightCap) is the most daylight can count under a cloudy sky; 1 without a sensor.
+/// The blind position to use: a blind that drops off Home Assistant for a moment keeps its last
+/// known position instead of counting as fully open; with none seen yet it counts as open.
+public func blindPosition(reported: Double, last: Double?) -> Double {
+    reported >= 0 ? min(reported, 100) : last ?? 100
+}
+
 public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
                    tuning t: Tuning = Tuning(), light: Double = 1) -> Int {
     let sun = min(daylightFraction(elevation: elev, tuning: t), light)
