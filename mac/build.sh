@@ -7,7 +7,7 @@ set -e
 cd "$(dirname "$0")"
 OUT="${1:-$HOME/Applications}"
 APP="$OUT/Daylit.app"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Package.swift sets macOS 14 as the minimum, so the binary runs there whatever SDK builds it.
 VERSION="${DAYLIT_VERSION:-0.0.0}"   # 0.0.0 = a local build; the log calls it "dev"
 ARCHS=""
@@ -18,6 +18,7 @@ swift build -c release --product Daylit $ARCHS
 RUNNING=$(pgrep -f "$APP/Contents/MacOS/Daylit" || true)
 if [ -n "$RUNNING" ]; then kill $RUNNING; while pgrep -f "$APP/Contents/MacOS/Daylit" >/dev/null; do sleep 0.2; done; fi
 cp "$(swift build -c release --show-bin-path $ARCHS)/Daylit" "$APP/Contents/MacOS/Daylit"
+cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # made by packaging/icon/make.sh
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -25,6 +26,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleIdentifier</key><string>app.daylit.mac</string>
   <key>CFBundleName</key><string>Daylit</string>
   <key>CFBundleExecutable</key><string>Daylit</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

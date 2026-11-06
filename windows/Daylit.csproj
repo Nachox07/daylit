@@ -12,6 +12,8 @@
     <AssemblyName>Daylit</AssemblyName>
     <RootNamespace>Daylit</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The exe icon (Explorer, Settings → Apps); made by packaging/icon/make.sh. The tray icon is drawn in Win.cs. -->
+    <ApplicationIcon>Daylit.ico</ApplicationIcon>
     <Version>0.0.0</Version> <!-- a local build; releases pass the tag, and the log calls 0.0.0 "dev" -->
     <!-- DPI awareness is declared in app.manifest on purpose: WPF owns the process, the WinForms advice does not apply. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>

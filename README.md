@@ -1,4 +1,4 @@
-# Daylit
+# <img src="docs/icon.png" width="44" alt="" align="top"> Daylit
 
 **External monitor brightness that follows your day.**
 
