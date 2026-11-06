@@ -91,3 +91,25 @@ jobs:
           NOTES
           gh release create "$TAG" Daylit-mac-*.zip Daylit-windows-*.zip \
             --repo "$GITHUB_REPOSITORY" --title "Daylit $TAG" --notes-file notes.md
+  packages:
+    # Homebrew tap, winget and packaging/ here, through packaging/publish.sh. Needs the secret
+    # PACKAGES_TOKEN (a classic token with the public_repo scope); without it the job only warns.
+    # winget runs only when the repository variable WINGET_AUTO is "true".
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Publish to the package managers
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          WINGET: ${{ vars.WINGET_AUTO == 'true' && '1' || '0' }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::PACKAGES_TOKEN is not set: update Homebrew and winget by hand (packaging/README.md)"
+            exit 0
+          fi
+          packaging/publish.sh "$VERSION"
