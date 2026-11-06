@@ -1,6 +1,6 @@
 // Draws the Daylit app icon: a white sun on a warm rounded square.
-// Usage: swift draw.swift <out.png> <size> <mac|win>
-// "mac" keeps Apple's icon margin and a soft shadow; "win" fills the square.
+// Usage: swift draw.swift <out.png> <size> <mac|win> [flat]
+// "mac" keeps Apple's icon margin and a soft shadow ("flat" drops it); "win" fills the square.
 import AppKit
 
 let args = CommandLine.arguments
@@ -14,9 +14,18 @@ ctx.scaleBy(x: s, y: s)
 // The tile: Apple's grid puts an 824-point shape inside a 1024 canvas.
 let inset: CGFloat = mac ? 100 : 24
 let tile = CGRect(x: inset, y: inset, width: 1024 - 2 * inset, height: 1024 - 2 * inset)
-let radius = tile.width * 0.225
-let path = CGPath(roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil)
-if mac {
+// A superellipse (|x|^5 + |y|^5 = 1), the smooth "squircle" corner Apple and Windows 11 icons use,
+// instead of a plain rounded rectangle whose corners look pinched.
+let path = CGMutablePath()
+for i in 0...720 {
+    let t = Double(i) / 720 * 2 * .pi, n = 5.0
+    let x = pow(abs(cos(t)), 2 / n) * (cos(t) < 0 ? -1 : 1), y = pow(abs(sin(t)), 2 / n) * (sin(t) < 0 ? -1 : 1)
+    let p = CGPoint(x: tile.midX + x * tile.width / 2, y: tile.midY + y * tile.height / 2)
+    if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+}
+path.closeSubpath()
+let shadow = args.count > 4 ? args[4] != "flat" : true
+if mac && shadow {
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: CGColor(gray: 0, alpha: 0.35))
     ctx.addPath(path); ctx.setFillColor(CGColor(gray: 0, alpha: 1)); ctx.fillPath()
