@@ -132,6 +132,24 @@ current and never show anyone's setup. Re-recording the snapshots (*Tests → UI
 updates them. To change what they show, edit the scenes in `mac/Sources/Daylit/Snapshots.swift` and
 `windows/Snapshots.cs` (generic monitor names, round levels), then re-record.
 
+### Brightness chart GIF
+
+`docs/chart-{light,dark}.gif` (docs/setup.md) are drawn by the same code and made-up state as the
+`curve-*` snapshots, so they need no screen recording and look the same on every Mac:
+
+```sh
+cd mac && swift build && B=$(swift build --show-bin-path)/Daylit
+for m in light dark; do
+  $B --render-chart-frames /tmp/chart-$m $([ $m = dark ] && echo dark)
+  ffmpeg -framerate 12 -i /tmp/chart-$m/frame-%04d.png -vf "scale=760:-1:flags=lanczos,palettegen=max_colors=128:stats_mode=diff" /tmp/pal.png
+  ffmpeg -framerate 12 -i /tmp/chart-$m/frame-%04d.png -i /tmp/pal.png \
+    -lavfi "scale=760:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" -loop 0 ../docs/chart-$m.gif
+done
+```
+
+The storyboard is `Snapshots.chartFrames` in `mac/Sources/Daylit/Snapshots.swift`. Re-render after a
+change to the chart, as with the snapshots.
+
 ### Demo GIF and video (macOS)
 
 `docs/demo-{light,dark}.gif` (and the social videos) come from a scripted demo: `DAYLIT_DEMO=1`

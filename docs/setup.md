@@ -14,6 +14,49 @@ Moving its sliders does not change the screen; a line under each monitor shows i
 It saves into the config file below and keeps everything else in it (other monitors, per-monitor Home
 Assistant helpers, keys it does not show). Comments in the file are not kept.
 
+## When the screens brighten
+
+Settings → *Automatic* draws today for the monitor you pick: the time of day across, its brightness
+up. The solid line is the blind open, the dashed one the blind closed (no blind, no dashed line), and
+the dotted floor is the night level. The dot is where the monitor is right now.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="chart-dark.gif">
+    <img src="chart-light.gif" width="620" alt="The brightness chart: the day goes by and the dot follows the line, the blind closes and the dot drops toward the dashed line, clouds lower it, a hand-set +6 lifts it, the full-brightness handle is dragged and the full day gets shorter, then the date moves to midwinter and the day shrinks">
+  </picture>
+</p>
+
+**The handles.** The orange one sets how high the sun must be for full brightness, the purple one how
+low for the night level; in between, the level blends. Drag either end sideways: each handle is one
+sun height, so its morning and evening times move together (they are not a mirror around noon: they
+centre on the sun's highest point). While you drag, the label shows the height it saves
+("sun 12° up"). Because it is saved as a height, the times shift through the year by themselves.
+*Exact values* below the chart takes the degrees directly.
+
+**How Daylit decides, right now.** The box under the chart shows each step with today's numbers, in
+the order the rules apply:
+
+1. **The blind** picks the daytime level, between *blind closed* and *day* (40% open: 40% of the way).
+2. **The sun** blends that with *night*: 100% above the orange handle, 0% below the purple one.
+3. **Clouds**, with a [daylight sensor](#clouds-a-daylight-sensor), can hold the sun's share down.
+4. **Room lights** only count around dusk: on, they keep the screen at least 5 above *night*.
+5. **Your hand**: a level you set keeps its distance from the result until dusk.
+
+The levels themselves are per monitor (Settings → *Displays*, or Home Assistant's helpers).
+
+**Short winter days and the far north.** When today's sun never reaches a handle's height, there is no
+time to put it on: it rests on the day's highest (or lowest) point with a note such as *No full
+brightness today: the sun stays under 12°*. Clicking it changes nothing; drag it away to choose a
+height the sun reaches today, or type it in *Exact values*.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../mac/Tests/Snapshots/curve-parked-dark.png">
+    <img src="../mac/Tests/Snapshots/curve-parked-light.png" width="620" alt="The chart at 80° north in midwinter: both handles rest at noon, 'Night level all day: the sun stays under -3°' and 'No full brightness today'">
+  </picture>
+</p>
+
 ## Config file
 
 - macOS: `~/.config/daylit/config.json`
@@ -191,8 +234,7 @@ follow the sun only.
 ## Tuning
 
 Every number behind the rules can be changed in the config file's optional `tuning` block. The
-Settings window has the ones people change: when the screens brighten (*Automatic*, a sun curve with
-draggable lines) and when light and dark mode switch (*Appearance*); the `timing` keys are file only. A missing key keeps the value below; values that make no
+Settings window has the ones people change: when the screens brighten (*Automatic*, [the brightness chart](#when-the-screens-brighten)) and when light and dark mode switch (*Appearance*); the `timing` keys are file only. A missing key keeps the value below; values that make no
 sense (night above day, a dark edge above its light edge) are refused with the key's name.
 
 | Key | Default | What it does |

@@ -33,6 +33,7 @@ struct BrightnessChart: View {
     let tuning: Tuning          // with the elevations being edited
     let live: LiveInputs?
     let set: (String, Double) -> Void   // tuning field, elevation
+    var showDegrees: String? = nil      // the docs animation: label this handle as if it were being dragged
     @State private var picked: String? = nil
     @State private var dragging: String? = nil
 
@@ -47,9 +48,11 @@ struct BrightnessChart: View {
     func levels(_ m: ChartMonitor) -> [Double] {
         effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: live?.levels[m.id])
     }
+    /// The line's level for an elevation: target()'s rule without its rounding, so the slopes draw smooth.
     func level(_ m: ChartMonitor, elev: Double, pos: Double) -> Double {
         let l = levels(m)
-        return Double(target(day: l[0], blindDown: l[1], night: l[2], elev: elev, pos: pos, lights: false, tuning: tuning))
+        let daytime = l[1] + (l[0] - l[1]) * pos / 100
+        return l[2] + (daytime - l[2]) * daylightFraction(elevation: elev, tuning: tuning)
     }
     func clock(_ t: Double) -> String {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; f.timeZone = timeZone
@@ -213,7 +216,7 @@ struct BrightnessChart: View {
 
     func title(_ sp: HandleSpec, _ p: HandlePlace, _ s: [(t: Double, e: Double)]) -> String {
         let value = sp.isDay ? tuning.sunDay : tuning.sunNight
-        let degrees = dragging == sp.id ? " · sun \(SettingsView.fmt(value))° up" : ""
+        let degrees = (dragging ?? showDegrees) == sp.id ? " · sun \(SettingsView.fmt(value))° up" : ""
         if p.parked {
             let v = SettingsView.fmt(value)
             switch (sp.isDay, p.sunAbove) {
