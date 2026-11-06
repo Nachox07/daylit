@@ -251,7 +251,8 @@ sealed class BrightnessChart : StackPanel {
                     grips.Add((sp.isDay, p, hit));
                 }
                 var label = Text(c.Title(sp.isDay, p, t), 12, Palette.Text, FontWeights.Medium);
-                double lx = Math.Clamp(X(p.At), X0 + 110, Math.Max(X0 + 110, w - 110));
+                double half = label.Width / 2 + 11;   // the pill stays inside the chart, whatever its text
+                double lx = Math.Clamp(X(p.At), X0 + half, Math.Max(X0 + half, w - half));
                 var pill = new Rect(lx - label.Width / 2 - 7, labelY[i] - label.Height / 2 - 3, label.Width + 14, label.Height + 6);
                 dc.DrawRoundedRectangle(Palette.Solid, new Pen(Palette.CardBorder, 1), pill, 6, 6);
                 dc.DrawText(label, new Point(pill.X + 7, pill.Y + 3));
