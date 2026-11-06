@@ -7,13 +7,17 @@ import DaylitCore
 
 /// What the monitors see right now, from the last tick: nil fields when Daylit has no reading.
 struct LiveInputs: Equatable {
+    var elev: Double? = nil     // the sun's elevation the tick used (Home Assistant's when it has one)
     var pos: Double?            // blind position 0…100; nil without a blind
     var lights = false
     var light = 1.0             // the cloud cap on the sun's share (1: clear or no sensor)
     var levels: [String: [Double]] = [:]   // Home Assistant's day / blind closed / night per monitor uuid
     var offsets: [String: (value: Int, weight: Double)] = [:]   // a hand-set distance in effect, per monitor uuid
+    var linked: [String: Int] = [:]   // linked monitors that follow another: the level they land on
+    var leader = ""                   // the monitor they follow
+    var applying = true               // false: Automatic is off or this Mac is idle, so nothing is being set
     static func == (a: LiveInputs, b: LiveInputs) -> Bool {
-        a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
+        a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
             && a.offsets.mapValues { "\($0.value) \($0.weight)" } == b.offsets.mapValues { "\($0.value) \($0.weight)" }
     }
 }
@@ -42,7 +46,15 @@ struct BrightnessChart: View {
 
     var mon: ChartMonitor? { monitors.first { $0.id == picked } ?? monitors.first }
     var day: (start: Date, length: TimeInterval) { dayBounds(now, timeZone: timeZone) }
-    var samples: [(t: Double, e: Double)] { daySamples(latitude: latitude, longitude: longitude, start: day.start, length: day.length) }
+    var samples: [(t: Double, e: Double)] {
+        let d = day, key = "\(latitude) \(longitude) \(d.start.timeIntervalSince1970) \(d.length)"
+        if let c = Self.cache, c.key == key { return c.samples }
+        let s = daySamples(latitude: latitude, longitude: longitude, start: d.start, length: d.length)
+        Self.cache = (key, s)
+        return s
+    }
+    /// Today's sun changes once a day, not on every redraw or drag step.
+    @MainActor static var cache: (key: String, samples: [(t: Double, e: Double)])?
 
     /// The monitor's levels in effect: Home Assistant's helpers where it has them.
     func levels(_ m: ChartMonitor) -> [Double] {
@@ -144,18 +156,21 @@ struct BrightnessChart: View {
         let d = decision(m)
         Circle().fill(Color.primary).frame(width: 10, height: 10).overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
             .position(x: x(t), y: y(Double(d.level))).allowsHitTesting(false)
-        Text("Now \(d.level)%").font(.caption2.weight(.semibold))
+        Text("\(dotTitle) \(d.level)%").font(.caption2.weight(.semibold))
             .padding(.horizontal, 4).background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
             .position(x: min(max(x(t), 34), x(1) - 34), y: max(y(Double(d.level)) - 13, 9)).allowsHitTesting(false)
     }
 
     func decision(_ m: ChartMonitor) -> Decision {
         let l = levels(m)
-        let elev = solarElevation(latitude: latitude, longitude: longitude, at: now)
+        let elev = live?.elev ?? solarElevation(latitude: latitude, longitude: longitude, at: now)
         let o = live?.offsets[m.id]
         return explain(day: l[0], blindDown: l[1], night: l[2], elev: elev, pos: hasBlind ? (live?.pos ?? 100) : nil,
-                       lights: live?.lights ?? false, tuning: tuning, light: live?.light ?? 1, offset: o?.value, offsetWeight: o?.weight ?? 1)
+                       lights: live?.lights ?? false, tuning: tuning, light: live?.light ?? 1, offset: o?.value, offsetWeight: o?.weight ?? 1,
+                       linked: live?.linked[m.id], leader: live?.leader ?? "", applying: live?.applying ?? true)
     }
+    /// "Now 77%" while Daylit sets it; "Target 77%" when Automatic is off or this Mac is idle.
+    var dotTitle: String { live?.applying == false ? "Target" : "Now" }
 
     // MARK: handles
 
@@ -260,6 +275,10 @@ struct BrightnessChart: View {
                     .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .controlBackgroundColor)))
                     .fixedSize()
                 }
+            }
+            if live?.applying == false {
+                Text("Automatic is off or this Mac is idle: the screen stays where it is until it takes over again.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Text("Each handle is one sun height, so its morning and evening times move together and shift through the year. A level you set by hand keeps its distance until dusk.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -18,7 +18,9 @@ Assistant helpers, keys it does not show). Comments in the file are not kept.
 
 Settings → *Automatic* draws today for the monitor you pick: the time of day across, its brightness
 up. The solid line is the blind open, the dashed one the blind closed (no blind, no dashed line), and
-the dotted floor is the night level. The dot is where the monitor is right now.
+the dotted floor is the night level. The dot is where the monitor is right now; with *Automatic* off
+or the computer idle it is the target, marked so, since nothing is being set. A linked monitor
+that follows another ends on the group's level.
 
 <p align="center">
   <picture>
@@ -47,8 +49,9 @@ The levels themselves are per monitor (Settings → *Displays*, or Home Assistan
 
 **Short winter days and the far north.** When today's sun never reaches a handle's height, there is no
 time to put it on: it rests on the day's highest (or lowest) point with a note such as *No full
-brightness today: the sun stays under 12°*. Clicking it changes nothing; drag it away to choose a
-height the sun reaches today, or type it in *Exact values*.
+brightness today: the sun stays under 12°*. Clicking it changes nothing. Dragging it away picks a
+height the sun reaches today when the other handle leaves room (the full-day line always stays above
+the night one); *Exact values* takes any height.
 
 <p align="center">
   <picture>

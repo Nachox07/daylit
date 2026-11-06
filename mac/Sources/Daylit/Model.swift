@@ -527,10 +527,10 @@ import DaylitCore
             if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
         }
 
-        guard source != .off else { detail = ""; problem = configProblem; return }
+        guard source != .off else { detail = ""; problem = configProblem; if live != nil { live = nil }; return }
         // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
-        guard !mons.isEmpty else { detail = ""; return }
-        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; return }
+        guard !mons.isEmpty else { detail = ""; if live != nil { live = nil }; return }
+        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
         guard let inp = await inputs(), gen == generation else { return }
 
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
@@ -546,6 +546,7 @@ import DaylitCore
         if sync, mons.count > 1 { adoptSync() }
         let leader = sync && mons.count > 1 ? mons.indices.first(where: { cur[$0] != nil && syncOffsets.isMember(mons[$0].uuid) }) : nil
         var base: Int? = nil
+        var linkedNow: [String: Int] = [:]   // linked followers: the level they land on (for the Settings chart)
         let now = Date().timeIntervalSince1970
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
             guard let c0 = cur[i] else { continue }
@@ -589,6 +590,7 @@ import DaylitCore
             if ok, let v = step.level { mons[i].level = Double(v) }
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = ok ? step.applied : c0, manual = step.manual
+            if follower { linkedNow[m.uuid] = applied }
             mons[i].manual = manual
             if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual
                 || mons[i].publishedLight != inp.lightRatio.map({ Int(($0 * 10).rounded()) }) {
@@ -611,7 +613,9 @@ import DaylitCore
         for m in mons {
             if let o = m.offset, let w = offsetWeight(sun: nowSun, setAt: m.offsetSun ?? nowSun, age: m.offsetAt.map { now - $0 }) { offs[m.uuid] = (o, w) }
         }
-        let next = LiveInputs(pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels, offsets: offs)
+        let leaderLabel = leader.map { mons[$0].label } ?? ""
+        let next = LiveInputs(elev: inp.elev, pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels,
+                              offsets: offs, linked: linkedNow, leader: leaderLabel, applying: auto && here)
         if live != next { live = next }
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"

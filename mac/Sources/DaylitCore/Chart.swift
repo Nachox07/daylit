@@ -77,7 +77,8 @@ public struct Decision: Equatable {
 }
 
 public func explain(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double?, lights: Bool,
-                    tuning t: Tuning = Tuning(), light: Double = 1, offset: Int? = nil, offsetWeight w: Double = 1) -> Decision {
+                    tuning t: Tuning = Tuning(), light: Double = 1, offset: Int? = nil, offsetWeight w: Double = 1,
+                    linked: Int? = nil, leader: String = "", applying: Bool = true) -> Decision {
     let p = pos ?? 100
     let base = target(day: day, blindDown: blindDown, night: night, elev: elev, pos: p, lights: lights, tuning: t, light: light)
     let daytime = blindDown + (day - blindDown) * p / 100
@@ -98,12 +99,17 @@ public func explain(day: Double, blindDown: Double, night: Double, elev: Double,
     let lifted = lights && elev < t.lightsBoostSunBelow && Double(base) > blended.rounded()
     steps.append(DecisionStep("Lights", lifted ? "on → \(base)" : lights ? "on, no effect now" : elev < t.lightsBoostSunBelow ? "off" : "no effect by day"))
     var level = base
+    if let v = linked {
+        // A linked monitor that follows another lands at the group's level, keeping its link distance.
+        steps.append(DecisionStep(leader.isEmpty ? "Linked" : "Linked to \(leader)", "→ \(v)", final: true))
+        return Decision(level: v, steps: steps)
+    }
     if let o = offset {
         let applied = Int((Double(o) * w).rounded())
         level = min(max(base + applied, 0), 100)
         if applied != 0 { steps.append(DecisionStep("You", "\(applied > 0 ? "+" : "")\(applied) → \(level)", final: true)) }
     }
-    if !steps.contains(where: \.final) { steps.append(DecisionStep("Now", "\(level)", final: true)) }
+    if !steps.contains(where: \.final) { steps.append(DecisionStep(applying ? "Now" : "Target", "\(level)", final: true)) }
     return Decision(level: level, steps: steps)
 }
 

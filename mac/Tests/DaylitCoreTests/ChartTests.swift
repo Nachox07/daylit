@@ -89,4 +89,14 @@ final class ChartTests: XCTestCase {
         XCTAssertEqual(d.steps.first, DecisionStep("Day level", "90"))
         XCTAssertEqual(d.steps.last, DecisionStep("Now", "90", final: true))
     }
+
+    func testALinkedMonitorEndsOnTheGroupsLevel() {
+        let d = explain(day: 80, blindDown: 60, night: 30, elev: 30, pos: 40, lights: false, linked: 64, leader: "Studio Display")
+        XCTAssertEqual(d.level, 64)
+        XCTAssertEqual(d.steps.last, DecisionStep("Linked to Studio Display", "→ 64", final: true))
+    }
+    func testWithAutomaticOffTheLastStepIsATarget() {
+        let d = explain(day: 90, blindDown: 70, night: 45, elev: 30, pos: nil, lights: false, applying: false)
+        XCTAssertEqual(d.steps.last, DecisionStep("Target", "90", final: true))
+    }
 }
