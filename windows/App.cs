@@ -51,6 +51,10 @@ sealed class Controller {
     public string? LightStatus { get => lightStatus; private set { if (lightStatus == value) return; lightStatus = value; LightStatusChanged?.Invoke(); } }
     string? lightStatus;
     public event Action? LightStatusChanged;
+    /// The last tick's blind, lights, clouds and hand-set distances, for the Settings chart (null before the first one).
+    public LiveInputs? Live { get; private set; }
+    public event Action? LiveChanged;
+    void ClearLive() { if (Live == null) return; Live = null; LiveChanged?.Invoke(); }
     public bool HotkeysOk;
     public Source Source => Cfg.Effective;
     public bool PauseOnBattery => Settings.PauseOnBattery ?? Cfg.PauseOnBattery ?? true;
@@ -524,10 +528,10 @@ sealed class Controller {
         }
         Error = ConfigError;
 
-        if (Source == Source.Off) { Subtitle = ""; foreach (var m in mons) m.Manual = false; return; }
+        if (Source == Source.Off) { Subtitle = ""; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
         // Nothing to drive: no polling until a monitor appears (DisplaySettingsChanged ticks again).
-        if (mons.Length == 0) { Subtitle = ""; return; }
-        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; return; }
+        if (mons.Length == 0) { Subtitle = ""; ClearLive(); return; }
+        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
 
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {
@@ -577,6 +581,7 @@ sealed class Controller {
         int li = Settings.SyncMonitors && mons.Length > 1 ? Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) : -1;
         int? groupBase = null;
         bool holdsChanged = false;
+        var linkedNow = new Dictionary<string, int>();   // linked followers: the level they land on (for the Settings chart)
         var order = li >= 0 ? new[] { li }.Concat(Enumerable.Range(0, mons.Length).Where(j => j != li)) : Enumerable.Range(0, mons.Length);
         foreach (int i in order) {
             var m = mons[i];
@@ -618,6 +623,7 @@ sealed class Controller {
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
             m.Cur = ok ? step.Current : c; m.Manual = step.Manual;
             int applied = ok ? step.Applied : c;
+            if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
                 !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Sensor)) {
                 if (await HAClient.Publish(Cfg, m, applied, target, m.Manual, sun, s) != null) {   // retried next tick if it failed
@@ -628,6 +634,20 @@ sealed class Controller {
         }
 
         if (holdsChanged) Settings.Holds = holds;
+
+        // What the Settings chart shows as "right now". With Home Assistant down it keeps the levels it last gave.
+        var offs = new Dictionary<string, (int Value, double Weight)>();
+        foreach (var m in mons)
+            if (m.Offset is int o && Rules.OffsetWeight(sun, m.OffsetSun ?? sun, m.OffsetAt is double at ? Now - at : null) is double w) offs[m.Key] = (o, w);
+        IReadOnlyDictionary<string, double[]>? haLevels = Source == Source.HomeAssistant ? Live?.Levels : null;
+        if (Source == Source.HomeAssistant && !haDown && s.FromHa is { } raw) {
+            var fresh = new Dictionary<string, double[]>();
+            for (int i = 0; i < mons.Length && i < raw.Length; i++) fresh[mons[i].Key] = raw[i];
+            haLevels = fresh;
+        }
+        Live = new LiveInputs(s.Elev, s.HasBlind ? s.Pos : null, s.Lights, light, haLevels, offs, linkedNow,
+                              li >= 0 ? mons[li].Label : "", AutoOn && here);
+        LiveChanged?.Invoke();
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
         Subtitle = !AutoOn ? "Off — sliders and hotkeys only"

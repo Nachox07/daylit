@@ -59,6 +59,7 @@ sealed class SettingsWindow : Window {
         foreach (var s in Sources) source.Items.Add(new ComboBoxItem { Content = s.text, Tag = s.tag });
         source.SelectionChanged += (_, _) => SourceChanged();
         lat.TextChanged += (_, _) => Refresh(); lon.TextChanged += (_, _) => Refresh();
+        cover.TextChanged += (_, _) => RebuildCurves();   // the chart's closed-blind line comes and goes with it
         locate.Click += async (_, _) => await Locate();
         test.Click += async (_, _) => await Test();
 
@@ -68,7 +69,7 @@ sealed class SettingsWindow : Window {
             Card("Location", Field("Latitude", lat, "51.48"), Field("Longitude", lon, "0.00"), Row(locate, sunNow),
                  Hint("City level is enough. Daylit saves two decimals (about 1 km) and computes the sun on this PC.")),
             brightnessCard = Card("When the screens brighten", dayCurve,
-                 Hint("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between."),
+                 Hint("Brightness through today. Drag a handle sideways to choose how high the sun must be for full brightness, and how low for the night level."),
                  new Expander { Header = "Exact values", Margin = new Thickness(0, 8, 0, 0),
                                 Content = TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")) }));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
@@ -84,6 +85,10 @@ sealed class SettingsWindow : Window {
         ShowLightStatus();
         app.LightStatusChanged += ShowLightStatus;
         Closed += (_, _) => app.LightStatusChanged -= ShowLightStatus;
+        // The chart's "right now" follows each tick while the window is open.
+        void ShowLive() => (dayCurve.Content as BrightnessChart)?.Update();
+        app.LiveChanged += ShowLive;
+        Closed += (_, _) => app.LiveChanged -= ShowLive;
         var look = new CheckBox { Content = "Light or dark mode from daylight", IsChecked = Settings.AutoLook, Margin = new Thickness(0, 2, 0, 2) };
         look.Click += (_, _) => app.SetLook(look.IsChecked == true);
         var pause = new CheckBox { Content = "Pause on battery", IsChecked = app.PauseOnBattery, Margin = new Thickness(0, 2, 0, 2),
@@ -201,6 +206,7 @@ sealed class SettingsWindow : Window {
     }
 
     readonly ContentControl themeCurve = new(), dayCurve = new();
+    string? chartPick;   // the monitor the brightness chart shows, kept when it is rebuilt
 
     /// The value a tuning field has in the window: what is typed, or its default.
     double TuneValue(string id) =>
@@ -218,6 +224,17 @@ sealed class SettingsWindow : Window {
         };
     }
 
+    /// The tuning the brightness chart draws with: the app's, with the brightness numbers typed in the window.
+    Tuning ChartTuning() {
+        var t = app.Cfg.Tuned;
+        return new Tuning {
+            Brightness = new Tuning.BrightnessPart {
+                SunNight = TuneValue("brightness.sunNight"), SunDay = TuneValue("brightness.sunDay"),
+                LightsBoost = TuneValue("brightness.lightsBoost"), LightsBoostSunBelow = TuneValue("brightness.lightsBoostSunBelow"),
+                CloudyDaylight = t.CloudyDaylight },
+            Theme = t.Theme, Timing = t.Timing };
+    }
+
     /// Today's sun pictures; a hint instead without a location.
     void RebuildCurves() {
         if (Coords is not var (la, lo)) {
@@ -231,15 +248,12 @@ sealed class SettingsWindow : Window {
         Color orange = Color.FromRgb(0xF7, 0x8C, 0x1E), purple = Color.FromRgb(0x6E, 0x5B, 0xD6);
         themeCurve.Content = new SunCurve(la, lo, when, tz,
             [new("theme.lightSunAbove", "Light", orange, false), new("theme.darkSunBelow", "Dark", purple, true)], TuneValue, Set);
-        var first = rows.FirstOrDefault();
-        dayCurve.Content = new SunCurve(la, lo, when, tz,
-            [new("brightness.sunDay", "Full day", orange, false), new("brightness.sunNight", "Night", purple, true)], TuneValue, Set,
-            first.mon == null ? null : e => {
-                double night = TuneValue("brightness.sunNight"), day = TuneValue("brightness.sunDay");
-                double sun = Math.Clamp((e - night) / (day - night), 0, 1);
-                return Rules.Target([first.day.Value, first.blind.Value, first.night.Value], 100, false, sun, app.Cfg.Tuned, false);
-            },
-            first.mon == null ? "" : $"{first.label.Text} through the day, blind open");
+        if (rows.Count == 0) { dayCurve.Content = Hint("Connect an external monitor to see its brightness through today."); return; }
+        var mons = rows.Select(r => new ChartMonitor(r.mon.Key, string.IsNullOrWhiteSpace(r.label.Text) ? r.mon.D.Friendly : r.label.Text.Trim(),
+                                                     r.day.Value, r.blind.Value, r.night.Value)).ToList();
+        bool snapshot = FixedNow != null;
+        dayCurve.Content = new BrightnessChart(la, lo, when, tz, mons, SourceTag == "homeAssistant" && cover.Text.Trim() != "",
+            ChartTuning, () => snapshot ? null : app.Live, Set, chartPick, id => chartPick = id);
     }
 
     readonly CheckBox roomBox = new() { Content = "Count the blind and the room lights", Margin = new Thickness(0, 2, 0, 2) };
@@ -258,7 +272,7 @@ sealed class SettingsWindow : Window {
                                        VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
             box.TextChanged += (_, _) => {
                 hint.Visibility = box.Text == "" ? Visibility.Visible : Visibility.Collapsed;
-                (themeCurve.Content as UIElement)?.InvalidateVisual(); (dayCurve.Content as UIElement)?.InvalidateVisual();
+                (themeCurve.Content as UIElement)?.InvalidateVisual(); (dayCurve.Content as BrightnessChart)?.Update();
             };
             System.Windows.Automation.AutomationProperties.SetName(box, f.Label);
             System.Windows.Automation.AutomationProperties.SetHelpText(box, $"Default {Fmt(f.Default)}{f.Unit}");
@@ -413,6 +427,7 @@ sealed class SettingsWindow : Window {
         foreach (var m in external) {
             var spec = Mon.Match(m.D, c.Monitors);
             var label = new TextBox { Text = !string.IsNullOrWhiteSpace(spec?.Label) ? spec!.Label! : m.D.Friendly };
+            label.TextChanged += (_, _) => RebuildCurves();   // the chart's monitor picker shows the names
             var day = new Slider { Value = spec?.Day ?? Config.DefaultDay };
             var blind = new Slider { Value = spec?.BlindDown ?? Config.DefaultBlindDown };
             var night = new Slider { Value = spec?.Night ?? Config.DefaultNight };

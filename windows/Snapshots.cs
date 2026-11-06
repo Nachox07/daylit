@@ -45,6 +45,8 @@ static class Snapshots {
                 Save(Frame(settings.Detach(), 860, Palette.Solid, 8), Path.Combine(dir, $"settings-{pane.ToLowerInvariant()}-{mode}.png"));
                 settings.Close();
             }
+            foreach (var (name, chart) in ChartScenes())
+                Save(Frame(chart(), 632, Palette.Solid, 0), Path.Combine(dir, $"{name}-{mode}.png"));
             var osd = new Osd();
             Save(Frame(osd.Detach("Studio Display", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
             osd.Close();
@@ -60,6 +62,27 @@ static class Snapshots {
                         { "match": "U2723QE", "contrast": 60, "homeAssistant": { "day": "input_number.dell_day" } } ],
           "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """;
+
+    /// The brightness chart from fixed state: Greenwich (or 80°N), UTC, levels 90 / 70 / 45, a blind 40% open,
+    /// clouds capping daylight at 80% and a hand-set +6, unless a scene says otherwise. The Mac draws the same scenes.
+    static IEnumerable<(string name, Func<FrameworkElement> chart)> ChartScenes() {
+        ChartMonitor[] mons = [new("a", "Studio Display", 90, 70, 45), new("b", "Dell U2723QE", 80, 60, 30)];
+        var plusSix = new Dictionary<string, (int Value, double Weight)> { ["a"] = (6, 1) };
+        var live = new LiveInputs(Pos: 40, Lights: false, Light: 0.8, Offsets: plusSix);
+        static DateTimeOffset Date(string iso) => DateTimeOffset.Parse(iso, System.Globalization.CultureInfo.InvariantCulture);
+        // At dusk: the first minute after noon the sun is 1° below the horizon, so the room lights count.
+        var june = Date("2026-06-19T12:00:00Z");
+        var dusk = Enumerable.Range(0, 12 * 60).Select(i => june.AddMinutes(i)).FirstOrDefault(t => Sun.Elevation(t, 51.48, 0) < -1, june);
+        Func<FrameworkElement> Scene(DateTimeOffset now, double lat = 51.48, bool blind = true, LiveInputs? l = null) {
+            var li = l ?? live;
+            return () => new BrightnessChart(lat, 0, now, TimeZoneInfo.Utc, mons, blind, () => new Tuning(), () => li, (_, _) => { }) { Margin = new Thickness(16) };
+        }
+        yield return ("curve-today", Scene(Date("2026-06-19T15:00:00Z")));
+        yield return ("curve-winter", Scene(Date("2026-12-21T12:00:00Z")));
+        yield return ("curve-parked", Scene(Date("2026-12-21T12:00:00Z"), lat: 80));
+        yield return ("curve-no-blind", Scene(Date("2026-06-19T15:00:00Z"), blind: false, l: new LiveInputs(Pos: null, Light: 0.8, Offsets: plusSix)));
+        yield return ("curve-dusk", Scene(dusk, l: new LiveInputs(Pos: 0, Lights: true)));
+    }
 
     static Mon Fake(string label, int level, bool hdr = false, bool manual = false) =>
         new(new Display { Friendly = label, Gdi = @"\\.\DISPLAY" + label.Length, Hdr = hdr, DevicePath = "snapshot-" + label }, null) {
