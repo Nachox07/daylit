@@ -27,7 +27,11 @@ if [ "$DRY" = 1 ]; then
   echo "dry run: push Casks/daylit.rb $VERSION to Nachox07/homebrew-tap"
 else
   clone Nachox07/homebrew-tap "$WORK/tap"
-  cp "$ROOT/packaging/homebrew/Casks/daylit.rb" "$WORK/tap/Casks/daylit.rb"
+  # A rerun of an older release must not replace a newer cask.
+  TAP_VERSION="$(sed -n 's/^  version "\(.*\)"/\1/p' "$WORK/tap/Casks/daylit.rb")"
+  NEWEST="$(printf '%s\n%s\n' "$TAP_VERSION" "$VERSION" | sort -V | tail -n 1)"
+  [ "$NEWEST" = "$VERSION" ] || { echo "homebrew: the tap has $TAP_VERSION, newer than $VERSION; left alone"; SKIP_TAP=1; }
+  [ "${SKIP_TAP:-0}" = 1 ] || cp "$ROOT/packaging/homebrew/Casks/daylit.rb" "$WORK/tap/Casks/daylit.rb"
   if git -C "$WORK/tap" diff --quiet; then
     echo "homebrew: the tap already has $VERSION"
   else
@@ -42,8 +46,9 @@ fi
 BRANCH="Nachox07.Daylit-$VERSION"
 if [ "${WINGET:-0}" != 1 ]; then
   echo "winget: skipped (WINGET is not 1)"
-elif [ "$DRY" != 1 ] && [ -n "$(gh pr list -R microsoft/winget-pkgs --head "$BRANCH" --state all --json number -q '.[].number')" ]; then
-  echo "winget: a pull request for $BRANCH already exists"
+elif [ "$DRY" != 1 ] && [ -n "$(gh pr list -R microsoft/winget-pkgs --head "$BRANCH" --state all \
+       --json state -q '.[] | select(.state != "CLOSED") | .state')" ]; then
+  echo "winget: an open or merged pull request for $BRANCH already exists"
 else
   run gh repo sync Nachox07/winget-pkgs --source microsoft/winget-pkgs --branch master
   if [ "$DRY" = 1 ]; then
@@ -61,7 +66,7 @@ else
   else
     git -C "$WORK/winget" add manifests
     commit "$WORK/winget" "Update: Nachox07.Daylit to $VERSION"
-    git -C "$WORK/winget" push -q origin "$BRANCH"
+    git -C "$WORK/winget" push -q -f origin "$BRANCH"   # our fork: a rerun replaces the branch
     gh pr create -R microsoft/winget-pkgs --head "Nachox07:$BRANCH" --base master \
       --title "Update: Nachox07.Daylit to $VERSION" \
       --body "Update: **Nachox07.Daylit** to **$VERSION**, from the GitHub release https://github.com/Nachox07/daylit/releases/tag/v$VERSION. Opened by Daylit's release workflow."
@@ -79,7 +84,8 @@ else
   git -C "$ROOT" checkout -q -b "$PB"
   git -C "$ROOT" add packaging
   commit "$ROOT" "Point packaging at $VERSION"
-  git -C "$ROOT" push -q "https://x-access-token:${GH_TOKEN}@github.com/Nachox07/daylit.git" "$PB"
+  git -C "$ROOT" push -q -f "https://x-access-token:${GH_TOKEN}@github.com/Nachox07/daylit.git" "$PB"
+  [ -n "$(gh pr list -R Nachox07/daylit --head "$PB" --state open --json number -q '.[].number')" ] ||
   gh pr create -R Nachox07/daylit --head "$PB" --base main --title "Point packaging at $VERSION" \
     --body "The release workflow updated the Homebrew cask and winget manifests for v$VERSION and published them. This keeps the copies in packaging/ in step."
 fi
