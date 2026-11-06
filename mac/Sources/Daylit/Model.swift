@@ -22,6 +22,7 @@ import DaylitCore
     @Published var dark = false
     /// "Sync monitors": moving one external monitor moves the others, keeping their offsets.
     @Published var sync = UserDefaults.standard.bool(forKey: "syncMonitors")
+    @Published var live: LiveInputs?     // the last tick's blind, lights, clouds and hand-set distances, for the Settings chart
     var syncOffsets: SyncOffsets = {
         guard let d = UserDefaults.standard.data(forKey: "syncOffsets"), let o = try? JSONDecoder().decode(SyncOffsets.self, from: d) else { return SyncOffsets() }
         return o
@@ -605,6 +606,13 @@ import DaylitCore
             }
         }
         saveHolds()
+        let nowSun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
+        var offs: [String: (value: Int, weight: Double)] = [:]
+        for m in mons {
+            if let o = m.offset, let w = offsetWeight(sun: nowSun, setAt: m.offsetSun ?? nowSun, age: m.offsetAt.map { now - $0 }) { offs[m.uuid] = (o, w) }
+        }
+        let next = LiveInputs(pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels, offsets: offs)
+        if live != next { live = next }
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")

@@ -11,7 +11,11 @@ public struct HandlePlace: Equatable {
     /// The sun never crosses this elevation today: the handle rests on the day's peak (a line above
     /// it) or trough (a line below it), and dragging it saves nothing until it leaves that point.
     public let parked: Bool
-    public init(at: Double, partner: Double?, parked: Bool) { self.at = at; self.partner = partner; self.parked = parked }
+    /// For a parked handle: the sun stays above the line all day (false: below it all day).
+    public let sunAbove: Bool
+    public init(at: Double, partner: Double?, parked: Bool, sunAbove: Bool = false) {
+        self.at = at; self.partner = partner; self.parked = parked; self.sunAbove = sunAbove
+    }
 }
 
 /// The handle for elevation `e`: on the morning crossing (where the sun comes up through the line)
@@ -32,7 +36,7 @@ public func handlePlace(_ s: [(t: Double, e: Double)], line e: Double, morning: 
     // No crossing: the peak when the whole day is below the line, the trough when it is all above.
     let allBelow = s.allSatisfy { $0.e < e }
     let pick = allBelow ? s.max { $0.e < $1.e } : s.min { $0.e < $1.e }
-    return HandlePlace(at: pick?.t ?? 0.5, partner: nil, parked: true)
+    return HandlePlace(at: pick?.t ?? 0.5, partner: nil, parked: true, sunAbove: !allBelow)
 }
 
 /// The sun's elevation at a point of today (linear between samples).

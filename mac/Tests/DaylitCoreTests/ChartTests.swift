@@ -31,7 +31,7 @@ final class ChartTests: XCTestCase {
     func testWhenTheSunNeverReachesTheLineTheHandleParksOnThePeak() {
         let s = day("2026-12-21T12:00:00Z", lat: 70)   // noon about -3.4°: under the 12° line all day
         let p = handlePlace(s, line: 12)
-        XCTAssertTrue(p.parked); XCTAssertNil(p.partner)
+        XCTAssertTrue(p.parked); XCTAssertNil(p.partner); XCTAssertFalse(p.sunAbove)
         XCTAssertEqual(p.at, 0.5, accuracy: 0.02)
         // A click on it saves nothing; dragging it away saves the sun's height where it lands.
         XCTAssertNil(draggedElevation(s, to: p.at, day: true, other: -3, parkedAt: p.at))
@@ -40,7 +40,7 @@ final class ChartTests: XCTestCase {
     func testInPolarDayTheNightHandleParksOnTheTrough() {
         let s = day("2026-06-21T12:00:00Z", lat: 80)   // the sun stays about 13° up at midnight
         let p = handlePlace(s, line: -3)
-        XCTAssertTrue(p.parked)
+        XCTAssertTrue(p.parked); XCTAssertTrue(p.sunAbove)
         XCTAssertTrue(p.at < 0.02 || p.at > 0.98)
     }
     func testTheHandlesNeverCrossAndStayInTheAcceptedRange() {

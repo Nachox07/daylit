@@ -48,6 +48,32 @@ import DaylitCore
             ("settings-homeassistant", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
             ("settings-appearance", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
             ("settings-app", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
+        ] + chartScenes()
+    }
+
+    /// The brightness chart from fixed state: Greenwich (or 80°N), GMT, levels 90 / 70 / 45, a blind 40% open,
+    /// clouds capping daylight at 80% and a hand-set +6, unless a scene says otherwise.
+    static func chartScenes() -> [(String, AnyView)] {
+        let gmt = TimeZone(identifier: "GMT")!
+        let mons = [ChartMonitor(id: "a", label: "Studio Display", day: 90, blindDown: 70, night: 45),
+                    ChartMonitor(id: "b", label: "Dell U2723QE", day: 80, blindDown: 60, night: 30)]
+        let live = LiveInputs(pos: 40, lights: false, light: 0.8, offsets: ["a": (6, 1)])
+        func date(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+        // At dusk: the first moment after noon the sun is 1° below the horizon, so the room lights count.
+        let june = date("2026-06-19T12:00:00Z")
+        let dusk = stride(from: 0.0, to: 12 * 3600, by: 60).map { june.addingTimeInterval($0) }
+            .first { solarElevation(latitude: 51.48, longitude: 0, at: $0) < -1 } ?? june
+        func chart(_ now: Date, lat: Double = 51.48, blind: Bool = true, live l: LiveInputs = live) -> AnyView {
+            AnyView(BrightnessChart(latitude: lat, longitude: 0, now: now, timeZone: gmt, monitors: mons, hasBlind: blind,
+                                    tuning: Tuning(), live: l, set: { _, _ in })
+                .frame(width: 600).padding(16).background(Color(nsColor: .windowBackgroundColor)))
+        }
+        return [
+            ("curve-today", chart(date("2026-06-19T15:00:00Z"))),
+            ("curve-winter", chart(date("2026-12-21T12:00:00Z"))),
+            ("curve-parked", chart(date("2026-12-21T12:00:00Z"), lat: 80)),
+            ("curve-no-blind", chart(date("2026-06-19T15:00:00Z"), blind: false, live: LiveInputs(pos: nil, light: 0.8, offsets: ["a": (6, 1)]))),
+            ("curve-dusk", chart(dusk, live: LiveInputs(pos: 0, lights: true))),
         ]
     }
 

@@ -1,6 +1,6 @@
 // Today's sun as a picture: its height through the day at the user's location, with draggable
 // lines for the elevations the rules use. Each line shows when the sun crosses it today, so nobody
-// has to think in degrees. Below, how bright a monitor would be hour by hour.
+// has to think in degrees. Used for light and dark mode; brightness has its own chart (BrightnessChart).
 import SwiftUI
 import AppKit
 import DaylitCore
@@ -19,9 +19,6 @@ struct SunCurve: View {
     let timeZone: TimeZone
     var markers: [SunMarker]
     let set: (String, Double) -> Void
-    /// Optional brightness preview: the level (0–100) for an elevation.
-    var level: ((Double) -> Int)? = nil
-    var levelTitle = ""
 
     /// Today from local midnight to the next one: 23 or 25 hours on the days the clocks change.
     var day: (start: Date, length: TimeInterval) {
@@ -90,21 +87,6 @@ struct SunCurve: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary.opacity(0.1)))
 
-            if let level {
-                Text(levelTitle).font(.caption).foregroundStyle(.secondary)
-                GeometryReader { geo in
-                    let w = geo.size.width, h = geo.size.height
-                    Path { p in
-                        p.move(to: CGPoint(x: 0, y: h))
-                        for pt in s { p.addLine(to: CGPoint(x: pt.t * w, y: h - CGFloat(level(pt.e)) / 100 * h)) }
-                        p.addLine(to: CGPoint(x: w, y: h)); p.closeSubpath()
-                    }
-                    .fill(Color.accentColor.opacity(0.35))
-                }
-                .frame(height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.primary.opacity(0.1)))
-            }
         }
     }
 
