@@ -17,6 +17,9 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
     public string? LightUnit { get; init; }
     /// How clear the sky is, 0…1, when the light sensor says.
     public double? LightRatio { get; init; }
+    /// Per monitor: Home Assistant's own [day, blindDown, night] (-1 where it has no value), for the Settings
+    /// chart; null when these inputs did not come from Home Assistant.
+    public double[][]? FromHa { get; init; }
 }
 
 /// Home Assistant REST: one template call per tick returns everything; sensors are posted back.
@@ -65,7 +68,7 @@ static class HAClient {
             var levels = mons.Select((m, i) => new[] {
                 a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
             var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit };
+            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit, FromHa = a.m.Select(v => v[..3]).ToArray() };
         } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
     }
 

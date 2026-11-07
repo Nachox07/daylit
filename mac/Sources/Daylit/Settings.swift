@@ -283,9 +283,9 @@ struct SettingsView: View {
                 Text("City level is enough; Daylit saves two decimals (about 1 km) and computes the sun on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if source != "off", let curve = sunCurve(["brightness.sunDay": ("Full day", Color.orange, false), "brightness.sunNight": ("Night", Color.indigo, true)], preview: true) {
-                Section { curve } header: { Text("When the screens brighten") } footer: {
-                    Text("Drag a line: full daytime brightness above the orange one, night brightness below the purple one, a blend in between.")
+            if source != "off", let chart = brightnessChart {
+                Section { chart } header: { Text("When the screens brighten") } footer: {
+                    Text("Brightness through today. Drag a handle sideways to choose how high the sun must be for full brightness, and how low for the night level.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
@@ -411,22 +411,31 @@ struct SettingsView: View {
         Double((tune[id] ?? "").replacingOccurrences(of: ",", with: ".")) ?? Tuning.allFields.first { $0.id == id }?.defaultValue ?? 0
     }
 
+    /// The brightness through today for the monitors being edited, with the elevations being edited; nil without a location.
+    var brightnessChart: BrightnessChart? {
+        guard let l = coords, !monitors.isEmpty else { return nil }
+        var t = m.config.tuned
+        var b = t.brightness ?? .init()
+        b.sunNight = value("brightness.sunNight"); b.sunDay = value("brightness.sunDay")
+        b.lightsBoost = value("brightness.lightsBoost"); b.lightsBoostSunBelow = value("brightness.lightsBoostSunBelow")
+        t.brightness = b
+        let snapshot = Self.fixedNow != nil
+        return BrightnessChart(latitude: l.0, longitude: l.1, now: Self.now,
+                               timeZone: snapshot ? TimeZone(identifier: "UTC")! : .current,   // snapshots: the same on every machine
+                               monitors: monitors.map { ChartMonitor(id: $0.id, label: $0.label.isEmpty ? $0.name : $0.label, day: $0.day, blindDown: $0.blindDown, night: $0.night) },
+                               hasBlind: source == "homeAssistant" && !cover.trimmingCharacters(in: .whitespaces).isEmpty,
+                               tuning: t, live: snapshot ? nil : m.live,
+                               set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) })
+    }
+
     /// Today's sun with draggable lines for the given fields; nil without a location.
-    func sunCurve(_ lines: KeyValuePairs<String, (String, Color, Bool)>, preview: Bool = false) -> SunCurve? {
+    func sunCurve(_ lines: KeyValuePairs<String, (String, Color, Bool)>) -> SunCurve? {
         guard let l = coords else { return nil }
         var tz = TimeZone.current
         if Self.fixedNow != nil { tz = TimeZone(identifier: "UTC")! }   // snapshots: the same on every machine
-        let first = monitors.first
         return SunCurve(latitude: l.0, longitude: l.1, now: Self.now, timeZone: tz,
                         markers: lines.map { SunMarker(id: $0.key, title: $0.value.0, color: $0.value.1, value: value($0.key), below: $0.value.2) },
-                        set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) },
-                        level: preview ? first.map { d in { e in
-                            var t = m.config.tuned
-                            t.brightness = .init()
-                            t.brightness?.sunNight = value("brightness.sunNight"); t.brightness?.sunDay = value("brightness.sunDay")
-                            return target(day: d.day, blindDown: d.blindDown, night: d.night, elev: e, pos: 100, lights: false, tuning: t)
-                        } } : nil,
-                        levelTitle: first.map { "\($0.label) through the day, blind open" } ?? "")
+                        set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) })
     }
 
     /// A dragged line stops half a degree short of its partner: full day stays above night, light above dark.

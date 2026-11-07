@@ -93,19 +93,21 @@ flowchart LR
 ```
 
 Every 30 seconds, every 2 minutes on battery (and at once after wake, a display change or opening the panel) each app works out
-a target per monitor from three levels you choose: *day*, *blind closed* and *night*.
+a target per monitor from three levels you choose: *day*, *blind closed* and *night*, in this order:
 
-1. The daytime level slides between *blind closed* and *day* with the blind position.
-2. The sun blends it with *night*: night below −3° elevation, full daytime from 12°.
-3. Room lights on around dusk keep it a little above *night*, so a lit room is not too dark.
-4. Optional: a daylight sensor in Home Assistant (solar panel power, or an outdoor light sensor) tells a
-   cloudy day from a clear one. On an overcast morning the screens stay dimmer even with the blind open
-   ([details](docs/setup.md#clouds-a-daylight-sensor)).
+1. **The blind** picks the daytime level, between *blind closed* and *day*.
+2. **The sun** blends it with *night*: night below −3° elevation, full daytime from 12°.
+3. **Clouds**, optional: a daylight sensor in Home Assistant (solar panel power, or an outdoor light
+   sensor) holds the sun's share down on an overcast day ([details](docs/setup.md#clouds-a-daylight-sensor)).
+4. **Room lights** on around dusk keep it a little above *night*, so a lit room is not too dark.
+5. **Your hand.** A level you set keeps its distance from the target, so Daylit does not fight you:
+   turn the screen 20 points down on a grey morning and it stays 20 below while the blind opens and the
+   sun climbs. The distance fades out at sunset, so the next day starts clean; *Manual ✕* on the
+   monitor's row goes back to automatic at once.
 
-A level you set by hand keeps its distance from the target, so Daylit does not fight you: turn the
-screen 20 points down on a grey morning and it stays 20 below while the blind opens and the sun climbs.
-That distance fades out at sunset, so the next day starts clean; *Manual ✕* on the monitor's row goes
-back to automatic at once. The sun's position is computed locally; the tests check it against NOAA reference values to within 0.05°.
+Settings → *Automatic* draws all of this for today, with handles to choose when full brightness starts
+and when night starts, and shows each step with the numbers right now
+([the chart](docs/setup.md#when-the-screens-brighten)). The sun's position is computed locally; the tests check it against NOAA reference values to within 0.05°.
 
 - **Two computers, one set of monitors.** When a Mac and a PC share monitors through input
   switching, only the one in use changes brightness. The idle one catches up when you come back.

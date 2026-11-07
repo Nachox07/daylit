@@ -1,6 +1,6 @@
 // Today's sun as a picture: its height through the day at the user's location, with draggable lines
 // for the elevations the rules use. Each line shows when the sun crosses it today, so nobody has to
-// think in degrees. Below, how bright a monitor would be hour by hour. Same as the Mac's SunCurve.
+// think in degrees. Same as the Mac's SunCurve.
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
@@ -17,18 +17,15 @@ sealed class SunCurve : FrameworkElement {
     readonly IReadOnlyList<Marker> markers;
     readonly Func<string, double> get;
     readonly Action<string, double> set;
-    readonly Func<double, int>? level;
-    readonly string levelTitle;
-    const double ChartH = 170, Gap = 26, StripH = 44;
+    const double ChartH = 170;
     readonly List<(Marker m, Rect r)> handles = new();
     string? dragging;
     double top, bottom;
 
     public SunCurve(double lat, double lon, DateTimeOffset now, TimeZoneInfo tz, IReadOnlyList<Marker> markers,
-                    Func<string, double> get, Action<string, double> set, Func<double, int>? level = null, string levelTitle = "") {
-        (this.lat, this.lon, this.now, this.tz, this.markers, this.get, this.set, this.level, this.levelTitle) =
-            (lat, lon, now, tz, markers, get, set, level, levelTitle);
-        Height = ChartH + (level != null ? Gap + StripH : 0);
+                    Func<string, double> get, Action<string, double> set) {
+        (this.lat, this.lon, this.now, this.tz, this.markers, this.get, this.set) = (lat, lon, now, tz, markers, get, set);
+        Height = ChartH;
         Cursor = Cursors.Arrow;
         System.Windows.Automation.AutomationProperties.SetName(this, "Today's sun");
     }
@@ -106,24 +103,6 @@ sealed class SunCurve : FrameworkElement {
         }
         dc.Pop();
         dc.DrawRoundedRectangle(null, new Pen(Palette.CardBorder, 1), new Rect(0.5, 0.5, w - 1, ChartH - 1), 8, 8);
-
-        if (level != null) {
-            var title = Text(levelTitle, 12, Palette.Secondary);
-            dc.DrawText(title, new Point(0, ChartH + (Gap - title.Height) / 2));
-            double y0 = ChartH + Gap;
-            var area = new StreamGeometry();
-            using (var g = area.Open()) {
-                g.BeginFigure(new Point(0, y0 + StripH), true, true);
-                g.PolyLineTo(s.Select(p => new Point(p.t * w, y0 + StripH - level(p.e) / 100.0 * StripH))
-                              .Append(new Point(w, y0 + StripH)).ToList(), true, true);
-            }
-            area.Freeze();
-            var box = new Rect(0, y0, w, StripH);
-            dc.PushClip(new RectangleGeometry(box, 6, 6));
-            dc.DrawGeometry(Solid(((SolidColorBrush)Palette.Accent).Color, 90), null, area);
-            dc.Pop();
-            dc.DrawRoundedRectangle(null, new Pen(Palette.CardBorder, 1), box, 6, 6);
-        }
     }
 
     /// Today's times for an elevation: "06:52 – 21:14" while the sun is above it, or for a state that

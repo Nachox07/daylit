@@ -48,7 +48,84 @@ import DaylitCore
             ("settings-homeassistant", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
             ("settings-appearance", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
             ("settings-app", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
+        ] + chartScenes()
+    }
+
+    /// The brightness chart from fixed state: Greenwich (or 80°N), GMT, levels 90 / 70 / 45, a blind 40% open,
+    /// clouds capping daylight at 80% and a hand-set +6, unless a scene says otherwise.
+    static func chartScenes() -> [(String, AnyView)] {
+        let gmt = TimeZone(identifier: "GMT")!
+        let mons = [ChartMonitor(id: "a", label: "Studio Display", day: 90, blindDown: 70, night: 45),
+                    ChartMonitor(id: "b", label: "Dell U2723QE", day: 80, blindDown: 60, night: 30)]
+        let live = LiveInputs(pos: 40, lights: false, light: 0.8, offsets: ["a": (6, 1)])
+        func date(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+        // At dusk: the first moment after noon the sun is 1° below the horizon, so the room lights count.
+        let june = date("2026-06-19T12:00:00Z")
+        let dusk = stride(from: 0.0, to: 12 * 3600, by: 60).map { june.addingTimeInterval($0) }
+            .first { solarElevation(latitude: 51.48, longitude: 0, at: $0) < -1 } ?? june
+        func chart(_ now: Date, lat: Double = 51.48, blind: Bool = true, live l: LiveInputs = live) -> AnyView {
+            AnyView(BrightnessChart(latitude: lat, longitude: 0, now: now, timeZone: gmt, monitors: mons, hasBlind: blind,
+                                    tuning: Tuning(), live: l, set: { _, _ in })
+                .frame(width: 600).padding(16).background(Color(nsColor: .windowBackgroundColor)))
+        }
+        return [
+            ("curve-today", chart(date("2026-06-19T15:00:00Z"))),
+            ("curve-winter", chart(date("2026-12-21T12:00:00Z"))),
+            ("curve-parked", chart(date("2026-12-21T12:00:00Z"), lat: 80)),
+            ("curve-no-blind", chart(date("2026-06-19T15:00:00Z"), blind: false, live: LiveInputs(pos: nil, light: 0.8, offsets: ["a": (6, 1)]))),
+            ("curve-dusk", chart(dusk, live: LiveInputs(pos: 0, lights: true))),
         ]
+    }
+
+    /// The docs animation of the brightness chart (docs/setup.md), from the same made-up state as the
+    /// chart scenes: the day goes by, the blind closes, clouds come, a hand-set +6, a handle is dragged,
+    /// then the seasons turn to midwinter. Writes frame-0000.png…; CONTRIBUTING.md turns them into a GIF.
+    static func chartFrames(to dir: URL, dark: Bool) -> Int32 {
+        PanelBackground.plain = true
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let gmt = TimeZone(identifier: "GMT")!
+        let mons = [ChartMonitor(id: "a", label: "Studio Display", day: 90, blindDown: 70, night: 45)]
+        func date(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
+        let june = date("2026-06-19T00:00:00Z")
+        func ease(_ i: Int, _ n: Int) -> Double { let x = Double(i) / Double(max(n - 1, 1)); return x * x * (3 - 2 * x) }
+        struct Frame { var now: Date; var live: LiveInputs; var sunDay = 12.0; var degrees: String? = nil; var hold = 1 }
+        var frames: [Frame] = []
+        let clear = LiveInputs(pos: 100)
+        // 1. The day goes by: 04:30 to 15:00 with the blind open and a clear sky.
+        for i in 0..<42 { frames.append(Frame(now: june.addingTimeInterval((4.5 + 10.5 * ease(i, 42)) * 3600), live: clear)) }
+        frames[frames.count - 1].hold = 8
+        let afternoon = june.addingTimeInterval(15 * 3600)
+        // 2. The blind closes to 40%, 3. clouds cap daylight at 60%, 4. a hand-set +6.
+        for i in 0..<16 { frames.append(Frame(now: afternoon, live: LiveInputs(pos: 100 - 60 * ease(i, 16)))) }
+        frames[frames.count - 1].hold = 8
+        for i in 0..<16 { frames.append(Frame(now: afternoon, live: LiveInputs(pos: 40, light: 1 - 0.4 * ease(i, 16)))) }
+        frames[frames.count - 1].hold = 8
+        frames.append(Frame(now: afternoon, live: LiveInputs(pos: 40, light: 0.6, offsets: ["a": (6, 1)]), hold: 12))
+        // 5. Drag the full-brightness handle: a higher sun means a shorter full day; then back.
+        let mine = LiveInputs(pos: 40, light: 0.6, offsets: ["a": (6, 1)])
+        for i in 0..<18 { frames.append(Frame(now: afternoon, live: mine, sunDay: ((12 + 18 * ease(i, 18)) * 2).rounded() / 2, degrees: "brightness.sunDay")) }
+        frames[frames.count - 1].hold = 8
+        for i in 0..<18 { frames.append(Frame(now: afternoon, live: mine, sunDay: ((30 - 18 * ease(i, 18)) * 2).rounded() / 2, degrees: "brightness.sunDay")) }
+        frames[frames.count - 1].hold = 6
+        // 6. The seasons turn: midsummer to midwinter at noon, same settings.
+        for i in 0..<30 {
+            let d = june.addingTimeInterval(ease(i, 30) * 185 * 86400 + 12 * 3600)
+            frames.append(Frame(now: d, live: LiveInputs(pos: 100)))
+        }
+        frames[frames.count - 1].hold = 24
+        var n = 0
+        for f in frames {
+            var t = Tuning(); var b = Tuning.Brightness(); b.sunDay = f.sunDay; t.brightness = b
+            let view = AnyView(BrightnessChart(latitude: 51.48, longitude: 0, now: f.now, timeZone: gmt, monitors: mons, hasBlind: true,
+                                               tuning: t, live: f.live, set: { _, _ in }, showDegrees: f.degrees)
+                .frame(width: 600).padding(16).background(Color(nsColor: .windowBackgroundColor)))
+            guard let png = image(view, dark: dark) else { return 1 }
+            for _ in 0..<f.hold {
+                try? png.write(to: dir.appendingPathComponent(String(format: "frame-%04d.png", n))); n += 1
+            }
+        }
+        print("\(n) frames in \(dir.path)")
+        return 0
     }
 
     /// A made-up config for the settings window scene.
