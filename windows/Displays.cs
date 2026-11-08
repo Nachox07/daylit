@@ -111,7 +111,7 @@ static class Ddc {
         }
     }
     public static int? Get(string gdi) => With<int?>(gdi, h =>
-        GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out uint c, out uint m) && m > 0 ? (int)Math.Round(c * 100.0 / m) : null, null);
+        GetVCPFeatureAndVCPFeatureReply(h, 0x10, IntPtr.Zero, out uint c, out uint m) && m > 0 && c <= m ? (int)Math.Round(c * 100.0 / m) : null, null);
     /// True when the monitor acknowledged the write. Without a readable maximum, 100 is assumed (the usual VCP 0x10 range).
     public static bool Set(string gdi, int v, byte code = Brightness) => With(gdi, h => {
         uint m = GetVCPFeatureAndVCPFeatureReply(h, code, IntPtr.Zero, out _, out uint max) && max > 0 ? max : 100;
@@ -131,6 +131,7 @@ sealed class Mon {
     public bool Dragging;                       // its panel slider is held with the mouse
     public bool Touched;                        // moved with the slider or keys since the last tick
     public double? RemoteSeen;                 // last_changed of the HA "set" helper already acted on
+    public double? RemoteValue;                // its value then
     public bool Manual;                        // automatic mode is holding a hand-set value
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
     public ReadState Reads = ReadState.Unknown; // DDC only: does it report its level (Rules.cs)

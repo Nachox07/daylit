@@ -119,7 +119,7 @@ import DaylitCore
                 m.noControl = "No brightness control. Turn on HDR for this display, or DDC/CI in its menu (\(DDC.hint))."
             }
             if let o = old[s.uuid] {
-                m.level = o.level; m.remoteSeen = o.remoteSeen
+                m.level = o.level; m.remoteSeen = o.remoteSeen; m.remoteValue = o.remoteValue
                 if o.control == control {
                     m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.offset = o.offset; m.offsetSun = o.offsetSun; m.offsetAt = o.offsetAt
                     m.published = o.published; m.readState = o.readState
@@ -551,7 +551,7 @@ import DaylitCore
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
-            var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
+            var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
             var want = ownTarget(m)
             let follower = base != nil && syncOffsets.isMember(m.uuid)
             if let b = base, follower {
@@ -582,7 +582,7 @@ import DaylitCore
             }
             let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
-            mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen
+            mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen; mons[i].remoteValue = st.remoteValue
             if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }

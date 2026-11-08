@@ -259,6 +259,19 @@ public class DecideTests {
     }
 
     [Fact]
+    public void HomeAssistantRestartWithTheSameSetValueIsNotACommand() {
+        var first = D(75, 75, remote: (20, 1000));
+        var restart = D(75, 75, remote: (20, 5000), s: first.State, here: false);
+        Assert.Null(restart.Remote);
+        Assert.Null(restart.Write);
+        Assert.Null(restart.State.Offset);
+        Assert.Equal(5000, restart.State.RemoteSeen);
+        var real = D(75, 75, remote: (40, 6000), s: restart.State, here: false);
+        Assert.Equal(40, real.Remote);
+        Assert.Equal(40, real.State.RemoteValue);
+    }
+
+    [Fact]
     public void SetHelperChangeAppliesEvenWhenIdleAndIsHeld() {
         var s = D(70, 70, remote: (30, 2000), s: new Hold(1000, 70, 70), here: false);
         Assert.Equal(30, s.Remote);

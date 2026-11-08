@@ -588,7 +588,7 @@ sealed class Controller {
             m.Manual = false;
             if (m.Cur is not int c) continue;
             int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost, light);
-            var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt);
+            var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt, m.RemoteValue);
             bool follower = groupBase != null && syncOffsets.IsMember(m.Key);
             if (groupBase is int b && follower) {
                 // Moved on its own (its buttons) since the last tick: that is its new place in the group.
@@ -619,7 +619,7 @@ sealed class Controller {
             if (i == li) groupBase = syncOffsets.Base(m.Key, ok ? step.Applied : c);   // followers go where the leader really is
             if (st.Offset != m.Offset && st.Offset is int o)
                 Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
-            (m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (st.RemoteSeen, st.LastSet, st.LastTarget, st.Offset, st.OffsetSun, st.OffsetAt);
+            (m.RemoteSeen, m.RemoteValue, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (st.RemoteSeen, st.RemoteValue, st.LastSet, st.LastTarget, st.Offset, st.OffsetSun, st.OffsetAt);
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
             m.Cur = ok ? step.Current : c; m.Manual = step.Manual;
             int applied = ok ? step.Applied : c;
