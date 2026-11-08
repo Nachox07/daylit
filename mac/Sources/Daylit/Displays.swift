@@ -83,7 +83,7 @@ enum DDC {
         let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return p.terminationStatus == 0 ? s : nil
     }
-    static func get(_ uuid: String) -> Int? { run(["display", uuid, "get", "luminance"]).flatMap { Int($0) } }
+    static func get(_ uuid: String) -> Int? { run(["display", uuid, "get", "luminance"]).flatMap { Int($0) }.flatMap { (0...100).contains($0) ? $0 : nil } }   // a garbled DDC answer (48750) is no reading
     /// True when m1ddc reports success (the monitor acknowledged the write).
     @discardableResult static func set(_ uuid: String, _ v: Int) -> Bool { run(["display", uuid, "set", "luminance", String(v)]) != nil }
     /// Contrast (VCP 0x12), 0–100 scaled to the monitor's reported maximum (100 when it reports none),
@@ -138,6 +138,7 @@ struct Mon: Identifiable {
     var publishedLight: Int?      // and the sky's clearness, in tenths
     var touched = false   // moved with the slider or keys since the last tick
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
+    var remoteValue: Double? = nil   // its value then
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
     var writeFailing = false         // the last automatic write was refused (logged once, retried each tick)
 }

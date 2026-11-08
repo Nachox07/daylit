@@ -58,7 +58,9 @@ static class Sun {
 /// What automatic mode remembers per monitor between ticks.
 /// Offset: a hand-set level as its distance from the target; OffsetSun: the daylight fraction when it was set;
 /// OffsetAt: when (Unix seconds).
-record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offset = null, double? OffsetSun = null, double? OffsetAt = null);
+/// RemoteValue: the "set" helper's value when RemoteSeen was taken (a restart of Home Assistant bumps last_changed alone).
+record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offset = null, double? OffsetSun = null, double? OffsetAt = null,
+                   double? RemoteValue = null);
 
 /// The outcome of one tick for one monitor.
 /// Current: the level after this tick; Write: what to send to the monitor; Remote: a "set" from HA that was applied.
@@ -111,7 +113,8 @@ static class Rules {
 
     /// One automatic decision for one monitor (Windows rules).
     /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
-    ///   hand-set level. The value seen on the first look is not a command.
+    ///   hand-set level. The value seen on the first look is not a command, nor is the same value again
+    ///   (a restart of Home Assistant gives the helper a new last_changed).
     /// - A level set by hand keeps its distance from the target: set 52 when the target is 76 and the
     ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
     ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
@@ -121,12 +124,13 @@ static class Rules {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
-            if (s.RemoteSeen == null) s = s with { RemoteSeen = r.Changed };
+            if (s.RemoteSeen == null) s = s with { RemoteSeen = r.Changed, RemoteValue = r.Value };
+            else if (r.Changed > s.RemoteSeen && s.RemoteValue == r.Value) s = s with { RemoteSeen = r.Changed };
             else if (r.Changed > s.RemoteSeen) {
                 int v = (int)Math.Round(Math.Clamp(r.Value, 0, 100), MidpointRounding.AwayFromZero);
                 if (c != v) write = v;
                 c = v; fromRemote = true; remoteValue = v;
-                s = s with { RemoteSeen = r.Changed, LastTarget = target, LastSet = v, Offset = v == target ? null : v - target, OffsetSun = sun, OffsetAt = now };
+                s = s with { RemoteSeen = r.Changed, RemoteValue = r.Value, LastTarget = target, LastSet = v, Offset = v == target ? null : v - target, OffsetSun = sun, OffsetAt = now };
             }
         }
         int applied = c;
@@ -156,7 +160,7 @@ static class Rules {
     /// write applied nothing, so forget it: otherwise the next tick reads the old level, takes the gap
     /// for a hand-set change and stops retrying. A Home Assistant "set" it carried stays pending, so
     /// the next tick applies it again too.
-    public static Hold AfterWrite(Hold s, bool ok, Hold before) => ok ? s : s with { LastSet = null, RemoteSeen = before.RemoteSeen };
+    public static Hold AfterWrite(Hold s, bool ok, Hold before) => ok ? s : s with { LastSet = null, RemoteSeen = before.RemoteSeen, RemoteValue = before.RemoteValue };
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
     public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {

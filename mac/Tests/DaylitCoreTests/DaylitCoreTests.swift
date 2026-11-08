@@ -296,6 +296,17 @@ final class DecideTests: XCTestCase {
         XCTAssertNil(s.remote)
         XCTAssertEqual(s.state.remoteSeen, 1000)
     }
+    func testHomeAssistantRestartWithTheSameSetValueIsNotACommand() {
+        let first = step(75, want: 75, remote: RemoteSet(value: 20, changed: 1000))
+        let restart = step(75, want: 75, remote: RemoteSet(value: 20, changed: 5000), state: first.state, here: false)
+        XCTAssertNil(restart.remote)
+        XCTAssertNil(restart.write)
+        XCTAssertNil(restart.state.offset)
+        XCTAssertEqual(restart.state.remoteSeen, 5000)
+        let real = step(75, want: 75, remote: RemoteSet(value: 40, changed: 6000), state: restart.state, here: false)
+        XCTAssertEqual(real.remote, 40)
+        XCTAssertEqual(real.state.remoteValue, 40)
+    }
     func testSetHelperChangeAppliesEvenWhenIdleAndIsHeld() {
         let s = step(70, want: 70, remote: RemoteSet(value: 30, changed: 2000), state: HoldState(lastSet: 70, lastTarget: 70, remoteSeen: 1000), here: false)
         XCTAssertEqual(s.remote, 30)

@@ -48,12 +48,13 @@ public struct HoldState: Equatable {
     public var lastSet: Int?         // level automatic mode last applied (nil: none yet / forget)
     public var lastTarget: Int?      // target at that time
     public var remoteSeen: Double?   // last_changed of the "set" helper already acted on
+    public var remoteValue: Double?  // its value then: a restart of Home Assistant bumps last_changed alone
     public var offset: Int?          // a hand-set level, as its distance from the target (nil: none)
     public var offsetSun: Double?    // daylight fraction (0…1) when it was set
     public var offsetAt: Double?     // when it was set (Unix seconds)
     public init(lastSet: Int? = nil, lastTarget: Int? = nil, remoteSeen: Double? = nil, offset: Int? = nil, offsetSun: Double? = nil,
-                offsetAt: Double? = nil) {
-        self.lastSet = lastSet; self.lastTarget = lastTarget; self.remoteSeen = remoteSeen
+                offsetAt: Double? = nil, remoteValue: Double? = nil) {
+        self.lastSet = lastSet; self.lastTarget = lastTarget; self.remoteSeen = remoteSeen; self.remoteValue = remoteValue
         self.offset = offset; self.offsetSun = offsetSun; self.offsetAt = offsetAt
     }
 }
@@ -65,7 +66,7 @@ extension HoldState {
     /// the next tick applies it again too.
     public func afterWrite(ok: Bool, before: HoldState) -> HoldState {
         var s = self
-        if !ok { s.lastSet = nil; s.remoteSeen = before.remoteSeen }
+        if !ok { s.lastSet = nil; s.remoteSeen = before.remoteSeen; s.remoteValue = before.remoteValue }
         return s
     }
 }
@@ -120,7 +121,8 @@ public func localDay(_ t: Double, calendar: Calendar = .current) -> Int {
 /// One automatic decision for one monitor (macOS rules).
 ///
 /// - A change of the HA "set" helper applies once, even when this Mac is idle, then is followed like a
-///   hand-set level. The value seen on the first look is not a command.
+///   hand-set level. The value seen on the first look is not a command, nor is the same value again
+///   (a restart of Home Assistant gives the helper a new last_changed).
 /// - Idle (someone may be using the other machine on these monitors): nothing else happens.
 /// - A level set by hand keeps its distance from the target: set 52 when the target is 76 and the
 ///   screen follows the target 24 points lower as the blind opens and the sun rises. The distance
@@ -131,9 +133,12 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
     var s = s0, c = c0, step = Step(state: s0, applied: c0)
     var fromRemote = false
     if let r = remote {
-        if s.remoteSeen == nil { s.remoteSeen = r.changed }
+        // A restart of Home Assistant gives the helper a new last_changed with the same value: not a command.
+        let same = s.remoteValue.map { $0 == r.value } ?? false
+        if s.remoteSeen == nil { s.remoteSeen = r.changed; s.remoteValue = r.value }
+        else if r.changed > s.remoteSeen! && same { s.remoteSeen = r.changed }
         else if r.changed > s.remoteSeen! {
-            s.remoteSeen = r.changed
+            s.remoteSeen = r.changed; s.remoteValue = r.value
             let v = Int(min(max(r.value, 0), 100).rounded())
             if c != v { step.write = v }
             c = v; fromRemote = true
