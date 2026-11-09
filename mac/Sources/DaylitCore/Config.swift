@@ -1,4 +1,4 @@
-// Settings file: ~/.config/daylit/config.json (DAYLIT_CONFIG overrides the path). Every key is
+// Settings file: ~/.config/daylit/config.json, or iCloud Drive (ConfigLocation.swift); DAYLIT_CONFIG overrides the path. Every key is
 // optional; no file = zero config (detected monitors, sliders and keys, no automatic mode).
 import Foundation
 
@@ -62,10 +62,10 @@ public struct Config: Decodable {
         self.ddcTool = ddcTool; self.homeAssistant = homeAssistant; self.monitors = monitors
     }
 
-    public static let path: URL = {
-        if let p = ProcessInfo.processInfo.environment["DAYLIT_CONFIG"], !p.isEmpty { return URL(fileURLWithPath: p) }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/daylit/config.json")
-    }()
+    /// DAYLIT_CONFIG, else iCloud Drive when "Keep settings in iCloud Drive" is on, else ~/.config/daylit (ConfigLocation).
+    public static var path: URL {
+        ConfigLocation.system.path(useICloud: UserDefaults.standard.bool(forKey: ConfigLocation.defaultsKey))
+    }
 
     /// The path with the home folder shown as ~, for output a user may paste somewhere.
     public static var displayPath: String {
@@ -79,9 +79,15 @@ public struct Config: Decodable {
     /// drops the source settings, so a bad entity id or URL is never sent to Home Assistant.
     public static func load(from url: URL = path) -> (Config, String?) {
         guard let d = try? Data(contentsOf: url) else { return (Config(), nil) }
+        let (c, err) = parse(d)
+        return (c ?? Config(), err)
+    }
+
+    /// The config in the file's text, or nil when it is not valid JSON for a config, plus the problem to show.
+    static func parse(_ d: Data) -> (Config?, String?) {
         let c: Config
         do { c = try JSONDecoder().decode(Config.self, from: ConfigText.relaxed(d)) }
-        catch { return (Config(), "config.json is not valid: \(Self.describe(error))") }
+        catch { return (nil, "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
             var safe = Config(pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
             safe.builtIn = c.builtIn
