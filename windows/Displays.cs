@@ -58,7 +58,7 @@ static class Native {
             var sn = new SourceName { H = H<SourceName>(GET_SOURCE_NAME, p.Src.Adapter, p.Src.Id) };
             var ci = new ColorInfo { H = H<ColorInfo>(GET_ADVANCED_COLOR, p.Tgt.Adapter, p.Tgt.Id) };
             if (Get(ref tn) != 0 || Get(ref sn) != 0) continue;
-            list.Add(new Display { Friendly = tn.Friendly ?? "", Gdi = sn.Gdi ?? "", DevicePath = tn.Path ?? "", Adapter = p.Tgt.Adapter, TargetId = p.Tgt.Id,
+            list.Add(new Display { Friendly = DisplayName.Label(tn.Friendly, list.Count), Gdi = sn.Gdi ?? "", DevicePath = tn.Path ?? "", Adapter = p.Tgt.Adapter, TargetId = p.Tgt.Id,
                                    Internal = IsInternal(p.Tgt.Tech) || IsInternal(tn.Tech),
                                    Hdr = Get(ref ci) == 0 && (ci.Value & 2) != 0 });
         }

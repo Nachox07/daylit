@@ -723,6 +723,20 @@ public class HaErrorRuleTests {
         Assert.True(HaErrorRule.ShouldShow(false, null, 0));
         Assert.Equal(new double[] { 2, 5 }, HaErrorRule.RetryDelays);
     }
+    [Fact] public void OutageIsLoggedOnceThenEveryTenMinutes() {
+        const string m = "Cannot reach Home Assistant";
+        Assert.True(HaErrorRule.ShouldLog(m, null, null, 0));
+        Assert.False(HaErrorRule.ShouldLog(m, m, 0, 30));
+        Assert.False(HaErrorRule.ShouldLog(m, m, 0, 599));
+        Assert.True(HaErrorRule.ShouldLog(m, m, 0, 600));
+    }
+    [Fact] public void ADifferentErrorIsLoggedAtOnce() =>
+        Assert.True(HaErrorRule.ShouldLog("Token rejected", "Cannot reach Home Assistant", 0, 30));
+    [Fact] public void AnEmptyDisplayNameGetsANumber() {
+        Assert.Equal("Display 2", DisplayName.Label("", 1));
+        Assert.Equal("Display 1", DisplayName.Label("  ", 0));
+        Assert.Equal("DELL S2725QC", DisplayName.Label("DELL S2725QC", 0));
+    }
 }
 
 public class ConfigPatchTests {

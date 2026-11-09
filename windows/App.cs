@@ -74,6 +74,7 @@ sealed class Controller {
     // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
+    DateTime? haLoggedAt;   // when the current outage was last written to the log (HaErrorRule.ShouldLog)
 
     /// Fixed state and nothing else: no tray, hotkeys, timers, monitors or network (UI snapshots).
     public Controller(Config cfg, List<Mon> mons, string subtitle) {
@@ -538,14 +539,21 @@ sealed class Controller {
             s = await HAClient.State(Cfg, mons);
             foreach (var delay in HaErrorRule.RetryDelays) {   // a first failure after start, wake or a network switch is usually brief
                 if (s != null || !HAClient.Transient) break;
-                Log.Write($"home assistant: retrying in {delay} s ({HAClient.LastCause ?? "no answer"})");
+                if (haDownSince == null) Log.Write($"home assistant: retrying in {delay} s ({HAClient.LastCause ?? "no answer"})");   // once, not every tick of an outage
                 await Task.Delay(TimeSpan.FromSeconds(delay));
                 s = await HAClient.State(Cfg, mons);
             }
             if (s == null) {
                 haDown = true;
-                Log.Write("home assistant: " + (HAClient.LastError ?? "unreachable") + (HAClient.LastCause is { } cause ? $" ({cause})" : ""));
-                lastHaError = HAClient.LastError;
+                var message = HAClient.LastError ?? "unreachable";
+                double Secs(DateTime t) => (t - DateTime.UnixEpoch).TotalSeconds;
+                if (HaErrorRule.ShouldLog(message, lastHaError, haLoggedAt is { } at ? (double?)Secs(at) : null, Secs(DateTime.UtcNow))) {
+                    var still = haLoggedAt != null && message == lastHaError;
+                    Log.Write("home assistant: " + message + (HAClient.LastCause is { } cause ? $" ({cause})" : "")
+                              + (still ? $", still, for {(int)(DateTime.UtcNow - (haDownSince ?? DateTime.UtcNow)).TotalMinutes} min" : ""));
+                    haLoggedAt = DateTime.UtcNow;
+                }
+                lastHaError = message;
                 haDownSince ??= DateTime.UtcNow;
                 if (HaErrorRule.ShouldShow(HAClient.Transient, (haDownSince.Value - DateTime.UnixEpoch).TotalSeconds,
                                            (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds))
@@ -553,13 +561,14 @@ sealed class Controller {
                 if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= Cfg.Tuned.HaFallbackSeconds) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
-        if (!haDown) haDownSince = null;
+        var downFor = haDownSince is { } since ? (int)(DateTime.UtcNow - since).TotalMinutes : 0;
+        if (!haDown) { haDownSince = null; haLoggedAt = null; }
         if (!haDown && Source == Source.HomeAssistant && s != null) {
             if (s.HasBlind) s = s with { Pos = Rules.BlindPosition(s.Pos, lastHaPos) };
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
         }
-        if (!haDown && lastHaError != null) { Log.Write("home assistant: ok"); lastHaError = null; }
+        if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         s = ApplyLight(s, !haDown && Source == Source.HomeAssistant, out double light);

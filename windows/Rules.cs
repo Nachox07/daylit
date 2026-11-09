@@ -373,6 +373,20 @@ public static class HaErrorRule {
     public const double ShowAfter = 60;
     public static bool ShouldShow(bool transient, double? downSince, double now) =>
         !transient || (downSince is double since && now - since >= ShowAfter);
+
+    /// While Home Assistant stays down, a reminder in the log this often (seconds).
+    public const double LogEvery = 600;
+    /// Whether a failing tick writes to the log: the first failure of an outage, a different error,
+    /// then one reminder every LogEvery. Not three lines every tick for as long as it lasts.
+    public static bool ShouldLog(string message, string? lastMessage, double? lastLogged, double now) =>
+        lastLogged is not double at || message != lastMessage || now - at >= LogEvery;
+}
+
+/// The name shown for a monitor: Windows and macOS sometimes report an empty one (a display that is
+/// still waking up, or one behind an adapter). Never an empty label in the panel or the log.
+public static class DisplayName {
+    public static string Label(string? name, int index) =>
+        string.IsNullOrWhiteSpace(name) ? $"Display {index + 1}" : name.Trim();
 }
 
 /// A fixed contrast per monitor (config `contrast`, DDC/CI VCP 0x12). It is written once at start and
