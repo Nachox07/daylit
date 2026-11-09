@@ -62,12 +62,14 @@ the night one); *Exact values* takes any height.
 
 ## Config file
 
-- macOS: `~/.config/daylit/config.json`
+- macOS: `~/.config/daylit/config.json`, or with Settings → App → *Keep settings in iCloud Drive*
+  `~/Library/Mobile Documents/com~apple~CloudDocs/Daylit/config.json`
+  ([one file for all your Macs](../README.md#settings-on-more-than-one-mac))
 - Windows: `%APPDATA%\Daylit\config.json`
 
 The panel's gear menu → **Open config file** creates one if it is missing. Every key is optional;
 [`config.example.json`](../config.example.json) shows them all. After editing, use **Reload config**
-in the same menu.
+in the same menu. On macOS Daylit also notices the change within a few seconds.
 
 | Key | Meaning |
 |---|---|
