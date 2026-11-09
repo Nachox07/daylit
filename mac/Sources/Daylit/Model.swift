@@ -38,6 +38,13 @@ import DaylitCore
     var paused: Bool { pauseOnBattery && hasBattery && onBattery }
     var config = Config()
     var configProblem: String?
+    /// "Keep settings in iCloud Drive" (UserDefaults: it cannot live in the file it moves).
+    @Published var iCloudOn = UserDefaults.standard.bool(forKey: ConfigLocation.defaultsKey)
+    @Published var iCloudNote: String?   // what turning it on or off did, or why it could not
+    /// The last config that loaded, kept while the file is broken or still downloading from iCloud.
+    var lastGood: Config?
+    /// The file as last loaded: a change (here, or another Mac through iCloud) reloads on the next check.
+    var configStamp: ConfigLocation.Stamp?
     var dragging: Set<CGDirectDisplayID> = []
     let ddcQ = DispatchQueue(label: "ddc")
     /// Slider and key values for DDC monitors: the newest one waiting, and the monitors with a write under way.
@@ -72,7 +79,16 @@ import DaylitCore
     // MARK: setup
 
     func reload() {
-        let (c, err) = Config.load()
+        let p = Config.path
+        if ConfigLocation.state(of: p) == .evicted {
+            // iCloud Drive removed the file from this Mac to save space: ask for it back.
+            do { try FileManager.default.startDownloadingUbiquitousItem(at: p); Log.write("config: downloading from iCloud Drive") }
+            catch { Log.write("config: iCloud Drive download did not start: \(error.localizedDescription)") }
+        }
+        configStamp = ConfigLocation.stamp(of: p)
+        let (c, err, kept) = Config.reload(from: p, lastGood: lastGood)
+        if !kept && ConfigLocation.state(of: p) == .present { lastGood = c }
+        if kept { Log.write("config: keeping the last settings that loaded") }
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
@@ -82,7 +98,7 @@ import DaylitCore
         problem = configProblem
         DDC.tool = c.ddcTool ?? DDC.defaultTool
         HAClient.tokenCache = [:]
-        log("config \(Config.path.path): source=\(src) problem=\(configProblem ?? "none")")
+        log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
             log(String(format: "sun elevation now %.2f° at %.3f, %.3f", solarElevation(latitude: l.latitude, longitude: l.longitude), l.latitude, l.longitude))
         }
@@ -174,6 +190,10 @@ import DaylitCore
 
     func check() {
         if Appearance.isDark != dark { dark = Appearance.isDark }
+        // One stat every 5 s: an edit, or iCloud bringing another Mac's change, reloads within seconds.
+        if let was = configStamp, ConfigLocation.stamp(of: Config.path) != was {
+            Log.write("config: changed on disk, reloading"); reload(); return
+        }
         // Switching HDR on or off changes whether macOS can set an external display's brightness, and it
         // does not always post a screen-change notification: re-probe cheaply and re-detect on a change.
         let probe = externalScreens().map { "\($0.uuid)=\(Native.usable($0.id))" }.joined(separator: ",")
@@ -391,6 +411,39 @@ import DaylitCore
     func setLogin(_ on: Bool) {
         try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
         login = SMAppService.mainApp.status == .enabled
+    }
+
+    /// Turns "Keep settings in iCloud Drive" on or off, moving the file (ConfigLocation), then loads it.
+    func setICloud(_ on: Bool) {
+        let loc = ConfigLocation.system
+        do {
+            if on {
+                switch try loc.moveToICloud() {
+                case .copiedLocal: iCloudNote = "Your settings are now in iCloud Drive."
+                case .empty: iCloudNote = "Settings you save from now on go to iCloud Drive."
+                case .adopted(let backedUp, let downloading):
+                    iCloudNote = "Using the settings already in iCloud Drive"
+                        + (downloading ? " (downloading)" : "")
+                        + (backedUp ? ". This Mac's own are kept in ~/.config/daylit/config.local-backup.json." : ".")
+                }
+            } else {
+                switch try loc.moveToLocal() {
+                case .copiedBack: iCloudNote = "This Mac keeps a copy of the iCloud settings in ~/.config/daylit."
+                case .nothingThere: iCloudNote = nil
+                }
+            }
+        } catch ConfigLocation.MoveError.notDownloaded {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: loc.iCloud)
+            iCloudNote = "The iCloud copy is still downloading. Try again in a moment."
+            return
+        } catch {
+            iCloudNote = "Could not move the settings: \(error.localizedDescription)"
+            return
+        }
+        UserDefaults.standard.set(on, forKey: ConfigLocation.defaultsKey)
+        iCloudOn = on
+        Log.write("config: iCloud Drive \(on ? "on" : "off")")
+        reload()
     }
 
     /// Opens the config file in the default text editor, creating a starting one if there is none.

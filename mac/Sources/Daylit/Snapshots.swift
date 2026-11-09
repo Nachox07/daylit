@@ -22,7 +22,7 @@ import DaylitCore
             let d = Daylit(preview: ())
             d.mons = mons; d.source = source; d.auto = true; d.detail = detail; d.sync = sync
             d.problem = nil; d.builtIn = nil
-            d.login = false; d.hasBattery = true; d.lookOn = false; d.pauseOnBattery = true   // not this Mac's own settings
+            d.login = false; d.iCloudOn = false; d.iCloudNote = nil; d.hasBattery = true; d.lookOn = false; d.pauseOnBattery = true   // not this Mac's own settings
             if sync { d.syncOffsets = SyncOffsets(levels: mons.map { (key: $0.uuid, level: Int($0.level)) }) }
             return d
         }
@@ -43,11 +43,11 @@ import DaylitCore
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
-            ("settings-displays", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator()))),
-            ("settings-automatic", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .automatic))),
-            ("settings-homeassistant", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
-            ("settings-appearance", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .appearance))),
-            ("settings-app", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, path: settingsFile(), locator: Locator(), initialPane: .app))),
+            ("settings-displays", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator()))),
+            ("settings-automatic", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator(), initialPane: .automatic))),
+            ("settings-homeassistant", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator(), initialPane: .homeAssistant))),
+            ("settings-appearance", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator(), initialPane: .appearance))),
+            ("settings-app", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator(), initialPane: .app))),
         ] + chartScenes()
     }
 

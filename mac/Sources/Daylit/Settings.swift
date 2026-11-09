@@ -155,7 +155,9 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var locating = false
     let close: () -> Void
-    var path: URL = Config.path              // snapshots pass a made-up file
+    var file: URL? = nil                     // snapshots pass a made-up file
+    /// Read each time: turning iCloud Drive on or off moves the file while the window is open.
+    var path: URL { file ?? Config.path }
     var height: CGFloat = 600
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     nonisolated(unsafe) static var fixedNow: Date?
@@ -342,6 +344,13 @@ struct SettingsView: View {
                 Text("These apply right away.").font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Toggle(isOn: Binding(get: { m.iCloudOn }, set: { m.setICloud($0); load() })) {
+                    Row("Keep settings in iCloud Drive", "icloud")
+                }.disabled(iCloudBlocked != nil && !(m.iCloudOn && ConfigLocation.system.override == nil))   // on but signed out: it can still be turned off
+            } footer: {
+                Text(iCloudFooter).font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 LabeledContent("config.json") {
                     Button("Open Config File") { m.openConfig() }
                 }
@@ -350,6 +359,15 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Why the iCloud switch cannot be turned on here. Snapshots: never, so they look the same on every machine.
+    var iCloudBlocked: String? { file != nil ? nil : ConfigLocation.system.iCloudBlocked }
+
+    var iCloudFooter: String {
+        let about = "The same settings on every Mac signed in to your iCloud. The Home Assistant token stays on each Mac."
+        if let why = iCloudBlocked { return m.iCloudOn ? why + " Daylit uses the settings on this Mac until it is back." : why }
+        return m.iCloudNote.map { about + " " + $0 } ?? about
     }
 
     var appearancePane: some View {
