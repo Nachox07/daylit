@@ -92,7 +92,8 @@ never reports its level; the panel handles that once the user moves its slider.
 
 ### 3. Pick a source and write the config
 
-Windows `%APPDATA%\Daylit\config.json`, macOS `~/.config/daylit/config.json`. Every key is
+Windows `%APPDATA%\Daylit\config.json`, macOS `~/.config/daylit/config.json` (or in iCloud Drive
+when the user turned on *Keep settings in iCloud Drive*: `--check-config` prints the `path` in use). Every key is
 optional; [`config.example.json`](config.example.json) shows them all.
 
 | `source` | needs | use when |

@@ -125,6 +125,25 @@ and when night starts, and shows each step with the numbers right now
   at start and after a display change, wake or config reload. It is never automated
   ([details](docs/setup.md#contrast)).
 
+## Settings on more than one Mac
+
+Settings → App → **Keep settings in iCloud Drive** moves `config.json` to iCloud Drive
+(`~/Library/Mobile Documents/com~apple~CloudDocs/Daylit/config.json`), so every Mac signed in to
+your iCloud uses the same file. A change saved on one Mac shows up on the others within seconds of
+iCloud bringing it over. macOS only: Windows keeps its own file.
+
+- **The first Mac** copies its settings there. **The next one** uses what is already there and keeps
+  its own file as `~/.config/daylit/config.local-backup.json`, so nothing is lost.
+- **Turning it off** copies the iCloud file back to `~/.config/daylit/config.json`. The iCloud copy
+  stays for your other Macs.
+- **What stays on each Mac:** the Home Assistant token (in that Mac's keychain), levels set by hand,
+  *Automatic*, linked monitors, and the gear menu's switches (pause on battery, light/dark from
+  daylight, open at login).
+- **Monitors match by name** (`match` is part of the display name), not by an id, so the same
+  model is found on every Mac. Everything else in the file is shared, `builtIn` and `ddcTool` too.
+- If the file is broken or still downloading, Daylit keeps the last settings that loaded and shows
+  the problem. `DAYLIT_CONFIG`, when set, wins and turns the switch off.
+
 ## Contributing
 
 Build, test and screenshot steps for both apps are in [CONTRIBUTING.md](CONTRIBUTING.md). Both apps
