@@ -380,6 +380,24 @@ public enum HAErrorRule {
         guard let since = downSince else { return false }
         return now - since >= showAfter
     }
+
+    /// While Home Assistant stays down, a reminder in the log this often (seconds).
+    public static let logEvery: Double = 600
+    /// Whether a failing tick writes to the log: the first failure of an outage, a different error,
+    /// then one reminder every `logEvery`. Not three lines every tick for as long as it lasts.
+    public static func shouldLog(message: String, lastMessage: String?, lastLogged: Double?, now: Double) -> Bool {
+        guard let at = lastLogged, message == lastMessage else { return true }
+        return now - at >= logEvery
+    }
+}
+
+/// The name shown for a monitor: macOS and Windows sometimes report an empty one (a display that is
+/// still waking up, or one behind an adapter). Never an empty label in the panel or the log.
+public enum DisplayName {
+    public static func label(_ name: String, index: Int) -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "Display \(index + 1)" : n
+    }
 }
 
 /// A fixed contrast per monitor (config `contrast`, DDC/CI VCP 0x12). It is written once at start and

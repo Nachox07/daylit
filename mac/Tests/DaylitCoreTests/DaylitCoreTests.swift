@@ -756,6 +756,21 @@ final class SyncTests: XCTestCase {
         XCTAssertTrue(HAErrorRule.shouldShow(transient: false, downSince: nil, now: 0))
         XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
     }
+    func testHAOutageIsLoggedOnceThenEveryTenMinutes() {
+        let m = "Cannot reach Home Assistant"
+        XCTAssertTrue(HAErrorRule.shouldLog(message: m, lastMessage: nil, lastLogged: nil, now: 0))
+        XCTAssertFalse(HAErrorRule.shouldLog(message: m, lastMessage: m, lastLogged: 0, now: 30))
+        XCTAssertFalse(HAErrorRule.shouldLog(message: m, lastMessage: m, lastLogged: 0, now: 599))
+        XCTAssertTrue(HAErrorRule.shouldLog(message: m, lastMessage: m, lastLogged: 0, now: 600))
+    }
+    func testADifferentHAErrorIsLoggedAtOnce() {
+        XCTAssertTrue(HAErrorRule.shouldLog(message: "Token rejected", lastMessage: "Cannot reach Home Assistant", lastLogged: 0, now: 30))
+    }
+    func testAnEmptyDisplayNameGetsANumber() {
+        XCTAssertEqual(DisplayName.label("", index: 1), "Display 2")
+        XCTAssertEqual(DisplayName.label("  ", index: 0), "Display 1")
+        XCTAssertEqual(DisplayName.label("DELL S2725QC", index: 0), "DELL S2725QC")
+    }
 }
 
 final class ConfigEditTests: XCTestCase {

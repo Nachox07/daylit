@@ -10,12 +10,13 @@ struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
 /// External displays only: the built-in screen keeps its own brightness handling.
 @MainActor func externalScreens() -> [Screen] {
     if ProcessInfo.processInfo.environment["DAYLIT_DEBUG_NO_DISPLAYS"] == "1" { return [] }   // tests: the empty state
-    return NSScreen.screens.compactMap { s in
+    let found: [(CGDirectDisplayID, String, String)] = NSScreen.screens.compactMap { s in
         guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
               CGDisplayIsBuiltin(id) == 0 else { return nil }
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
-        return Screen(id: id, uuid: uuid, name: s.localizedName)
+        return (id, uuid, s.localizedName)
     }
+    return found.enumerated().map { i, d in Screen(id: d.0, uuid: d.1, name: DisplayName.label(d.2, index: i)) }
 }
 
 /// The laptop's own screen while the lid is open. Shown in the panel for manual use only: automatic

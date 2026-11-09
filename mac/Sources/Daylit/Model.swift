@@ -488,6 +488,8 @@ import DaylitCore
     /// When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     /// network at login or after wake does not jump the monitors to the fallback levels.
     var haDownSince: Date?
+    /// When the current outage was last written to the log (see HAErrorRule.shouldLog).
+    var haLoggedAt: Date?
     /// The last levels and blind position Home Assistant gave. With Home Assistant down, the sun drives
     /// the target but these stay, so a network blip does not swap them for the defaults and move the screens.
     var lastHALevels: [String: [Double]] = [:]
@@ -669,15 +671,19 @@ import DaylitCore
             var result = await HAClient.state(ha, mons)
             for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
                 guard case .failure(.unreachable) = result else { break }
-                Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))")
+                if haDownSince == nil { Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))") }   // once, not every tick of an outage
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 result = await HAClient.state(ha, mons)
             }
             switch result {
             case .success(let s):
                 problem = configProblem
-                haDownSince = nil
-                if lastHAError != nil { Log.write("home assistant: ok"); lastHAError = nil }
+                if lastHAError != nil {
+                    let mins = haDownSince.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
+                    Log.write("home assistant: ok" + (mins > 0 ? " again after \(mins) min" : ""))
+                    lastHAError = nil
+                }
+                haDownSince = nil; haLoggedAt = nil
                 lastHALevels = s.m.mapValues(fallbackLevels)
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
@@ -715,7 +721,13 @@ import DaylitCore
                 return i
             case .failure(let f):
                 let message = HAClient.describe(f, ha)
-                Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? ""))
+                if HAErrorRule.shouldLog(message: message, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
+                                         now: Date().timeIntervalSince1970) {
+                    let still = haLoggedAt != nil && message == lastHAError
+                    Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? "")
+                              + (still ? ", still, for \(Int(Date().timeIntervalSince(haDownSince ?? Date()) / 60)) min" : ""))
+                    haLoggedAt = Date()
+                }
                 lastHAError = message
                 if haDownSince == nil { haDownSince = Date() }
                 let transient = f == .unreachable
