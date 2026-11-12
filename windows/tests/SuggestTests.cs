@@ -55,3 +55,49 @@ public class SuggestCandidateTests {
         Assert.Equal(new[] { Level.Night }, Suggest.Candidates(evenings, SuggestData.UtcDay));
     }
 }
+
+public class SuggestFitTests {
+    [Fact]
+    public void ExactSyntheticDataRecoversTheLevels() {
+        // Every mix of sun and blind, from levels 90 / 50 / 30, many times over so the pull hardly counts.
+        double[] truth = [90, 50, 30];
+        var t = new Tuning();
+        var samples = new List<Sample>();
+        for (int r = 0; r < 25; r++)
+            foreach (var elev in new[] { -3.0, 4.5, 12, 30 })
+                foreach (var p in new[] { 0.0, 0.5, 1 }) {
+                    double s = t.Fraction(elev);
+                    var w = Suggest.Weights(s, p);
+                    double chosen = w[0] * truth[0] + w[1] * truth[1] + w[2] * truth[2];
+                    samples.Add(new Sample("m", (int)Math.Round(chosen, MidpointRounding.AwayFromZero), 0, s, p, elev, false, [70, 40, 20], 0));
+                }
+        var f = Suggest.Fit(samples, [70, 40, 20], [Level.Day, Level.BlindDown, Level.Night]);
+        Assert.Equal(90, f[0], 1.0); Assert.Equal(50, f[1], 1.0); Assert.Equal(30, f[2], 1.0);
+    }
+
+    [Fact]
+    public void ALevelThatIsNotACandidateStaysPut() {
+        double[] levels = [100, 78, 75];
+        var samples = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 70, levels)).ToList();
+        var f = Suggest.Fit(samples, levels, [Level.BlindDown]);
+        Assert.Equal(100, f[0]); Assert.Equal(75, f[2]);
+        Assert.True(f[1] < 78);
+    }
+
+    [Fact]
+    public void ThePullKeepsASingleSampleNearTheCurrentValue() {
+        // Alone, this sample asks for blind down ≈ 43 ((60 − 0.3 · 100) / 0.7). One sample against the
+        // pull of the current 78 moves it less than halfway.
+        double[] levels = [100, 78, 75];
+        var f = Suggest.Fit([SuggestData.Make(0, 9, 20, 0.3, 60, levels)], levels, [Level.BlindDown]);
+        Assert.Equal(66.443, f[1], 0.01);
+        Assert.True(f[1] > (42.857 + 78) / 2);
+    }
+
+    [Fact]
+    public void AFitIsClampedToTheRange() {
+        double[] levels = [100, 78, 75];
+        var high = Enumerable.Range(0, 12).Select(d => SuggestData.Make(d % 3, 12, 30, 1, 99, levels)).ToList();
+        Assert.True(Suggest.Fit(high, levels, [Level.Day])[0] <= 100);
+    }
+}

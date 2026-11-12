@@ -49,3 +49,54 @@ static partial class Suggest {
         return LevelText.All.Where(l => samples.Where(x => Dominates(x, l)).Select(x => day(x.At)).Distinct().Count() >= MinDays).ToList();
     }
 }
+
+static partial class Suggest {
+    /// Least squares for the candidate levels, the others held at their current values, with a pull of
+    /// weight 1 toward the current value (as one extra sample at the current level):
+    ///     minimise Σ (chosen − x·L)² + Σ_candidates (L_k − current_k)²
+    /// Returns all three levels, each fitted one clamped to 0–100 (not rounded: see RoundToStep).
+    public static double[] Fit(IReadOnlyList<Sample> samples, double[] levels, IReadOnlyList<Level> candidates) {
+        int[] c = candidates.Select(l => (int)l).ToArray();
+        int n = c.Length;
+        if (n == 0 || levels.Length != 3) return (double[])levels.Clone();
+        var a = new double[n, n];
+        var b = new double[n];
+        foreach (var x in samples) {
+            var w = Weights(x.S, x.P);
+            double y = x.Chosen;
+            for (int k = 0; k < 3; k++) if (!c.Contains(k)) y -= w[k] * levels[k];
+            for (int i = 0; i < n; i++) {
+                b[i] += w[c[i]] * y;
+                for (int j = 0; j < n; j++) a[i, j] += w[c[i]] * w[c[j]];
+            }
+        }
+        for (int i = 0; i < n; i++) { a[i, i] += 1; b[i] += levels[c[i]]; }   // the pull toward the current value
+        var solved = Solve(a, b);
+        var o = (double[])levels.Clone();
+        for (int i = 0; i < n; i++) o[c[i]] = Math.Clamp(solved[i], 0, 100);
+        return o;
+    }
+
+    /// Gaussian elimination with partial pivoting. The pull adds 1 to the diagonal, so the matrix is
+    /// positive definite and no pivot is 0. Changes `a` and `b`.
+    static double[] Solve(double[,] a, double[] b) {
+        int n = b.Length;
+        for (int col = 0; col < n; col++) {
+            int piv = col;
+            for (int r = col + 1; r < n; r++) if (Math.Abs(a[r, col]) > Math.Abs(a[piv, col])) piv = r;
+            if (piv != col) {
+                for (int k = 0; k < n; k++) (a[col, k], a[piv, k]) = (a[piv, k], a[col, k]);
+                (b[col], b[piv]) = (b[piv], b[col]);
+            }
+            for (int r = 0; r < n; r++) {
+                if (r == col) continue;
+                double f = a[r, col] / a[col, col];
+                for (int k = col; k < n; k++) a[r, k] -= f * a[col, k];
+                b[r] -= f * b[col];
+            }
+        }
+        var x = new double[n];
+        for (int i = 0; i < n; i++) x[i] = b[i] / a[i, i];
+        return x;
+    }
+}
