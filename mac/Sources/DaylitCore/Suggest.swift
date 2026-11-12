@@ -115,7 +115,10 @@ public struct NumberStep: Equatable {
 
 extension Suggest {
     /// The nearest value `st` accepts, inside both its range and 0–100. Halves round up.
-    public static func roundToStep(_ v: Double, _ st: NumberStep) -> Double {
+    /// nil when `st` cannot be used: a step that is not positive, min above max, a non-finite number, or a range outside 0–100.
+    public static func roundToStep(_ v: Double, _ st: NumberStep) -> Double? {
+        guard v.isFinite, st.min.isFinite, st.max.isFinite, st.step.isFinite, st.step > 0, st.min <= st.max,
+              st.max >= 0, st.min <= 100 else { return nil }
         let lo = max(st.min, 0), hi = min(st.max, 100)
         let first = ((lo - st.min) / st.step - 1e-9).rounded(.up), last = ((hi - st.min) / st.step + 1e-9).rounded(.down)
         guard last >= first else { return min(max(v, lo), hi) }   // a step coarser than the range: just clamp
@@ -198,14 +201,14 @@ extension Suggest {
                                   dayOf: (Double) -> Int = { localDay($0) }) -> Suggestion? {
         if let d = dismissedUntil, now < d { return nil }
         guard levels.count == 3, steps.count == 3 else { return nil }
-        let mine = all.filter { $0.monitor == monitor && sameLevels($0.levels, levels) }
+        let mine = dropOld(all, now: now).filter { $0.monitor == monitor && sameLevels($0.levels, levels) }
         let cand = candidates(mine, dayOf: dayOf).filter { steps[$0.rawValue] != nil }
         guard !cand.isEmpty else { return nil }
         let fitted = fit(mine, levels: levels, candidates: cand)
         var proposed = levels
         var changes: [LevelChange] = []
         for l in cand {
-            let v = roundToStep(fitted[l.rawValue], steps[l.rawValue]!)
+            guard let v = roundToStep(fitted[l.rawValue], steps[l.rawValue]!) else { continue }
             if abs(v - levels[l.rawValue]) >= minMove - 1e-9 {
                 proposed[l.rawValue] = v
                 changes.append(LevelChange(level: l, from: levels[l.rawValue], to: v))
@@ -217,9 +220,12 @@ extension Suggest {
         var main = changes[0]   // the one that moves most; the first of them on a tie
         for c in changes where abs(c.to - c.from) > abs(main.to - main.from) { main = c }
         let ordered = [main] + changes.filter { $0.level != main.level }
-        let dom = mine.filter { dominates($0, main.level) }
-        let mean = Double(dom.reduce(0) { $0 + $1.chosen - $1.auto }) / Double(max(dom.count, 1))
-        return Suggestion(monitor: monitor, changes: ordered, amount: Int(abs(mean).rounded()), lower: mean < 0,
+        // The sentence follows the change: only the samples that pull the same way as the proposal count for the amount.
+        let lower = main.to < main.from
+        let agree = mine.filter { dominates($0, main.level) && (lower ? $0.chosen < $0.auto : $0.chosen > $0.auto) }
+        guard !agree.isEmpty else { return nil }
+        let mean = Double(agree.reduce(0) { $0 + abs($1.chosen - $1.auto) }) / Double(agree.count)
+        return Suggestion(monitor: monitor, changes: ordered, amount: Int(mean.rounded()), lower: lower,
                           samples: mine.count, days: Set(mine.map { dayOf($0.at) }).count)
     }
 }
@@ -277,7 +283,8 @@ extension Suggest {
     public static func makeSample(monitor: String, chosen: Int, auto: Int, elev: Double, pos: Double, lights: Bool, light: Double,
                                   levels: [Double], tuning: Tuning, now: Double, context: SampleContext) -> Sample? {
         if context.follower || context.writeFailed || context.idle || context.paused || context.sunFallback { return nil }
-        guard levels.count == 3, (1...99).contains(chosen), (1...99).contains(auto) else { return nil }
+        guard levels.count == 3, levels.allSatisfy(\.isFinite), elev.isFinite, pos.isFinite, light.isFinite,
+              (1...99).contains(chosen), (1...99).contains(auto) else { return nil }
         if boostDecides(levels: levels, elev: elev, pos: pos, lights: lights, tuning: tuning, light: light) { return nil }
         return Sample(monitor: monitor, chosen: chosen, auto: auto, s: min(daylightFraction(elevation: elev, tuning: tuning), light),
                       p: min(max(pos, 0), 100) / 100, elev: elev, lights: lights, levels: levels, at: now)
@@ -325,6 +332,8 @@ extension Suggest {
     public static func encode(_ samples: [Sample]) -> Data {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return (try? e.encode(CorrectionsFile(samples: samples))) ?? Data("{\"samples\":[]}".utf8)
+        // A sample with a NaN or infinite number cannot be written as JSON: leave that one out, keep the rest.
+        let ok = samples.filter { [$0.s, $0.p, $0.elev, $0.at].allSatisfy(\.isFinite) && $0.levels.allSatisfy(\.isFinite) }
+        return (try? e.encode(CorrectionsFile(samples: ok))) ?? Data("{\"samples\":[]}".utf8)
     }
 }

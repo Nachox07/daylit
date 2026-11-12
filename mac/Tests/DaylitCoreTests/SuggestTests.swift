@@ -29,7 +29,7 @@ final class SuggestCandidateTests: XCTestCase {
         XCTAssertEqual(dusk[2], 0.6, accuracy: 1e-9)
     }
 
-    func testABlindExactlyFortyPercentOpenStillCountsForBlindDown() {
+    func testALevelDominatesFromAWeightOfPointFiveFive() {
         let at45 = Fixture.sample(0, 9, elev: 30, p: 0.45, chosen: 70, levels: levels)
         let at46 = Fixture.sample(0, 9, elev: 30, p: 0.46, chosen: 70, levels: levels)
         XCTAssertTrue(Suggest.dominates(at45, .blindDown))    // weight 0.55
@@ -98,9 +98,11 @@ final class SuggestFitTests: XCTestCase {
 
     func testAFitIsClampedToTheRange() {
         let levels: [Double] = [100, 78, 75]
-        let high = (0..<3).map { Fixture.sample($0, 12, elev: 30, p: 1, chosen: 99, levels: levels) }
-        let f = Suggest.fit(high + high + high + high, levels: levels, candidates: [.day])
-        XCTAssertLessThanOrEqual(f[0], 100)
+        // Changes far above anything storable (chosen is only an Int): the unclamped fit would be near 500.
+        let wild = (0..<30).map { Fixture.sample($0 % 3, 12, elev: 30, p: 1, chosen: 500, levels: levels) }
+        XCTAssertEqual(Suggest.fit(wild, levels: levels, candidates: [.day])[0], 100)
+        let low = (0..<30).map { Fixture.sample($0 % 3, 12, elev: 30, p: 1, chosen: -400, levels: levels) }
+        XCTAssertEqual(Suggest.fit(low, levels: levels, candidates: [.day])[0], 0)
     }
 }
 
@@ -492,5 +494,110 @@ final class SuggestConfigTests: XCTestCase {
         XCTAssertThrowsError(try ConfigPatch.setLevels(["day": 60], display: "Monitor", suggestedMatch: "Monitor", in: Data("[1]".utf8)))
         XCTAssertThrowsError(try ConfigPatch.setLevels(["day": 60], display: "Monitor", suggestedMatch: "Monitor",
                                                        in: Data(#"{ "monitors": 3 }"#.utf8)))
+    }
+}
+
+final class SuggestReviewTests: XCTestCase {
+    let whole: [NumberStep?] = [.whole, .whole, .whole]
+    func suggest(_ samples: [Sample], levels: [Double], now: Double = Fixture.t0 + 5 * 86400) -> Suggestion? {
+        Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: whole, now: now, dismissedUntil: nil, dayOf: Fixture.utcDay)
+    }
+
+    func testTheSentenceNeverContradictsTheChange() {
+        // Blind-down samples ask for 1 lower, but twenty half-open ones pull blind down up: no honest sentence, so no suggestion.
+        let l: [Double] = [90, 50, 40]
+        let few = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 63, levels: l) }
+        let many = (0..<20).map { Fixture.sample($0 % 4, 10, elev: 30, p: 0.5, chosen: 95, levels: l) }
+        XCTAssertNil(suggest(few + many, levels: l))
+    }
+
+    func testTheAmountIsTheMeanOfTheChangesThatPullTheSameWay() {
+        let l: [Double] = [100, 78, 75]
+        // auto 86: three days lowered by 16, one day raised by 4. The proposal lowers, so the 4 does not count.
+        let lowered = (0..<9).map { Fixture.sample($0 % 3, 9, elev: 30, p: 0.35, chosen: 70, levels: l) }
+        let raised = [Fixture.sample(3, 9, elev: 30, p: 0.35, chosen: 90, levels: l)]
+        let s = suggest(lowered + raised, levels: l)
+        XCTAssertEqual(s?.lower, true)
+        XCTAssertEqual(s?.amount, 16)
+    }
+
+    func testSamplesOlderThanFourteenDaysDoNotSuggest() {
+        let l: [Double] = [100, 78, 75]
+        let samples = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: l) }
+        XCTAssertNotNil(suggest(samples, levels: l, now: Fixture.t0 + 5 * 86400))
+        XCTAssertNil(suggest(samples, levels: l, now: Fixture.t0 + 60 * 86400))
+    }
+
+    func testAMoveOfExactlyFivePointsIsProposed() {
+        // Blind fully down (auto 78), 60 changes at 73: the fit rounds to 73, a move of exactly 5, and the error falls by 5.
+        let l: [Double] = [100, 78, 75]
+        let samples = (0..<60).map { Fixture.sample($0 % 3, 9, elev: 30, p: 0, chosen: 73, levels: l) }
+        XCTAssertEqual(Suggest.roundToStep(Suggest.fit(samples, levels: l, candidates: [.blindDown])[1], .whole), 73)
+        XCTAssertEqual(suggest(samples, levels: l)?.changes, [LevelChange(level: .blindDown, from: 78, to: 73)])
+    }
+
+    func testAGainOfExactlyThreeIsProposed() {
+        // Chosen 70, 73 and 76 in equal numbers with the blind down (auto 78): blind down 73, error 5 → 2.
+        let l: [Double] = [100, 78, 75]
+        let samples = (0..<60).map { Fixture.sample($0 % 3, 9, elev: 30, p: 0, chosen: [70, 73, 76][$0 % 3], levels: l) }
+        XCTAssertEqual(Suggest.meanAbsError(samples, levels: l) - Suggest.meanAbsError(samples, levels: [100, 73, 75]), 3)
+        XCTAssertEqual(suggest(samples, levels: l)?.changes, [LevelChange(level: .blindDown, from: 78, to: 73)])
+    }
+
+    func testTheLightsBoostCountsWhenScoringAProposal() {
+        // Sun 0° (daylight 0.2), lights on, levels 32 / 32 / 30: the automatic level is 35 (the boost). The user asks
+        // for 40; night would have to go to 41, but then the boost makes it 46: worse than now, so nothing is offered.
+        let l: [Double] = [32, 32, 30]
+        let samples = (0..<12).map { Fixture.sample($0 % 3, 20, elev: 0, p: 1, chosen: 40, levels: l, lights: true) }
+        XCTAssertEqual(samples[0].auto, 35)
+        XCTAssertEqual(Suggest.fit(samples, levels: l, candidates: [.night])[2].rounded(), 41)
+        XCTAssertNil(suggest(samples, levels: l))
+    }
+
+    func testNonFiniteInputIsNotRecorded() {
+        func make(chosen: Int = 70, auto: Int = 86, elev: Double = 30, pos: Double = 35, light: Double = 1) -> Sample? {
+            Suggest.makeSample(monitor: "m", chosen: chosen, auto: auto, elev: elev, pos: pos, lights: false, light: light,
+                               levels: [100, 78, 75], tuning: Tuning(), now: 1000, context: SampleContext())
+        }
+        XCTAssertNotNil(make())
+        XCTAssertNil(make(elev: .nan)); XCTAssertNil(make(elev: .infinity))
+        XCTAssertNil(make(pos: .nan)); XCTAssertNil(make(light: .nan))
+        XCTAssertNil(Suggest.makeSample(monitor: "m", chosen: 70, auto: 86, elev: 30, pos: 35, lights: false, light: 1,
+                                        levels: [100, .nan, 75], tuning: Tuning(), now: 1000, context: SampleContext()))
+    }
+
+    func testOneBrokenSampleDoesNotEmptyTheFile() {
+        let good = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])
+        var bad = good; bad.elev = .nan
+        XCTAssertEqual(Suggest.decode(Suggest.encode([good, bad, good])), [good, good])
+    }
+
+    func testAnUnusableStepIsNotProposed() {
+        XCTAssertNil(Suggest.roundToStep(50, NumberStep(min: 0, max: 100, step: 0)))
+        XCTAssertNil(Suggest.roundToStep(50, NumberStep(min: 0, max: 100, step: -5)))
+        XCTAssertNil(Suggest.roundToStep(50, NumberStep(min: 90, max: 10, step: 1)))
+        XCTAssertNil(Suggest.roundToStep(50, NumberStep(min: 150, max: 300, step: 1)))
+        XCTAssertNil(Suggest.roundToStep(50, NumberStep(min: -50, max: -10, step: 1)))
+        XCTAssertEqual(Suggest.roundToStep(50, NumberStep(min: -50, max: 150, step: 1)), 50)
+        let l: [Double] = [100, 78, 75]
+        let samples = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: l) }
+        let bad = NumberStep(min: 0, max: 100, step: 0)
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: l, steps: [.whole, bad, .whole], now: Fixture.t0 + 5 * 86400,
+                                        dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testSettingLevelsWritesOtherNumbersAsTyped() throws {
+        let file = Data("""
+        { "source": "sun", "location": { "latitude": 51.4812, "longitude": -0.0034 },
+          "tuning": { "cloudyDaylight": 0.35 },
+          "monitors": [ { "match": "Monitor", "day": 100, "blindDown": 78, "night": 75 } ] }
+        """.utf8)
+        let out = try ConfigPatch.setLevels(["blindDown": 61], display: "Monitor", suggestedMatch: "Monitor", in: file)
+        let text = String(decoding: out, as: UTF8.self)
+        XCTAssertTrue(text.contains("51.4812"), text)
+        XCTAssertTrue(text.contains("-0.0034"), text)
+        XCTAssertTrue(text.contains("0.35"), text)
+        XCTAssertFalse(text.contains("0.3499"), text)
+        XCTAssertTrue(text.contains("61"))
     }
 }
