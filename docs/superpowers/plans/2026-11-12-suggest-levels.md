@@ -101,8 +101,8 @@ Modify:
 10. C# names the function `Suggest.SuggestionFor` (Swift: `Suggest.suggestion`) because a C# method named `Suggestion` next to the `Suggestion` type is confusing. Everything else mirrors.
 11. Second-day fixture: "78 → 72 at 58%" only gives an automatic 78 with daylight 0.5 (sun 4.5°, late afternoon); in full daylight it would be 81. The fixture uses sun 4.5°.
 12. Week fixture: "blind 100 raised slightly" cannot be at full daylight (the target would be 100, which is not recorded), so it uses sun 9° (daylight 0.8, auto 95, chosen 98), on a day that already has a midday sample, so day stays a non-candidate.
-13. The amount is the mean `|chosen − auto|` over main-level samples that pull the same way as the proposal (spec section 5 says so now); no such sample, no suggestion.
 13. "Exact synthetic data recovers the levels" is checked within 1 point: the pull toward the current value is part of the fit, so recovery is never exact; 300 samples make it small.
+14. The amount is the mean `|chosen − auto|` over main-level samples that pull the same way as the proposal (spec section 5 says so now); no such sample, no suggestion.
 
 ---
 
