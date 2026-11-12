@@ -26,11 +26,12 @@ sealed record Decision(int Level, IReadOnlyList<DecisionStep> Steps);
 /// Assistant's [day, blindDown, night] per monitor key (-1: no value there). Offsets: a hand-set distance
 /// in effect and how much of it applies now, per monitor key. Linked: linked monitors that follow another,
 /// and the level they land on; Leader: the monitor they follow. Applying: false when Automatic is off or
-/// this PC is idle, so nothing is being set.
+/// this PC is idle, so nothing is being set. LightsUsed: the room lights each monitor's target used, per monitor key.
 sealed record LiveInputs(double? Elev = null, double? Pos = null, bool Lights = false, double Light = 1,
                          IReadOnlyDictionary<string, double[]>? Levels = null,
                          IReadOnlyDictionary<string, (int Value, double Weight)>? Offsets = null,
-                         IReadOnlyDictionary<string, int>? Linked = null, string Leader = "", bool Applying = true);
+                         IReadOnlyDictionary<string, int>? Linked = null, string Leader = "", bool Applying = true,
+                         IReadOnlyDictionary<string, bool>? LightsUsed = null);
 
 static class Chart {
     static int R(double x) => (int)Math.Round(x, MidpointRounding.AwayFromZero);

@@ -394,6 +394,7 @@ sealed partial class Controller {
                           keep && lastHaPos != null);
     }
     double? lastHaPos;
+    bool? lastHaLights;   // the room lights Home Assistant last gave: a monitor with nightLights keeps them while it is down
 
     // MARK: light sensor
 
@@ -571,6 +572,7 @@ sealed partial class Controller {
             if (s.HasBlind) s = s with { Pos = Rules.BlindPosition(s.Pos, lastHaPos) };
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
+            lastHaLights = s.Lights;
         }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
@@ -594,13 +596,18 @@ sealed partial class Controller {
         int li = Settings.SyncMonitors && mons.Length > 1 ? Array.FindIndex(mons, x => x.Cur != null && syncOffsets.IsMember(x.Key)) : -1;
         int? groupBase = null;
         bool holdsChanged = false;
+        var lightsUsed = new Dictionary<string, bool>();   // the room lights each monitor's target used (for the Settings chart)
         var linkedNow = new Dictionary<string, int>();   // linked followers: the level they land on (for the Settings chart)
         var order = li >= 0 ? new[] { li }.Concat(Enumerable.Range(0, mons.Length).Where(j => j != li)) : Enumerable.Range(0, mons.Length);
         foreach (int i in order) {
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
-            int target = Rules.Target(s.Levels[i], s.Pos, s.Lights, sun, Cfg.Tuned, boost, light);
+            // In the sun fallback only a monitor with a nightLights level keeps the last lights state; the others count them as off.
+            bool roomLit = Rules.RoomLights(s.Lights, !haDown && Source == Source.HomeAssistant,
+                                            Source == Source.HomeAssistant ? lastHaLights : null, Rules.NightLightsLevel(s.Levels[i]) != null);
+            lightsUsed[m.Key] = roomLit;
+            int target = Rules.Target(s.Levels[i], s.Pos, roomLit, sun, Cfg.Tuned, boost, light);
             var hold = new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt, m.RemoteValue);
             bool follower = groupBase != null && syncOffsets.IsMember(m.Key);
             if (groupBase is int b && follower) {
@@ -647,7 +654,7 @@ sealed partial class Controller {
                                                       SunFallback: Source == Source.HomeAssistant && haDown);
                 // An offset back at 0 (st.Offset == null) passes null, which ends the pending change.
                 recorder.HandChanged(m.Key, st.Offset is int handOffset
-                    ? Suggest.MakeSample(m.Key, target + handOffset, target, s.Elev, s.Pos, s.Lights, light, s.Levels[i], Cfg.Tuned, tickNow, sampleContext)
+                    ? Suggest.MakeSample(m.Key, target + handOffset, target, s.Elev, s.Pos, roomLit, light, s.Levels[i], Cfg.Tuned, tickNow, sampleContext)
                     : null);
             }
             if (recorder.Settle(m.Key, AutoOn && st.Offset != null, s.Levels[i], tickNow) is Sample settled) {
@@ -679,7 +686,7 @@ sealed partial class Controller {
             haLevels = fresh;
         }
         Live = new LiveInputs(s.Elev, s.HasBlind ? s.Pos : null, s.Lights, light, haLevels, offs, linkedNow,
-                              li >= 0 ? mons[li].Label : "", AutoOn && here);
+                              li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed);
         LiveChanged?.Invoke();
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
