@@ -35,7 +35,7 @@ sealed class SettingsWindow : Window {
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     readonly List<(Mon mon, TextBox label, Slider day, Slider blind, Slider night, TextBlock now, TextBlock caption, bool haLevels, TextBox? contrast,
-                   TextBox nightLights, FrameworkElement nightLightsRow)> rows = new();
+                   TextBox nightLights, FrameworkElement nightLightsRow, string contrastLoaded, string nightLightsLoaded)> rows = new();
     string? opened;
 
     static readonly (string tag, string text, string hint)[] Sources = [
@@ -252,7 +252,7 @@ sealed class SettingsWindow : Window {
             [new("theme.lightSunAbove", "Light", orange, false), new("theme.darkSunBelow", "Dark", purple, true)], TuneValue, Set);
         if (rows.Count == 0) { dayCurve.Content = Hint("Connect an external monitor to see its brightness through today."); return; }
         var mons = rows.Select(r => new ChartMonitor(r.mon.Key, string.IsNullOrWhiteSpace(r.label.Text) ? r.mon.D.Friendly : r.label.Text.Trim(),
-                                                     r.day.Value, r.blind.Value, r.night.Value, NightLightsValue(r.nightLights))).ToList();
+                                                     r.day.Value, r.blind.Value, r.night.Value, NightLightsValue(r.nightLights, r.nightLightsLoaded))).ToList();
         bool snapshot = FixedNow != null;
         dayCurve.Content = new BrightnessChart(la, lo, when, tz, mons, SourceTag == "homeAssistant" && cover.Text.Trim() != "",
             ChartTuning, () => snapshot ? null : app.Live, Set, chartPick, id => chartPick = id);
@@ -394,7 +394,11 @@ sealed class SettingsWindow : Window {
     /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
     bool ShowsNightLights => SourceTag == "homeAssistant" && lights.Text.Trim() != "";
     /// The typed "Lights on" level, while its row shows; null when empty or not a level.
-    double? NightLightsValue(TextBox box) => ShowsNightLights && ContrastRule.ParseField(box.Text).value is int v ? (double?)v : null;
+    /// An untouched box keeps the file's value (a decimal stays a decimal), as Save does.
+    double? NightLightsValue(TextBox box, string loaded) =>
+        !ShowsNightLights ? null
+        : box.Text == loaded ? Num(loaded)
+        : ContrastRule.ParseField(box.Text).value is int v ? (double?)v : null;
 
     FrameworkElement Level(string title, Slider s) {
         var pct = new TextBlock { MinWidth = 44, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75 };
@@ -444,7 +448,7 @@ sealed class SettingsWindow : Window {
             var blind = new Slider { Value = spec?.BlindDown ?? Config.DefaultBlindDown };
             var night = new Slider { Value = spec?.Night ?? Config.DefaultNight };
             var caption = Hint("");
-            bool haLevels = spec?.HomeAssistant is { } mh && (mh.Day != null || mh.BlindDown != null || mh.Night != null);
+            bool haLevels = spec?.HomeAssistant is { } mh && (mh.Day != null || mh.BlindDown != null || mh.Night != null || mh.NightLights != null);
             var now = new TextBlock { FontSize = 20, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
             Typography.SetNumeralAlignment(now, FontNumeralAlignment.Tabular);
             var nowRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -457,7 +461,7 @@ sealed class SettingsWindow : Window {
             var nightLights = new TextBox { Text = spec?.NightLights is double nlv ? Fmt(nlv) : "" };
             nightLights.TextChanged += (_, _) => RebuildCurves();   // "How Daylit decides" uses it
             var nightLightsRow = OptionalNumber("Lights on", nightLights, NightLightsHelp);
-            rows.Add((m, label, day, blind, night, now, caption, haLevels, contrast, nightLights, nightLightsRow));
+            rows.Add((m, label, day, blind, night, now, caption, haLevels, contrast, nightLights, nightLightsRow, contrast?.Text ?? "", nightLights.Text));
             var card = new List<UIElement> { Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), nightLightsRow };
             if (contrast != null) card.Add(Contrast(contrast));
             card.Add(nowRow); card.Add(caption);
@@ -493,9 +497,9 @@ sealed class SettingsWindow : Window {
             r.nightLightsRow.Visibility = ShowsNightLights ? Visibility.Visible : Visibility.Collapsed;
             r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
             var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
+            if (ShowsNightLights) text += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
             if (r.contrast != null) text += " Contrast is set when the monitor is detected; empty leaves it to the monitor.";
-            if (ShowsNightLights) text += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost.";
             r.caption.Text = text;
         }
     }
@@ -526,21 +530,22 @@ sealed class SettingsWindow : Window {
         var mons = new List<SettingsEdit.Monitor>();
         foreach (var r in rows) {
             int? contrast = null;
+            bool contrastKeep = false, litKeep = false;
             if (r.contrast != null) {
-                var (ok, v) = ContrastRule.ParseField(r.contrast.Text);
+                var (ok, v, keep) = ContrastRule.ParseField(r.contrast.Text, r.contrastLoaded);
                 if (!ok) { Say($"Contrast for {r.label.Text} is 0 to 100, or empty to leave it unset.", true); return; }
-                contrast = v;
+                contrast = v; contrastKeep = keep;
             }
             int? lit = null;
             if (ShowsNightLights) {
                 // The same rule as contrast: 0 to 100, or empty for none.
-                var (litOk, litValue) = ContrastRule.ParseField(r.nightLights.Text);
+                var (litOk, litValue, keepLit) = ContrastRule.ParseField(r.nightLights.Text, r.nightLightsLoaded);
                 if (!litOk) { Say($"Lights on for {r.label.Text} is 0 to 100, or empty to keep Night plus the room-lights boost.", true); return; }
-                lit = litValue;
+                lit = litValue; litKeep = keepLit;
             }
             mons.Add(new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
-                                              (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value, contrast, r.contrast != null,
-                                              lit, ShowsNightLights));
+                                              (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value, contrast, r.contrast != null && !contrastKeep,
+                                              lit, ShowsNightLights && !litKeep));
         }
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon, mons,
             haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) { Light = daylightSensor.Text };

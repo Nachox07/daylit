@@ -133,7 +133,10 @@ sealed partial class Controller {
     // MARK: configuration
 
     void Load() {
+        var previousLights = Cfg.HomeAssistant?.Lights;
         (Cfg, ConfigError) = Config.Load();
+        // A removed or changed lights entity must not keep its last state alive through an outage.
+        if (Cfg.HomeAssistant?.Lights != previousLights) lastHaLights = null;
         HAClient.Token = Source == Source.HomeAssistant ? Cred.Read(Cfg.TokenName) : null;
         HAClient.LastError = null;
         AutoOn = Settings.Auto;

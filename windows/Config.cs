@@ -126,11 +126,11 @@ sealed class Config {
                 ids.AddRange([(at + "sensor", mh.Sensor), (at + "day", mh.Day), (at + "blindDown", mh.BlindDown),
                               (at + "night", mh.Night), (at + "set", mh.Set), (at + "nightLights", mh.NightLights)]);
             }
-        foreach (var (key, id) in ids)
-            if (id != null && !IsEntityId(id)) return $"config.json: {key} is not an entity id like light.office";
         foreach (var m in c.Monitors ?? [])
             if (m?.NightLights is double nlv && !(double.IsFinite(nlv) && nlv >= 0 && nlv <= 100))
                 return $"config.json: monitor \"{m.Match}\" nightLights is 0 to 100";
+        foreach (var (key, id) in ids)
+            if (id != null && !IsEntityId(id)) return $"config.json: {key} is not an entity id like light.office";
         if (c.Location is { } l && (l.Latitude is < -90 or > 90 || l.Longitude is < -180 or > 180))
             return "config.json: location latitude/longitude out of range";
         if (c.Tuning?.Validate() is { } bad) return bad;

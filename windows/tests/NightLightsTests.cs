@@ -283,3 +283,21 @@ public class NightLightsExplainTests {
                              Chart.Explain(95, 62, 60, e, 40, lights, light: 0.7, nightLights: 80).Level);
     }
 }
+
+public class FieldUnchangedTests {
+    [Fact]
+    public void UntouchedTextKeepsTheFilesValue() {
+        var r = ContrastRule.ParseField("72.5", "72.5");
+        Assert.True(r.ok); Assert.True(r.keep); Assert.Null(r.value);
+        Assert.True(ContrastRule.ParseField("", "").keep);
+    }
+
+    [Fact]
+    public void AnEditedBoxIsParsedAndRounded() {
+        var r = ContrastRule.ParseField("73.4", "72.5");
+        Assert.True(r.ok); Assert.False(r.keep); Assert.Equal(73, r.value);
+        Assert.Null(ContrastRule.ParseField("", "72.5").value);
+        Assert.False(ContrastRule.ParseField("", "72.5").keep);
+        Assert.False(ContrastRule.ParseField("x", "72.5").ok);
+    }
+}

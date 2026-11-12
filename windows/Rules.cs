@@ -422,6 +422,13 @@ static class ContrastRule {
     }
     /// The Settings window's contrast box: empty = not set (null), else a whole number 0–100 (a decimal comma
     /// is fine, halves round up). `ok` is false for anything else, so the window can say what is wrong.
+    /// The same box when the file may hold a decimal: text equal to what the window loaded (`original`) means
+    /// "not edited", so the file keeps its value (`keep`); only an edited box is parsed and rounded.
+    public static (bool ok, int? value, bool keep) ParseField(string text, string original) {
+        if (text == original) return (true, null, true);
+        var (ok, value) = ParseField(text);
+        return (ok, value, false);
+    }
     public static (bool ok, int? value) ParseField(string text) {
         var t = text.Trim().Replace(',', '.');
         if (t == "") return (true, null);
