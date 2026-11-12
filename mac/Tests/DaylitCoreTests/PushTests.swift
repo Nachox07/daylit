@@ -81,3 +81,72 @@ final class PushEntityTests: XCTestCase {
         XCTAssertEqual(PushRule.entities(Config()), [])
     }
 }
+
+final class PushParseTests: XCTestCase {
+    func testAuthMessages() {
+        XCTAssertEqual(PushRule.parse(#"{"type":"auth_required","ha_version":"2026.11.0"}"#), .authRequired)
+        XCTAssertEqual(PushRule.parse(#"{"type":"auth_ok","ha_version":"2026.11.0"}"#), .authOk)
+        XCTAssertEqual(PushRule.parse(#"{"type":"auth_invalid","message":"Invalid access token or password"}"#),
+                       .authInvalid("Invalid access token or password"))
+    }
+    func testResultSuccessAndFailure() {
+        XCTAssertEqual(PushRule.parse(#"{"id":1,"type":"result","success":true,"result":null}"#), .result(id: 1, ok: true))
+        XCTAssertEqual(PushRule.parse(#"{"id":1,"type":"result","success":false,"error":{"code":"invalid_format","message":"x"}}"#),
+                       .result(id: 1, ok: false))
+    }
+    func testPong() {
+        XCTAssertEqual(PushRule.parse(#"{"id":7,"type":"pong"}"#), .pong)
+    }
+    func testTheFirstEventListsEveryEntityUnderA() {
+        let m = #"{"id":1,"type":"event","event":{"a":{"cover.blind":{"s":"open","a":{"current_position":100},"c":"01J","lc":1763000000.1},"sun.sun":{"s":"above_horizon","a":{"elevation":20.5},"c":"01K","lc":1763000000.2,"lu":1763000100.3}}}}"#
+        XCTAssertEqual(PushRule.parse(m), .event(["cover.blind", "sun.sun"]))
+    }
+    func testAChangeUnderC() {
+        let m = #"{"id":1,"type":"event","event":{"c":{"light.room":{"+":{"s":"off","lc":1763000200.5,"c":"01L","a":{"brightness":null}},"-":{"a":["hs_color"]}}}}}"#
+        XCTAssertEqual(PushRule.parse(m), .event(["light.room"]))
+    }
+    func testARemovalUnderR() {
+        XCTAssertEqual(PushRule.parse(#"{"id":1,"type":"event","event":{"r":["input_number.night"]}}"#), .event(["input_number.night"]))
+    }
+    func testAllThreeInOneEvent() {
+        let m = #"{"id":1,"type":"event","event":{"a":{"light.a":{"s":"on","a":{},"c":"x","lc":1}},"c":{"light.b":{"+":{"s":"on"}}},"r":["light.c"]}}"#
+        XCTAssertEqual(PushRule.parse(m), .event(["light.a", "light.b", "light.c"]))
+    }
+    func testAnythingElseIsOther() {
+        for m in ["", "not json", "[]", #"[{"type":"auth_ok"}]"#, #"{"type":"something_new"}"#, #"{"no":"type"}"#,
+                  #"{"type":"result","success":true}"#, #"{"type":"event"}"#, #"{"type":"auth_ok""#] {
+            XCTAssertEqual(PushRule.parse(m), .other, m)
+        }
+    }
+}
+
+final class PushMessageTests: XCTestCase {
+    func obj(_ s: String) -> [String: Any] { try! JSONSerialization.jsonObject(with: Data(s.utf8)) as! [String: Any] }
+    func testTheAuthMessageCarriesTheTokenAsAccessToken() {
+        let o = obj(PushRule.authMessage(token: "abc\"def\\ghi"))
+        XCTAssertEqual(o["type"] as? String, "auth")
+        XCTAssertEqual(o["access_token"] as? String, "abc\"def\\ghi")
+        XCTAssertEqual(o.count, 2)
+    }
+    func testSubscribeNamesTheEntities() {
+        let o = obj(PushRule.subscribeMessage(id: 1, entities: ["light.room", "sun.sun"]))
+        XCTAssertEqual(o["id"] as? Int, 1)
+        XCTAssertEqual(o["type"] as? String, "subscribe_entities")
+        XCTAssertEqual(o["entity_ids"] as? [String], ["light.room", "sun.sun"])
+    }
+    func testPing() {
+        let o = obj(PushRule.pingMessage(id: 4))
+        XCTAssertEqual(o["id"] as? Int, 4); XCTAssertEqual(o["type"] as? String, "ping")
+    }
+    func testLogLinesCarryNoToken() {
+        let token = "a-token-that-must-not-appear"
+        _ = PushRule.authMessage(token: token)
+        for line in [PushRule.connectedLine(12), PushRule.lostLine("no pong", retryIn: 5), PushRule.rejectedLine("Invalid access token or password"),
+                     PushRule.offLine, PushRule.rejectedProblem] {
+            XCTAssertFalse(line.contains(token), line)
+        }
+        XCTAssertEqual(PushRule.connectedLine(12), "push: connected (12 entities)")
+        XCTAssertEqual(PushRule.lostLine("no pong", retryIn: 5), "push: lost (no pong), retrying in 5s")
+        XCTAssertEqual(PushRule.offLine, "push: off")
+    }
+}
