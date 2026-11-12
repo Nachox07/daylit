@@ -194,3 +194,19 @@ public class NightLightsConfigTests {
     public void AValueOutOfRangeIsClamped() =>
         Assert.Equal(100, (int)Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { NightLights = 140, NightLightsEditable = true }]), Original))["monitors"]![0]!["nightLights"]!);
 }
+
+public class NightLightsHomeAssistantTests {
+    [Fact]
+    public void TheTemplateAsksForTheHelperAsTheFourthNumber() =>
+        Assert.Contains("[-1, -1, -1, {{ states('input_number.lit') | float(-1) }}, -1, 0]",
+                        HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { NightLights = "input_number.lit" }]));
+
+    [Fact]
+    public void AMonitorWithoutTheHelperGetsMinusOneThere() =>
+        Assert.Contains("[{{ states('input_number.d') | float(-1) }}, -1, -1, -1, -1, 0]",
+                        HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { Day = "input_number.d" }]));
+
+    [Fact]
+    public void ABadHelperIdIsDroppedFromTheTemplate() =>
+        Assert.DoesNotContain("input_number.x", HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { NightLights = "input_number.x'}}" }]));
+}

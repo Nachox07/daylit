@@ -390,7 +390,7 @@ sealed partial class Controller {
         var l = Cfg.Location!;
         bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
-                          mons.Select(m => (keep ? m.HaLevels : null) ?? new[] { m.Day, m.BlindDown, m.Night }).ToArray(), null,
+                          mons.Select(m => (keep ? m.HaLevels : null) ?? m.LocalLevels).ToArray(), null,
                           keep && lastHaPos != null);
     }
     double? lastHaPos;

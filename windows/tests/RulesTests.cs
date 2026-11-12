@@ -528,7 +528,7 @@ public class TemplateTests {
         Assert.Contains("state_attr('light.room','brightness')", t);
         Assert.Contains("[{{ states('input_number.d') | float(-1) }}, -1, -1, ", t);
         Assert.Contains("states['input_number.s'].last_changed", t);
-        Assert.Contains("[-1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
+        Assert.Contains("[-1, -1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
     }
 
     [Fact]
