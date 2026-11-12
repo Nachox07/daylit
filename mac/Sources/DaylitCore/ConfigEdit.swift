@@ -156,3 +156,50 @@ public enum ConfigPatch {
     static func number(_ v: Double) -> Any { v == v.rounded() && abs(v) < 1e9 ? Int(v) : NSDecimalNumber(string: String(v)) }
     static func clamp(_ v: Int) -> Int { min(100, max(0, v)) }
 }
+
+extension ConfigPatch {
+    /// Every non-integer number as a decimal with the shortest text that reads back the same, so values this
+    /// function does not own are written as they were typed.
+    static func asTyped(_ v: Any) -> Any {
+        if let d = v as? [String: Any] { return d.mapValues(asTyped) }
+        if let a = v as? [Any] { return a.map(asTyped) }
+        if let n = v as? NSNumber, !(n === kCFBooleanTrue || n === kCFBooleanFalse), "dfDF".contains(String(cString: n.objCType)) {
+            let x = n.doubleValue
+            if x.isFinite, x != x.rounded() { return NSDecimalNumber(string: "\(x)") }
+        }
+        return v
+    }
+
+    /// The file with some of one monitor's local levels changed (keys "day", "blindDown", "night"; whole
+    /// numbers, clamped to 0–100) and everything else kept, as a suggestion's Apply needs. The entry is
+    /// found as `apply` finds it (its match is part of `display`, the connected display's name); without one,
+    /// an entry with `suggestedMatch` is added. Comments are not kept (check ConfigText.hasComments first).
+    /// Throws when the file is not a JSON object or the result would not load.
+    public static func setLevels(_ levels: [String: Int], display: String, suggestedMatch: String, in original: Data?) throws -> Data {
+        var root: [String: Any] = [:]
+        if let d = original, !d.isEmpty {
+            guard let o = try JSONSerialization.jsonObject(with: ConfigText.relaxed(d)) as? [String: Any] else {
+                throw ConfigEditError.notAnObject
+            }
+            root = o
+        }
+        if let raw = root["monitors"], !(raw is [[String: Any]]) {
+            throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
+        }
+        var list = root["monitors"] as? [[String: Any]] ?? []
+        let i = list.indices.first { j in
+            guard let match = list[j]["match"] as? String, !match.isEmpty else { return false }
+            return display.localizedCaseInsensitiveContains(match.trimmingCharacters(in: .whitespaces))
+        }
+        var entry = i.map { list[$0] } ?? ["match": suggestedMatch]
+        for (k, v) in levels where Level.allCases.contains(where: { $0.key == k }) { entry[k] = clamp(v) }
+        if let i { list[i] = entry } else { list.append(entry) }
+        root["monitors"] = list
+        // Written as typed: a number read back as a Double would come out as 51.479999999999997.
+        root = asTyped(root) as? [String: Any] ?? root
+        let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        let c = try JSONDecoder().decode(Config.self, from: out)
+        if let err = c.validate() { throw ConfigEditError.invalid(err) }
+        return out
+    }
+}

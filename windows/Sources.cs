@@ -104,6 +104,27 @@ static class HAClient {
                 ["light"] = s.LightRatio is double lr ? Math.Round(lr * 100, MidpointRounding.AwayFromZero) / 100 : null,   // how clear the sky is
                 ["sun_elevation"] = s.Elev, ["blind"] = s.Pos, ["lights"] = s.Lights, ["source"] = "Windows" } });
 
+    /// input_number/set_value: a level from an accepted suggestion (Suggest.cs). Returns null when it worked, otherwise
+    /// why not (read straight after the call, so a tick's own error is not mistaken for it).
+    public static async Task<string?> SetNumber(Config c, string entity, double value) {
+        if (!Config.IsEntityId(entity)) return "not an entity id";
+        var answer = await Call(c, "/api/services/input_number/set_value", new { entity_id = entity, value });
+        return answer != null ? null : LastError ?? "no answer";
+    }
+
+    /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; null when Home Assistant
+    /// does not answer or the entity has none. Leaves LastError and Transient alone, like History.
+    /// Answered is true when Home Assistant gave a 200 (Step is null then if the entity has no min/max/step).
+    public static async Task<(NumberStep? Step, bool Answered)> GetNumberStep(Config c, string entity) {
+        if (c.HomeAssistant?.Url is not { } url || Token == null || !Config.IsEntityId(entity)) return (null, false);
+        try {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + "/api/states/" + entity);
+            req.Headers.Authorization = new("Bearer", Token);
+            using var r = await http.SendAsync(req);
+            return r.IsSuccessStatusCode ? (NumberStep.Parse(await r.Content.ReadAsStringAsync()), true) : (null, false);
+        } catch { return (null, false); }
+    }
+
     public static Task<string?> SetSwitch(Config c, bool on) =>
         Call(c, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), new { entity_id = c.HomeAssistant!.AutoSwitch });
 }

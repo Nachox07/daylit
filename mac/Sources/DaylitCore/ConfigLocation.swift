@@ -63,6 +63,23 @@ public struct ConfigLocation {
         return fm.fileExists(atPath: placeholder(for: url).path) ? .evicted : .missing
     }
 
+    public enum ReadError: Error, Equatable {
+        /// iCloud Drive has the file but not on this Mac yet.
+        case downloading
+        case unreadable(String)
+    }
+
+    /// The config's bytes for a read-modify-write: nil only when there is no file at all. An evicted
+    /// file or a read error throws, so a caller never rebuilds (and overwrites) a config it could not read.
+    public static func dataForPatch(at url: URL) throws -> Data? {
+        switch state(of: url) {
+        case .missing: return nil
+        case .evicted: throw ReadError.downloading
+        case .present:
+            do { return try Data(contentsOf: url) } catch { throw ReadError.unreadable(error.localizedDescription) }
+        }
+    }
+
     /// What changes when the file does: iCloud replaces it by renaming a new one over it, so the inode
     /// changes even when the time and size happen to stay the same.
     public struct Stamp: Equatable {

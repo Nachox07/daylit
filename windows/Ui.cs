@@ -50,6 +50,8 @@ sealed class Flyout : Window {
     readonly TextBlock offHint, autoSub, error;
     readonly CheckBox auto;
     readonly Grid autoRow;
+    readonly Border suggestCard;      // a change of levels Daylit noticed (Suggest.cs), shown only while one is pending
+    readonly TextBlock suggestText;
     readonly List<Border> cards = new();
     readonly List<(Mon m, Slider s, TextBlock pct, TextBlock note, Border card, Button member)> rowViews = new();
     Button? link;
@@ -109,6 +111,18 @@ sealed class Flyout : Window {
         Grid.SetColumn(auto, 1);
         autoRow.Children.Add(autoText); autoRow.Children.Add(auto);
         root.Children.Add(autoRow);
+
+        // A change of levels Daylit noticed from repeated hand changes (Suggest.cs). Nothing changes without Apply.
+        suggestText = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        var apply = new Button { Content = "Apply", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 8, 0),
+                                 ToolTip = "Set the new level. A level from Home Assistant changes there; otherwise in config.json." };
+        apply.Click += (_, _) => app.ApplySuggestion();
+        var notNow = new Button { Content = "Not now", Padding = new Thickness(12, 4, 12, 4), ToolTip = "No suggestion for this monitor for 7 days" };
+        notNow.Click += (_, _) => app.DismissSuggestion();
+        suggestCard = Card(new StackPanel { Children = { suggestText, new StackPanel { Orientation = Orientation.Horizontal, Children = { apply, notNow } } } });
+        suggestCard.Margin = new Thickness(0, 12, 0, 0);
+        suggestCard.Visibility = Visibility.Collapsed;
+        root.Children.Add(suggestCard);
 
         error = Small(""); error.Margin = new Thickness(2, 10, 2, 0);
         root.Children.Add(error);
@@ -341,8 +355,13 @@ sealed class Flyout : Window {
             autoSub.Text = app.Subtitle;
             autoSub.ToolTip = app.Subtitle == "" ? null : app.Subtitle;
             autoSub.Visibility = app.Subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
-            error.Text = app.Error ?? "";
-            error.Visibility = app.Error == null ? Visibility.Collapsed : Visibility.Visible;
+            var sg = app.Suggestion;
+            var sgMon = sg is { } pending ? app.Mons.FirstOrDefault(x => x.Key == pending.Monitor) : null;
+            suggestCard.Visibility = sg != null && sgMon != null ? Visibility.Visible : Visibility.Collapsed;
+            suggestText.Text = sg != null && sgMon != null ? sg.Sentence(sgMon.Label) : "";
+            string problem = string.Join("\n", new[] { app.Error, app.SuggestError }.Where(t => !string.IsNullOrEmpty(t)));   // an Apply that failed stays until the next suggestion action
+            error.Text = problem;
+            error.Visibility = problem == "" ? Visibility.Collapsed : Visibility.Visible;
         } finally { syncing = false; }
     }
 

@@ -268,6 +268,34 @@ static class ConfigPatch {
         return text;
     }
 
+    /// The file with some of one monitor's local levels changed (keys "day", "blindDown", "night"; whole numbers,
+    /// clamped to 0–100) and everything else kept, as a suggestion's Apply needs. The entry is found as Apply finds
+    /// it (its match is part of `display`, the monitor's name); without one, an entry with `suggestedMatch` is added.
+    /// Comments are not kept (check HasComments first). Throws when the file is not a JSON object or the result would not load.
+    public static string SetLevels(IReadOnlyDictionary<string, int> levels, string display, string suggestedMatch, string? original) {
+        var root = string.IsNullOrWhiteSpace(original) ? new JsonObject()
+                 : JsonNode.Parse(original, documentOptions: Read) as JsonObject ?? throw new InvalidDataException("config.json is not a JSON object");
+        if (root["monitors"] is { } raw && (raw is not JsonArray arr || arr.Any(x => x is not JsonObject)))
+            throw new InvalidDataException("monitors must be a list of objects; fix it with Open config file");
+        var list = root["monitors"] as JsonArray ?? new JsonArray();
+        root.Remove("monitors");
+        var entry = list.OfType<JsonObject>().FirstOrDefault(o =>
+            o["match"]?.GetValueKind() == JsonValueKind.String && o["match"]!.GetValue<string>().Trim() is { Length: > 0 } match &&
+            display.Contains(match, StringComparison.OrdinalIgnoreCase));
+        if (entry == null) { entry = new JsonObject { ["match"] = suggestedMatch }; list.Add(entry); }
+        foreach (var (k, v) in levels)
+            if (k is "day" or "blindDown" or "night") entry[k] = Math.Clamp(v, 0, 100);
+        root["monitors"] = list;
+        var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
+        try {
+            File.WriteAllText(tmp, text);
+            var (_, err) = Config.Load(tmp);
+            if (err != null) throw new InvalidDataException(err.Replace("config.json: ", ""));
+        } finally { File.Delete(tmp); }
+        return text;
+    }
+
     /// Two decimals, written exactly as shown in the window.
     static decimal Round2(double v) { var d = Math.Round((decimal)v, 2, MidpointRounding.AwayFromZero); return d == 0 ? 0m : d; }
 }

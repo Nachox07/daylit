@@ -32,6 +32,30 @@ import DaylitCore
         guard let d = UserDefaults.standard.data(forKey: "holds"), let h = try? JSONDecoder().decode(SavedHolds.self, from: d) else { return SavedHolds() }
         return h
     }()
+    /// A change of levels to offer in the panel (DaylitCore.Suggest), and why the last Apply failed.
+    @Published var suggestion: Suggestion?
+    @Published var suggestError: String?
+    /// Hand changes waiting to settle, and the settled ones (corrections.json, this Mac only).
+    var recorder = Recorder()
+    var corrections: [Sample] = []
+    /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
+    var suggestDirty = true
+    /// Bumped by Apply and Not now. updateSuggestion drops its result when it changed during its Home
+    /// Assistant reads, so a card the user already handled does not come back.
+    var suggestEpoch = 0
+    /// Per monitor, bumped where Apply clears its hand-set offset. The tick copies a monitor's hold state, awaits
+    /// the write, then stores the state back: if this changed meanwhile, the copy still has the offset Apply just
+    /// cleared, so the tick clears it again in its own result (and carries on normally) instead of restoring it.
+    var offsetCleared: [String: Int] = [:]
+    /// input_number min/max/step per entity, kept until the config reloads (a failed read is not kept).
+    var stepCache: [String: NumberStep] = [:]
+    /// Entities Home Assistant answered for without min/max/step: not asked again until the config reloads.
+    var notNumber: Set<String> = []
+    /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
+    var suggestLevels: [String: [Double]] = [:]
+    var suggestFromHA: Bool?
+    /// "Not now": per monitor key, no suggestion until then (Unix seconds).
+    var suggestDismissed: [String: Double] = UserDefaults.standard.dictionary(forKey: "suggestDismissed") as? [String: Double] ?? [:]
     var lookDark: Bool?
     var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
     /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
@@ -61,6 +85,7 @@ import DaylitCore
     init(preview: Void) {}
 
     init() {
+        corrections = Self.loadCorrections()
         reload()
         if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt
         HotKeys.shared.start { [weak self] up, fine in self?.hotkey(up: up, fine: fine) }
@@ -92,6 +117,8 @@ import DaylitCore
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
+        // A suggestion worked out under the old config must not be applied under the new one.
+        suggestDirty = true; stepCache = [:]; notNumber = []; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr
@@ -365,8 +392,9 @@ import DaylitCore
         refresh()
     }
 
-    private func forgetHandSet(_ i: Int) {
+    func forgetHandSet(_ i: Int) {
         mons[i].lastSet = nil; mons[i].offset = nil; mons[i].offsetSun = nil; mons[i].offsetAt = nil; mons[i].manual = false
+        recorder.drop(mons[i].uuid)   // a change waiting to become a suggestion sample ends here too
     }
 
     func setPause(_ on: Bool) {
@@ -591,7 +619,7 @@ import DaylitCore
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
         func ownTarget(_ m: Mon) -> Int {
-            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+            let lv = levels(of: m, inp)
             return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights,
                           tuning: config.tuned, light: inp.light)
         }
@@ -607,6 +635,7 @@ import DaylitCore
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
+            let clearedAt = offsetCleared[m.uuid]
             var want = ownTarget(m)
             let follower = base != nil && syncOffsets.isMember(m.uuid)
             if let b = base, follower {
@@ -635,23 +664,42 @@ import DaylitCore
                 }
                 mons[i].writeFailing = !ok
             }
-            let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            var st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
+            let appliedMeanwhile = offsetCleared[m.uuid] != clearedAt
+            if appliedMeanwhile { st = Suggest.afterApply(st); recorder.drop(m.uuid) }
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
             mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen; mons[i].remoteValue = st.remoteValue
             if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }
             mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
+            // Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
+            if step.remote != nil {
+                // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
+                recorder.drop(m.uuid)
+            } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
+                let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
+                                        sunFallback: source == .homeAssistant && !inp.fromHA)
+                // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
+                recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
+                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: inp.lights,
+                                       light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
+                })
+            }
+            if let done = recorder.settle(monitor: m.uuid, held: auto && st.offset != nil, levels: levels(of: m, inp), now: now) {
+                corrections.append(done); saveCorrections(); suggestDirty = true
+            }
             if ok, let v = step.level { mons[i].level = Double(v) }
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
-            let applied = ok ? step.applied : c0, manual = step.manual
+            let applied = ok ? step.applied : c0, manual = step.manual && !appliedMeanwhile
             if follower { linkedNow[m.uuid] = applied }
             mons[i].manual = manual
             if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual
                 || mons[i].publishedLight != inp.lightRatio.map({ Int(($0 * 10).rounded()) }) {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
-                    "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
+                    "target": want, "manual": manual, "offset": st.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
                     "light": inp.lightRatio.map { ($0 * 100).rounded() / 100 as Any } ?? NSNull(),   // how clear the sky is
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
@@ -675,6 +723,7 @@ import DaylitCore
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
+        await updateSuggestion(inp)
     }
 
     func saveHolds() {

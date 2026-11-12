@@ -140,7 +140,9 @@ computer right now, or no token stored yet) and which config entry matched which
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
   and *Automatic*. A level set by hand keeps its distance from the
-  automatic one until sunset, and survives a restart (for up to 12 hours).
+  automatic one until sunset, and survives a restart (for up to 12 hours). Repeated hand changes in the
+  same situation make the panel offer a new level (*Apply* / *Not now*, [docs/setup.md → Suggested
+  levels](docs/setup.md#suggested-levels)); the samples stay on that machine in `corrections.json`.
 - "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on
   battery. "Light or dark mode from daylight" (on by default on Windows, off on macOS; on macOS the
   first switch asks for the Automation permission for System Events).
@@ -148,7 +150,7 @@ computer right now, or no token stored yet) and which config entry matched which
   built-in screen is never automated (on macOS it gets a manual slider while the lid is open;
   `"builtIn": false` hides it).
 - Log: `%LOCALAPPDATA%\Daylit\daylit.log` (Windows) or `~/Library/Logs/Daylit/daylit.log` (macOS)
-  shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume and Home Assistant errors.
+  shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume, suggested levels (`suggest:`) and Home Assistant errors.
 
 ## Work on the code
 

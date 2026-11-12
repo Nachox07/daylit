@@ -40,6 +40,13 @@ import DaylitCore
             }()))),
             ("panel-one-manual", AnyView(Panel(m: model([mon(1, "LG UltraFine 5K", 60, manual: true)], source: .homeAssistant,
                                                         detail: "Home Assistant · sun 100% · blind 56%")))),
+            ("panel-one-suggestion", AnyView(Panel(m: {
+                let one = mon(1, "Monitor", 64)
+                let d = model([one], source: .homeAssistant, detail: "Home Assistant · sun 100% · blind 35%")
+                d.suggestion = Suggestion(monitor: one.uuid, changes: [LevelChange(level: .blindDown, from: 78, to: 61)],
+                                          amount: 14, lower: true, samples: 13, days: 5)
+                return d
+            }()))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
