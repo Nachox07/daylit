@@ -132,6 +132,7 @@ struct MonitorDraft: Identifiable {
     let haLevels: Bool             // Home Assistant helpers set these levels
     let contrastApplies: Bool      // DDC monitor: the contrast box is shown
     var contrast = ""              // empty = not set
+    var nightLights = ""           // "Lights on": empty = not set (night + the room-lights boost)
 }
 
 struct SettingsView: View {
@@ -235,6 +236,16 @@ struct SettingsView: View {
                     level("Day", "sun.max", $d.day)
                     level("Blind closed", "blinds.horizontal.closed", $d.blindDown)
                     level("Night", "moon", $d.night)
+                    if showsNightLights {
+                        LabeledContent {
+                            HStack(spacing: 6) {
+                                TextField("Lights on", text: $d.nightLights, prompt: Text("Not set"))
+                                    .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
+                                    .help(Self.nightLightsHelp)
+                                Text("%").foregroundStyle(.secondary).frame(width: 16, alignment: .leading)
+                            }
+                        } label: { Row("Lights on", "lightbulb") }
+                    }
                     if d.contrastApplies {
                         LabeledContent {
                             HStack(spacing: 6) {
@@ -504,8 +515,13 @@ struct SettingsView: View {
                       light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1)   // with today's clouds; snapshots stay clear
     }
 
+    /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
+    var showsNightLights: Bool { source == "homeAssistant" && !lights.trimmingCharacters(in: .whitespaces).isEmpty }
+    static let nightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost."
+
     func caption(_ d: MonitorDraft) -> String {
         var s = coords == nil ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save."
+        if showsNightLights { s += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost." }
         if d.haLevels { s += " Home Assistant helpers set these levels; these apply only when it cannot be reached." }
         if d.contrastApplies { s += " Contrast is set when the monitor is detected; empty leaves it to the monitor." }
         return s
@@ -527,7 +543,8 @@ struct SettingsView: View {
             return MonitorDraft(id: mon.uuid, name: mon.name, label: cfg?.label ?? mon.name,
                                 day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20,
                                 haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil,
-                                contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "")
+                                contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "",
+                                nightLights: cfg?.nightLights.map { Self.fmt($0) } ?? "")
         }
         error = nil
         note = opened.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
@@ -553,6 +570,12 @@ struct SettingsView: View {
                 let (ok, v) = ContrastRule.parseField(d.contrast)
                 if !ok { error = "Contrast for \(d.label) is 0 to 100, or empty to leave it unset."; return nil }
                 me.contrastEditable = true; me.contrast = v
+            }
+            if showsNightLights {
+                // The same rule as contrast: 0 to 100, or empty for none.
+                let (ok, v) = ContrastRule.parseField(d.nightLights)
+                if !ok { error = "Lights on for \(d.label) is 0 to 100, or empty to keep Night plus the room-lights boost."; return nil }
+                me.nightLightsEditable = true; me.nightLights = v
             }
             mons.append(me)
         }
