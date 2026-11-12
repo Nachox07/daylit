@@ -133,3 +133,64 @@ public class NightLightsFallbackTests {
         Assert.Equal(80, Rules.Target([95, 62, 60, 80], 100, lit, t.Fraction(-10), t, true));
     }
 }
+
+public class NightLightsConfigTests {
+    static string Write(string text) {
+        var p = Path.Combine(Path.GetTempPath(), $"daylit-test-{Guid.NewGuid()}.json");
+        File.WriteAllText(p, text);
+        return p;
+    }
+    static System.Text.Json.Nodes.JsonObject Json(string s) => (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(s)!;
+    static readonly SettingsEdit.Monitor Dell = new("DELL U2723QE", "U2723QE", "Left", 95, 62, 60);
+    const string Original = """{ "monitors": [ { "match": "U2723QE", "night": 60, "nightLights": 80, "control": "ddc", "homeAssistant": { "nightLights": "input_number.lit" } } ] }""";
+
+    [Fact]
+    public void LoadsTheLocalLevelAndTheHelper() {
+        var (c, err) = Config.Load(Write("""{ "monitors": [ { "match": "Dell", "night": 60, "nightLights": 80, "homeAssistant": { "nightLights": "input_number.lit" } } ] }"""));
+        Assert.Null(err);
+        Assert.Equal(80, c.Monitors![0].NightLights);
+        Assert.Equal("input_number.lit", c.Monitors![0].HomeAssistant!.NightLights);
+    }
+
+    [Fact]
+    public void WithoutTheKeyThereIsNoLevel() =>
+        Assert.Null(Config.Load(Write("""{ "monitors": [ { "match": "Dell", "night": 60 } ] }""")).cfg.Monitors![0].NightLights);
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("101")]
+    public void ALevelOutsideZeroToHundredIsAProblem(string v) =>
+        Assert.Equal("config.json: monitor \"Dell\" nightLights is 0 to 100",
+                     Config.Load(Write($$"""{ "monitors": [ { "match": "Dell", "nightLights": {{v}} } ] }""")).error);
+
+    [Fact]
+    public void ZeroAndHundredAreFine() {
+        Assert.Null(Config.Load(Write("""{ "monitors": [ { "match": "Dell", "nightLights": 0 } ] }""")).error);
+        Assert.Null(Config.Load(Write("""{ "monitors": [ { "match": "Dell", "nightLights": 100 } ] }""")).error);
+    }
+
+    [Fact]
+    public void AHelperThatIsNotAnEntityIdIsAProblem() =>
+        Assert.Equal("config.json: monitor \"Dell\" homeAssistant.nightLights is not an entity id like light.office",
+                     Config.Load(Write("""{ "monitors": [ { "match": "Dell", "homeAssistant": { "nightLights": "lit" } } ] }""")).error);
+
+    [Fact]
+    public void SettingsSavesTheLevelAndKeepsEveryOtherKey() {
+        var m = Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { NightLights = 85, NightLightsEditable = true }]), Original))["monitors"]![0]!;
+        Assert.Equal(85, (int)m["nightLights"]!);
+        Assert.Equal("ddc", (string)m["control"]!);
+        Assert.Equal("input_number.lit", (string)m["homeAssistant"]!["nightLights"]!);
+    }
+
+    [Fact]
+    public void AnEmptyBoxRemovesTheKey() =>
+        Assert.Null(Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { NightLights = null, NightLightsEditable = true }]), Original))["monitors"]![0]!["nightLights"]);
+
+    [Fact]
+    public void WithoutTheBoxTheFileKeepsItsLevel() =>
+        Assert.Equal(80, (int)Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell]), Original))["monitors"]![0]!["nightLights"]!);
+
+    [Fact]
+    public void AValueOutOfRangeIsClamped() =>
+        Assert.Equal(100, (int)Json(ConfigPatch.Apply(new SettingsEdit("off", null, null, [Dell with { NightLights = 140, NightLightsEditable = true }]), Original))["monitors"]![0]!["nightLights"]!);
+}

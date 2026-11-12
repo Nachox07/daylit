@@ -29,6 +29,7 @@ sealed class MonitorHa {
     public string? Day { get; set; }          // input_number entities; override the local numbers
     public string? BlindDown { get; set; }
     public string? Night { get; set; }
+    public string? NightLights { get; set; }  // optional input_number: the level after sunset with the room lights on
     public string? Set { get; set; }          // input_number: changing it in HA sets this monitor now, even when the PC is idle
 }
 
@@ -39,6 +40,7 @@ sealed class MonitorConfig {
     public double? Day { get; set; }
     public double? BlindDown { get; set; }
     public double? Night { get; set; }
+    public double? NightLights { get; set; }  // optional: after sunset with the room lights on (none: night + the lights boost)
     public double? Contrast { get; set; }     // fixed contrast 0–100 over DDC/CI (VCP 0x12), set at start and after a display change
     public MonitorHa? HomeAssistant { get; set; }
 }
@@ -122,10 +124,13 @@ sealed class Config {
             if (m?.HomeAssistant is { } mh) {
                 string at = $"monitor \"{m.Match}\" homeAssistant.";
                 ids.AddRange([(at + "sensor", mh.Sensor), (at + "day", mh.Day), (at + "blindDown", mh.BlindDown),
-                              (at + "night", mh.Night), (at + "set", mh.Set)]);
+                              (at + "night", mh.Night), (at + "set", mh.Set), (at + "nightLights", mh.NightLights)]);
             }
         foreach (var (key, id) in ids)
             if (id != null && !IsEntityId(id)) return $"config.json: {key} is not an entity id like light.office";
+        foreach (var m in c.Monitors ?? [])
+            if (m?.NightLights is double nlv && !(double.IsFinite(nlv) && nlv >= 0 && nlv <= 100))
+                return $"config.json: monitor \"{m.Match}\" nightLights is 0 to 100";
         if (c.Location is { } l && (l.Latitude is < -90 or > 90 || l.Longitude is < -180 or > 180))
             return "config.json: location latitude/longitude out of range";
         if (c.Tuning?.Validate() is { } bad) return bad;
@@ -173,9 +178,11 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
                            IReadOnlyDictionary<string, double>? Tuning = null, bool? ThemeRoom = null) {
     /// `Name` is the connected display's name; `SuggestedMatch` is used only when no entry matches it yet.
     /// `ContrastEditable`: the window shows a contrast box for it (DDC only); otherwise `contrast` in the file is kept.
-    /// `Contrast` null = not set: the key is removed.
+    /// `Contrast` null = not set: the key is removed. `NightLightsEditable`: the window shows the Lights on box;
+    /// otherwise `nightLights` in the file is kept. `NightLights` null = not set: the key is removed.
     public sealed record Monitor(string Name, string SuggestedMatch, string Label, int Day, int BlindDown, int Night,
-                                 int? Contrast = null, bool ContrastEditable = false);
+                                 int? Contrast = null, bool ContrastEditable = false,
+                                 int? NightLights = null, bool NightLightsEditable = false);
     /// homeAssistant.light: the daylight sensor.
     public string Light { get; init; } = "";
 }
@@ -200,7 +207,7 @@ static class ConfigPatch {
         name.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault(t => t.Any(char.IsDigit) && t.Any(char.IsLetter)) ?? name;
 
     /// The file with the edit applied. Unknown keys, unplugged monitors and per-monitor settings the window
-    /// does not show (Home Assistant helpers, control, contrast where it has no box) are kept; comments are not. Throws when the result
+    /// does not show (Home Assistant helpers, control, contrast and nightLights where they have no box) are kept; comments are not. Throws when the result
     /// would not load, or when the file is not a JSON object.
     public static string Apply(SettingsEdit e, string? original) {
         var root = string.IsNullOrWhiteSpace(original) ? new JsonObject()
@@ -237,6 +244,9 @@ static class ConfigPatch {
             entry["day"] = Math.Clamp(m.Day, 0, 100); entry["blindDown"] = Math.Clamp(m.BlindDown, 0, 100); entry["night"] = Math.Clamp(m.Night, 0, 100);
             if (m.ContrastEditable) {
                 if (m.Contrast is int ct) entry["contrast"] = Math.Clamp(ct, 0, 100); else entry.Remove("contrast");
+            }
+            if (m.NightLightsEditable) {
+                if (m.NightLights is int lit) entry["nightLights"] = Math.Clamp(lit, 0, 100); else entry.Remove("nightLights");
             }
         }
         if (list.Count > 0) root["monitors"] = list;
