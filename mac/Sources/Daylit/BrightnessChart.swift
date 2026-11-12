@@ -16,8 +16,9 @@ struct LiveInputs: Equatable {
     var linked: [String: Int] = [:]   // linked monitors that follow another: the level they land on
     var leader = ""                   // the monitor they follow
     var applying = true               // false: Automatic is off or this Mac is idle, so nothing is being set
+    var lightsUsed: [String: Bool] = [:]   // the room lights each monitor's target used (the sun fallback keeps them for nightLights)
     static func == (a: LiveInputs, b: LiveInputs) -> Bool {
-        a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
+        a.lightsUsed == b.lightsUsed && a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
             && a.offsets.mapValues { "\($0.value) \($0.weight)" } == b.offsets.mapValues { "\($0.value) \($0.weight)" }
     }
 }

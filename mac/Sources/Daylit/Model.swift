@@ -155,6 +155,7 @@ import DaylitCore
             var m = Mon(id: s.id, uuid: s.uuid, name: s.name, label: cfg?.label ?? s.name, control: control,
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
             m.contrast = cfg?.contrast
+            m.nightLights = cfg?.nightLights
             if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
             if control == .native && !nativeOK {
                 m.noControl = "No brightness control right now. Turn on HDR for this display, or DDC/CI in its menu."
@@ -500,6 +501,7 @@ import DaylitCore
         var fromHA = false, hasBlind = false, bri = 0.0, sat = 100.0
         var light = 1.0                 // the daylight part's scale from the light sensor (1: clear or none)
         var lightRatio: Double? = nil   // how clear the sky is, 0…1, when the sensor says
+        var lastLights: Bool? = nil     // sun fallback: the room lights Home Assistant last gave (nil: none seen)
     }
 
     // MARK: light sensor
@@ -575,6 +577,8 @@ import DaylitCore
     /// the target but these stay, so a network blip does not swap them for the defaults and move the screens.
     var lastHALevels: [String: [Double]] = [:]
     var lastHAPos: Double?
+    /// The room lights Home Assistant last gave: a monitor with a nightLights level keeps them while it is down.
+    var lastHALights: Bool?
     var lastProbe: String?
 
     func tick() async {
@@ -618,10 +622,14 @@ import DaylitCore
 
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
+        /// The room lights for this monitor: in the sun fallback only one with a nightLights level keeps the last state.
+        func lightsFor(_ m: Mon) -> Bool {
+            roomLights(reported: inp.lights, fromHA: inp.fromHA, last: inp.lastLights, hasNightLights: nightLightsLevel(levels(of: m, inp)) != nil)
+        }
         func ownTarget(_ m: Mon) -> Int {
             let lv = levels(of: m, inp)
-            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights,
-                          tuning: config.tuned, light: inp.light)
+            return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
+                          tuning: config.tuned, light: inp.light, nightLights: nightLightsLevel(lv))
         }
         // Sync: the first group member that is reporting leads, with its own target and hand-set offset;
         // the others follow the level it lands on, each at its link offset (a hand-set level of theirs is
@@ -683,7 +691,7 @@ import DaylitCore
                                         sunFallback: source == .homeAssistant && !inp.fromHA)
                 // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
                 recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
-                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: inp.lights,
+                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
                                        light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
                 })
             }
@@ -718,7 +726,8 @@ import DaylitCore
         }
         let leaderLabel = leader.map { mons[$0].label } ?? ""
         let next = LiveInputs(elev: inp.elev, pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels,
-                              offsets: offs, linked: linkedNow, leader: leaderLabel, applying: auto && here)
+                              offsets: offs, linked: linkedNow, leader: leaderLabel, applying: auto && here,
+                              lightsUsed: Dictionary(mons.map { ($0.uuid, lightsFor($0)) }, uniquingKeysWith: { a, _ in a }))
         if live != next { live = next }
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
@@ -757,6 +766,7 @@ import DaylitCore
             let keep = source == .homeAssistant   // a sun-only config uses its own levels
             var i = Inputs(elev: e, pos: keep ? lastHAPos ?? 100 : 100, lights: false, levels: keep ? lastHALevels : [:],
                            line: note ?? "Sun · " + where_, hasBlind: keep && lastHAPos != nil)
+            i.lastLights = keep ? lastHALights : nil   // a sun-only config has no lights
             if lightNow != nil {   // no reading: back to the sun's rule, gently
                 i.light = stepLight(toward: 1)
                 if config.homeAssistant?.light != nil { lightStatus = "Home Assistant is not answering: going back to the sun's height alone." }
@@ -789,6 +799,7 @@ import DaylitCore
                 lastHALevels = s.m.mapValues(fallbackLevels)
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
+                lastHALights = s.lights
                 if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
                 let sun = Int((daylightFraction(elevation: s.elev, tuning: config.tuned) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"

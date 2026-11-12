@@ -34,7 +34,7 @@ extension Daylit {
 
     /// A monitor's levels this tick: Home Assistant's where it gave one, else the local ones.
     func levels(of m: Mon, _ inp: Inputs) -> [Double] {
-        effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+        effectiveLevels(local: [m.day, m.blindDown, m.night] + (m.nightLights.map { [$0] } ?? []), fromHA: inp.levels[m.uuid])
     }
 
     /// The monitor's input_number for a level, when the source is Home Assistant and one is configured.

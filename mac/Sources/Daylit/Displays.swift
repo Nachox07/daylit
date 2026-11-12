@@ -128,6 +128,7 @@ struct Mon: Identifiable {
     let day, blindDown, night: Double
     let ha: MonitorHA?
     var contrast: Double? = nil   // config: fixed DDC contrast, written by Daylit.applyContrast
+    var nightLights: Double? = nil   // config: the level after sunset with the room lights on (nil: night + the lights boost)
     var contrastSet: Int? = nil   // written since this monitor was (re)detected (ContrastRule)
     var level: Double = 0
     var available = true
