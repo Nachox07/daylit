@@ -37,12 +37,17 @@ sealed class PushClient {
     bool awaitingPong;
     string? lastReason; DateTime? loggedAt;   // the once-then-every-10-minutes rule (HaErrorRule.ShouldLog)
     readonly PushTimer pending = new();
-    readonly DispatcherTimer retry = new(), ping = new(), pong = new(), tickTimer = new(), network = new();
+    readonly DispatcherTimer retry = new(), ping = new(), pong = new(), tickTimer = new(), network = new(), auth = new();
+    readonly Func<bool> onBattery;
+    readonly Func<double> daylightLimit;
 
-    public PushClient(Dispatcher ui, Action tick, Func<DateTime> lastTick, Func<string?> token) {
+    public PushClient(Dispatcher ui, Action tick, Func<DateTime> lastTick, Func<string?> token,
+                      Func<bool> onBattery, Func<double> daylightLimit) {
         this.ui = ui; this.tick = tick; this.lastTick = lastTick; this.token = token;
+        this.onBattery = onBattery; this.daylightLimit = daylightLimit;
+        auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout);
+        auth.Tick += (_, _) => { auth.Stop(); Lost("auth timeout", conn); };
         retry.Tick += (_, _) => { retry.Stop(); Open(); };
-        ping.Interval = TimeSpan.FromSeconds(PushRule.PingEvery);
         ping.Tick += (_, _) => SendPing();
         pong.Interval = TimeSpan.FromSeconds(PushRule.PongTimeout);
         pong.Tick += (_, _) => {
@@ -88,7 +93,13 @@ sealed class PushClient {
 
     void Open() {
         if (target is not { } t || stopped) return;
-        if (token() is not { } secret) {
+        var secret = token();
+        if (secret != null && string.IsNullOrWhiteSpace(secret)) {
+            // A credential is stored but came back empty: a failed read retries on the normal backoff.
+            Lost("token unreadable", ++conn);
+            return;
+        }
+        if (secret == null) {
             // The REST tick already shows "No Home Assistant token"; AskToken calls TokenChanged().
             Close(); stopped = true;
             Log.Write("push: no token stored, waiting for one");
@@ -99,6 +110,7 @@ sealed class PushClient {
         var source = new CancellationTokenSource();
         var gate = new SemaphoreSlim(1, 1);
         ws = socket; cts = source; sendGate = gate;
+        auth.Stop(); auth.Start();   // auth_ok must follow within PushRule.AuthTimeout
         _ = Run(socket, source.Token, gate, c, secret, t);
     }
 
@@ -152,6 +164,7 @@ sealed class PushClient {
         if (c != conn) return;
         switch (m.Kind) {
             case PushKind.AuthOk:
+                auth.Stop();
                 subscribeId = nextId++;
                 _ = SendOrLose(PushRule.SubscribeMessage(subscribeId, t.Entities), c);
                 break;
@@ -162,6 +175,7 @@ sealed class PushClient {
                 if (!m.Ok) { Lost("subscribe refused", c); break; }
                 SetHealthy(true);
                 Log.Write(PushRule.ConnectedLine(t.Entities.Length));
+                ping.Interval = TimeSpan.FromSeconds(PushRule.PingInterval(onBattery()));
                 ping.Start();
                 break;
             case PushKind.Event:
@@ -176,6 +190,7 @@ sealed class PushClient {
     void SendPing() {
         if (ws == null) return;
         awaitingPong = true;
+        ping.Interval = TimeSpan.FromSeconds(PushRule.PingInterval(onBattery()));   // battery may have changed since the last ping
         _ = SendOrLose(PushRule.PingMessage(nextId++), conn);
         pong.Stop(); pong.Start();
     }
@@ -183,7 +198,7 @@ sealed class PushClient {
     void Request(IReadOnlySet<string> ids, Target t) {
         double now = Secs(DateTime.UtcNow);
         var last = lastTick();
-        var d = PushRule.Decide(ids, t.Entities.ToHashSet(), t.Daylight, last == DateTime.MinValue ? null : (double?)Secs(last), now);
+        var d = PushRule.Decide(ids, t.Entities.ToHashSet(), t.Daylight, last == DateTime.MinValue ? null : (double?)Secs(last), now, daylightLimit());
         if (!pending.Add(d, now) || pending.Due is not double due) return;
         tickTimer.Stop();
         tickTimer.Interval = TimeSpan.FromSeconds(Math.Max(0.01, due - now));
@@ -218,7 +233,7 @@ sealed class PushClient {
         cts?.Cancel(); cts = null;   // not disposed: the receive loop may still hold its token
         try { ws?.Abort(); ws?.Dispose(); } catch { }
         ws = null; sendGate = null;
-        retry.Stop(); ping.Stop(); pong.Stop(); tickTimer.Stop();
+        retry.Stop(); ping.Stop(); pong.Stop(); tickTimer.Stop(); auth.Stop();
         pending.Clear();
         SetHealthy(false);
     }

@@ -224,13 +224,43 @@ public class PushDecisionTests {
 
 public class PushTimerTests {
     [Fact]
-    public void ABurstRunsOneTick() {
+    public void ABurstRunsOneTickAndEachChangeExtendsTheWindow() {
         var t = new PushTimer();
         Assert.True(t.Add(PushTick.Now, 100));
         Assert.Equal((double?)101, t.Due);
-        Assert.False(t.Add(PushTick.Now, 100.3));
-        Assert.False(t.Add(PushTick.Now, 100.9));
+        Assert.True(t.Add(PushTick.Now, 100.3));
+        Assert.Equal(101.3, t.Due!.Value, 9);
+        Assert.True(t.Add(PushTick.Now, 100.9));
+        Assert.Equal(101.9, t.Due!.Value, 9);
+    }
+
+    [Fact]
+    public void ASingleChangeTicksAfterOneSecond() {
+        var t = new PushTimer();
+        t.Add(PushTick.Now, 100);
         Assert.Equal((double?)101, t.Due);
+    }
+
+    [Fact]
+    public void TheWindowIsCappedAtThreeSecondsAfterTheFirstChange() {
+        var t = new PushTimer();
+        t.Add(PushTick.Now, 100);
+        t.Add(PushTick.Now, 100.8); t.Add(PushTick.Now, 101.6); t.Add(PushTick.Now, 102.4);
+        Assert.Equal(103, t.Due!.Value, 9);
+        Assert.False(t.Add(PushTick.Now, 102.9));
+        Assert.Equal(103, t.Due!.Value, 9);
+    }
+
+    [Fact]
+    public void AStreamOverFiveSecondsTicksAtMostEveryThreeSeconds() {
+        var t = new PushTimer(); var fired = new List<double>();
+        for (double now = 100; now < 105; now += 0.5) {
+            t.Add(PushTick.Now, now);
+            if (t.Due is double d && d <= now + 0.5) { fired.Add(d); t.Clear(); }
+        }
+        Assert.Equal(103, fired[0], 9);
+        for (int i = 1; i < fired.Count; i++) Assert.True(fired[i] - fired[i - 1] >= 1);
+        Assert.True(fired.Count <= 2);
     }
 
     [Fact]
@@ -279,6 +309,26 @@ public class PushTimingTests {
     [Fact]
     public void ALongerConfiguredPollIsKeptWhileHealthy() =>
         Assert.Equal(900, PushRule.PollInterval(true, true, new Tuning { Timing = new() { BatteryPollSeconds = 900 } }));
+
+    [Fact]
+    public void TheDaylightLimitIsTheNormalPollIntervalWhenLongerThanAMinute() {
+        var mains = PushRule.DaylightLimit(false, new Tuning());
+        var battery = PushRule.DaylightLimit(true, new Tuning());
+        Assert.Equal(60, mains);
+        Assert.Equal(120, battery);
+        var subscribed = new HashSet<string> { "sensor.solar", "light.room" };
+        Assert.Equal(PushTick.After(110), PushRule.Decide(["sensor.solar"], subscribed, "sensor.solar", 1000, 1010, battery));
+        Assert.Equal(PushTick.Now, PushRule.Decide(["sensor.solar"], subscribed, "sensor.solar", 1000, 1120, battery));
+    }
+
+    [Fact]
+    public void PingIsEveryTwoMinutesOnBatteryAndEveryMinuteOnMains() {
+        Assert.Equal(60, PushRule.PingInterval(false));
+        Assert.Equal(120, PushRule.PingInterval(true));
+    }
+
+    [Fact]
+    public void AuthHasTenSecondsToComplete() => Assert.Equal(10, PushRule.AuthTimeout);
 
     [Fact]
     public void TheSocketIsOpenOnlyWhenEverythingAllowsIt() {

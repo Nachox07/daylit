@@ -31,6 +31,12 @@ static class PushRule {
     public const double HealthyPollSeconds = 300;
     /// An application ping this often; no pong within PongTimeout means the connection is gone.
     public const double PingEvery = 60, PongTimeout = 10;
+    /// Home Assistant's own protocol ping is answered by the system and cannot be seen by the app, so it does not tell
+    /// Daylit the link is dead; our ping does. On battery it runs half as often, to wake the PC less.
+    public static double PingInterval(bool onBattery) => onBattery ? 2 * PingEvery : PingEvery;
+    /// auth_ok must arrive this many seconds after connecting (auth_required, the auth message and the answer), or the
+    /// connection counts as lost.
+    public const double AuthTimeout = 10;
     /// Waits before each reconnect attempt; the last one repeats.
     public static readonly double[] Backoff = [2, 5, 15, 60];
 
@@ -97,16 +103,21 @@ static class PushRule {
 
     /// Whether these changes need a tick. `daylight` is homeAssistant.light; `lastTick` is when the last tick ran
     /// (Unix seconds; any tick reads the daylight sensor too).
-    public static PushTick Decide(IEnumerable<string> changed, IReadOnlySet<string> subscribed, string? daylight, double? lastTick, double now) {
+    public static PushTick Decide(IEnumerable<string> changed, IReadOnlySet<string> subscribed, string? daylight, double? lastTick, double now,
+                                  double every = DaylightEvery) {
         var relevant = changed.Where(subscribed.Contains).ToHashSet();
         if (relevant.Count == 0) return PushTick.Ignore;
         if (daylight != null && relevant.Count == 1 && relevant.Contains(daylight)) {
             if (lastTick is not double last) return PushTick.Now;
-            double wait = DaylightEvery - (now - last);
+            double wait = every - (now - last);
             return wait <= 0 ? PushTick.Now : PushTick.After(wait);
         }
         return PushTick.Now;
     }
+
+    /// How often the daylight sensor alone may tick: a minute, or the normal poll interval when that is longer
+    /// (battery: BatteryPollSeconds), so push never ticks more than polling would on battery.
+    public static double DaylightLimit(bool onBattery, Tuning t) => Math.Max(DaylightEvery, onBattery ? t.BatteryPollSeconds : t.PollSeconds);
 
     /// The wait before reconnect attempt `attempt` (0 = the first after a drop).
     public static double RetryDelay(int attempt) => Backoff[Math.Clamp(attempt, 0, Backoff.Length - 1)];
@@ -131,22 +142,33 @@ static class PushRule {
     public const string RejectedProblem = "Home Assistant rejected the token (push updates)";
 }
 
-/// The one pending push tick. A change asks for a tick in 1 s; more changes before it fires join it, so a burst
-/// runs one tick. A daylight-only change waits for its limit, unless a tick is already due.
+/// The one pending push tick. A change asks for a tick in 1 s; each further change before it fires pushes it back
+/// to 1 s after that change (a real debounce), but never later than 3 s after the first change, so a steady stream
+/// still ticks every 3 s. A daylight-only change waits for its limit, unless a tick is already due.
 sealed class PushTimer {
+    public const double MaxWait = 3;
     public double? Due { get; private set; }
+    double first;
+    bool immediate;   // the pending tick is a debounce window, not a daylight wait
     /// Adds a request; true when Due moved, so the caller restarts its timer.
     public bool Add(PushTick t, double now) {
-        double at;
         switch (t.Kind) {
             case PushTickKind.Ignore: return false;
-            case PushTickKind.Now: at = now + PushRule.Debounce; break;
-            default: at = now + Math.Max(t.Seconds, PushRule.Debounce); break;
+            case PushTickKind.Now:
+                if (immediate && Due is double d) {
+                    double at = Math.Min(now + PushRule.Debounce, first + MaxWait);
+                    if (at <= d) return false;
+                    Due = at; return true;
+                }
+                first = now; immediate = true; Due = now + PushRule.Debounce;
+                return true;
+            default:
+                double later = now + Math.Max(t.Seconds, PushRule.Debounce);
+                if (Due is double due && due <= later) return false;
+                if (Due == null) { first = now; immediate = false; }
+                Due = later; return true;
         }
-        if (Due is double due && due <= at) return false;
-        Due = at;
-        return true;
     }
     /// The timer fired (or the socket closed): nothing pending.
-    public void Clear() => Due = null;
+    public void Clear() { Due = null; immediate = false; }
 }

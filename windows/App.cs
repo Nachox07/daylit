@@ -127,9 +127,9 @@ sealed partial class Controller {
         SystemEvents.PowerModeChanged += OnPower;
         SystemEvents.DisplaySettingsChanged += OnDisplays;
         SystemEvents.UserPreferenceChanged += OnPrefs;
-        NetworkChange.NetworkAddressChanged += OnNetwork;
 
-        push = new PushClient(ui, () => _ = Tick("push"), () => lastTick, () => HAClient.Token);
+        push = new PushClient(ui, () => _ = Tick("push"), () => lastTick, () => HAClient.Token ?? Cred.Read(Cfg.TokenName),   // a failed read at Load is retried here
+                              () => Win.OnBattery, () => PushRule.DaylightLimit(Win.OnBattery, Cfg.Tuned));
         push.HealthChanged += StartTimers;
         StartTimers();
         _ = Tick("start");
@@ -194,7 +194,7 @@ sealed partial class Controller {
     public void Quit() {
         timer.Stop(); idleWatch.Stop();
         if (push is { } p) { p.HealthChanged -= StartTimers; p.Update(null); push = null; }   // closing must not restart the timers or reopen
-        NetworkChange.NetworkAddressChanged -= OnNetwork;
+        WatchNetwork(false);
         SystemEvents.PowerModeChanged -= OnPower;
         SystemEvents.DisplaySettingsChanged -= OnDisplays;
         SystemEvents.UserPreferenceChanged -= OnPrefs;
@@ -219,9 +219,19 @@ sealed partial class Controller {
         if (push == null) return;
         if (!PushRule.Wanted(Cfg.HomeAssistant?.Push, Source, Paused, AutoOn, Mons.Count > 0) || PushRule.SocketUrl(Cfg.HomeAssistant?.Url) is not { } url) {
             push.Update(null);
+            WatchNetwork(false);
             return;
         }
+        WatchNetwork(true);
         push.Update(new PushClient.Target(url, PushRule.Entities(Cfg), Cfg.HomeAssistant!.Light), force);
+    }
+
+    bool watchingNetwork;
+    /// Listen to network changes only while push has a target.
+    void WatchNetwork(bool on) {
+        if (on == watchingNetwork) return;
+        watchingNetwork = on;
+        if (on) NetworkChange.NetworkAddressChanged += OnNetwork; else NetworkChange.NetworkAddressChanged -= OnNetwork;
     }
 
     // NetworkChange raises on a thread-pool thread.
