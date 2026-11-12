@@ -149,7 +149,7 @@ struct SettingsView: View {
     @State private var daylightSensor = ""
     @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
     @State private var themeRoom = true
-    @State private var opened: Data? = nil
+    @State private var opened: ConfigLocation.Opened = .file(nil)
     @State private var error: String? = nil
     @State private var note: String? = nil
     @State private var testing = false
@@ -512,7 +512,7 @@ struct SettingsView: View {
     }
 
     func load() {
-        opened = try? Data(contentsOf: path)
+        opened = ConfigLocation.open(at: path)
         let (c, _) = Config.load(from: path)
         let (src, _) = c.resolvedSource()
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
@@ -529,8 +529,8 @@ struct SettingsView: View {
                                 haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil,
                                 contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "")
         }
-        error = nil
-        note = opened.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
+        error = opened.blockedReason   // an evicted or unreadable file shows defaults here; save() refuses until it reads
+        note = opened.data.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
     }
 
     func edit() -> SettingsEdit? {
@@ -568,14 +568,19 @@ struct SettingsView: View {
     func save() {
         guard let e = edit() else { return }
         let p = path
-        let now = try? Data(contentsOf: p)
+        let now = ConfigLocation.open(at: p)
+        if let why = now.blockedReason {
+            opened = now   // when the file arrives, the next Save reloads the window first
+            error = why + "; nothing was saved"
+            return
+        }
         if now != opened {
             load()
             error = "config.json changed while this window was open. It now shows the new file; check it and save again."
             return
         }
         do {
-            let out = try ConfigPatch.apply(e, to: now)
+            let out = try ConfigPatch.apply(e, to: now.data)
             try FileManager.default.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
             try out.write(to: p, options: .atomic)
             Log.write("settings: saved config.json (source=\(e.source))")

@@ -67,6 +67,31 @@ public struct ConfigLocation {
         /// iCloud Drive has the file but not on this Mac yet.
         case downloading
         case unreadable(String)
+
+        /// What to show the user.
+        public var message: String {
+            switch self {
+            case .downloading: return "config.json is still downloading from iCloud Drive"
+            case .unreadable(let why): return "config.json could not be read (\(why))"
+            }
+        }
+    }
+
+    /// What a window that edits the file saw when it looked: the bytes (nil: no file), or why it could not
+    /// look. Two looks compare equal only when nothing changed, and a blocked look never equals a file,
+    /// so the window notices when an evicted file has arrived.
+    public enum Opened: Equatable {
+        case file(Data?)
+        case blocked(String)
+
+        public var data: Data? { if case .file(let d) = self { return d }; return nil }
+        public var blockedReason: String? { if case .blocked(let r) = self { return r }; return nil }
+    }
+
+    public static func open(at url: URL) -> Opened {
+        do { return .file(try dataForPatch(at: url)) }
+        catch let e as ReadError { return .blocked(e.message) }
+        catch { return .blocked(ReadError.unreadable(error.localizedDescription).message) }
     }
 
     /// The config's bytes for a read-modify-write: nil only when there is no file at all. An evicted
