@@ -707,6 +707,7 @@ import DaylitCore
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
+        await updateSuggestion(inp)
     }
 
     func saveHolds() {

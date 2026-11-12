@@ -54,3 +54,97 @@ extension Daylit {
         return await HAClient.numberStep(ha, e)
     }
 }
+
+extension Daylit {
+    /// At the end of a tick: works the suggestion out again when something changed. The first monitor with
+    /// one is shown; the next shows after it is handled.
+    func updateSuggestion(_ inp: Inputs) async {
+        var current: [String: [Double]] = [:]
+        for m in mons { current[m.uuid] = levels(of: m, inp) }
+        if current != suggestLevels || inp.fromHA != suggestFromHA { suggestDirty = true }
+        guard suggestDirty else { return }
+        suggestDirty = false; suggestLevels = current; suggestFromHA = inp.fromHA
+        let now = Date().timeIntervalSince1970
+        // A monitor whose Home Assistant levels are unavailable this tick (Home Assistant down, or a helper
+        // reads below 0) is left out of `current`: dropStale keeps the samples of monitors it does not know,
+        // so they are not deleted for good just because the local levels stand in for a while.
+        var known = current
+        for m in mons where haLevelsUnavailable(of: m, inp) { known[m.uuid] = nil }
+        let kept = Suggest.dropOld(Suggest.dropStale(corrections, current: known), now: now)
+        if kept != corrections { corrections = kept; saveCorrections() }
+        let gen = generation
+        var found: Suggestion?
+        for m in mons where kept.contains(where: { $0.monitor == m.uuid }) {
+            guard let lv = current[m.uuid] else { continue }
+            var steps: [NumberStep?] = []
+            for l in Level.allCases { steps.append(await step(for: l, of: m, inp)) }
+            guard gen == generation else { suggestDirty = true; return }   // displays changed meanwhile
+            if let s = Suggest.suggestion(monitor: m.uuid, samples: kept, levels: lv, steps: steps, now: now,
+                                          dismissedUntil: suggestDismissed[m.uuid], tuning: config.tuned) {
+                found = s; break
+            }
+        }
+        guard found != suggestion else { return }
+        if let f = found, let m = mons.first(where: { $0.uuid == f.monitor }) { Log.write(f.logLine(label: m.label)) }
+        suggestion = found
+    }
+
+    /// Apply: writes each proposed level (its input_number in Home Assistant, or the local level in
+    /// config.json), then clears the monitor's hand-set offset, which would otherwise be applied again on
+    /// top of the new level. A failed write keeps the ones that worked and shows in the problem line.
+    func applySuggestion() async {
+        guard let sg = suggestion, let m = mons.first(where: { $0.uuid == sg.monitor }) else { return }
+        suggestion = nil; suggestError = nil
+        var local: [String: Int] = [:]
+        var failed: [String] = []
+        for c in sg.changes {
+            if let e = haEntity(c.level, of: m), let ha = config.homeAssistant {
+                if case .failure(let f) = await HAClient.setNumber(ha, e, c.to) { failed.append("\(e) failed: \(HAClient.describe(f, ha))") }
+            } else {
+                local[c.level.key] = Int(c.to.rounded())
+            }
+        }
+        var wroteFile = false
+        if !local.isEmpty {
+            let p = Config.path
+            do {
+                let original = try? Data(contentsOf: p)
+                if let d = original, ConfigText.hasComments(d) {
+                    throw ConfigEditError.invalid("it has comments, which saving would remove; set the level in Settings instead")
+                }
+                let out = try ConfigPatch.setLevels(local, display: m.name, suggestedMatch: CLI.suggestMatch(m.name), in: original)
+                try FileManager.default.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try out.write(to: p, options: .atomic)
+                wroteFile = true
+            } catch ConfigEditError.invalid(let why) {
+                failed.append("config.json failed: " + why.replacingOccurrences(of: "config.json: ", with: ""))
+            } catch ConfigEditError.notAnObject {
+                failed.append("config.json failed: it is not a JSON object")
+            } catch {
+                failed.append("config.json failed: \(error.localizedDescription)")
+            }
+        }
+        if let i = mons.firstIndex(where: { $0.uuid == sg.monitor }) {
+            let cleared = Suggest.afterApply(HoldState(lastSet: mons[i].lastSet, lastTarget: mons[i].lastTarget, offset: mons[i].offset,
+                                                       offsetSun: mons[i].offsetSun, offsetAt: mons[i].offsetAt))
+            mons[i].lastSet = cleared.lastSet; mons[i].offset = cleared.offset; mons[i].offsetSun = cleared.offsetSun
+            mons[i].offsetAt = cleared.offsetAt; mons[i].manual = false
+        }
+        recorder.drop(sg.monitor)
+        for f in failed { Log.write("suggest: \(m.label) \(f)") }
+        if failed.isEmpty { Log.write("suggest: \(m.label) applied") }
+        else { suggestError = "Could not apply the suggestion: " + failed.joined(separator: "; ") }
+        suggestDirty = true
+        if wroteFile { reload() } else { refresh() }   // reload: the new local level is in the file now
+    }
+
+    /// Not now: no suggestion for this monitor for 7 days, remembered across restarts.
+    func dismissSuggestion() {
+        guard let sg = suggestion else { return }
+        suggestDismissed[sg.monitor] = Date().timeIntervalSince1970 + Suggest.notNow
+        UserDefaults.standard.set(suggestDismissed, forKey: "suggestDismissed")
+        Log.write("suggest: \(mons.first { $0.uuid == sg.monitor }?.label ?? "a monitor") not now")
+        suggestion = nil; suggestError = nil; suggestDirty = true
+        refresh()
+    }
+}
