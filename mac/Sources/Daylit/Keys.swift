@@ -178,14 +178,14 @@ final class Keys {
     }
 
     /// Tries new shortcuts live. Returns what is taken ("brightness", "light/dark"); empty means saved.
-    /// On failure the saved ones come back.
+    /// On failure nothing stays registered; the shortcuts window re-registers the saved ones when it closes.
     func apply(_ u: Combo, _ d: Combo, _ t: Combo) -> [String] {
         unregister()
         var taken: [String] = []
         if !register(u, d) { taken.append("brightness") }
         if !registerTheme(t) { taken.append("light/dark") }
         if taken.isEmpty { up = u; down = d; theme = t; ok = true; themeOk = true; save(); Log.write("hotkeys: \(pairText), \(theme.text) (light/dark)"); return [] }
-        registerAll(log: false)
+        unregister()   // the window is still open: re-recording the old combination must record, not fire
         return taken
     }
 }

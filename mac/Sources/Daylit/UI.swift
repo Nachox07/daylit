@@ -135,8 +135,9 @@ struct Panel: View {
     /// Shown on hover over a slider instead of a paragraph in the panel.
     var keysHint: String {
         let k = HotKeys.shared
-        return k.ok ? "Brightness keys or \(k.pairText) change the screen with the active window. Add ⇧ (⌥⇧ with brightness keys) for fine steps."
-                    : "\(k.pairText) are taken by another app; change them in the gear menu. Brightness keys still work (⌥⇧ for fine steps)."
+        let base = k.ok ? "Brightness keys or \(k.pairText) change the screen with the active window. Add ⇧ (⌥⇧ with brightness keys) for fine steps."
+                        : "\(k.pairText) are taken by another app; change them in the gear menu. Brightness keys still work (⌥⇧ for fine steps)."
+        return k.themeOk ? base : base + " \(k.theme.text) (light/dark) is taken by another app; change it in the gear menu."
     }
 
     func note(_ mon: Mon, usable: Bool, unknown: Bool) -> String? {
@@ -303,7 +304,7 @@ struct ShortcutsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Click a box and press the new combination.")
-            Text("They change the screen with the active window. Hold ⇧ as well for steps of 1. The brightness keys keep working.")
+            Text("Brighter and Dimmer change the screen with the active window; hold ⇧ as well for steps of 1. The brightness keys keep working. The third one switches light and dark mode.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow { Text("Brighter"); box(0, up) }
@@ -344,7 +345,10 @@ struct ShortcutsView: View {
         stop(); recording = i; error = nil
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             let f = e.modifierFlags
-            if f.contains(.shift) { error = "Leave ⇧ out: it is added automatically for steps of 1."; return nil }
+            if f.contains(.shift) {
+                error = recording == 2 ? "Leave ⇧ out: Brighter and Dimmer use it for steps of 1." : "Leave ⇧ out: it is added automatically for steps of 1."
+                return nil
+            }
             if !f.contains(.control) && !f.contains(.command) { error = "Use ⌃ or ⌘ with the key, so it does not clash with typing."; return nil }
             var mods: UInt32 = 0
             if f.contains(.control) { mods |= UInt32(controlKey) }

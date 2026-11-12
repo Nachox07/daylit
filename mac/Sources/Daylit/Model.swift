@@ -413,7 +413,7 @@ import DaylitCore
 
     /// Manual switch; it stays until the automatic decision next changes.
     func toggleDark() {
-        if let e = Appearance.setDark(!Appearance.isDark) { problem = e }
+        if let e = Appearance.setDark(!Appearance.isDark) { problem = e; Log.write("theme: " + e) }
         Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); self.dark = Appearance.isDark }
     }
 
