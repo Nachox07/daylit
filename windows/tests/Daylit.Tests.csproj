@@ -14,6 +14,7 @@
     <Compile Include="../Config.cs" Link="App/Config.cs" />
     <Compile Include="../Light.cs" Link="App/Light.cs" />
     <Compile Include="../Suggest.cs" Link="App/Suggest.cs" />
+    <Compile Include="../Push.cs" Link="App/Push.cs" />
     <None Include="../../config.example.json" Link="config.example.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

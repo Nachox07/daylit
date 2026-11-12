@@ -22,6 +22,7 @@ sealed class HaConfig {
     public string? Cover { get; set; }
     public string? Lights { get; set; }
     public string? Light { get; set; }        // optional outdoor light sensor (solar power W, or lux): a cloudy day dims the monitors
+    public bool? Push { get; set; }           // experimental: Home Assistant says when something changed (Push.cs); default off
 }
 
 sealed class MonitorHa {
