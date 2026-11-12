@@ -11,13 +11,13 @@ public struct HAState: Decodable {
     public let light: Double?               // the light sensor's reading; -1 / missing = none or not a number
     public let lightAge: Double?            // seconds since it last reported
     public let lightUnit: String?           // its unit_of_measurement (W, kW, lx…); nil when unknown
-    /// Per display UUID: [day, blindDown, night, set, setChanged]; -1 = use the local value / no set helper;
+    /// Per display UUID: [day, blindDown, night, nightLights, set, setChanged]; -1 = use the local value / no set helper;
     /// setChanged is the set helper's last_changed (Unix seconds).
     public let m: [String: [Double]]
 
     /// nil when the answer is not what the template produces (e.g. a wrong entity id broke the JSON).
     public static func parse(_ d: Data) -> HAState? {
-        guard let s = try? JSONDecoder().decode(HAState.self, from: d), s.m.values.allSatisfy({ $0.count == 5 }) else { return nil }
+        guard let s = try? JSONDecoder().decode(HAState.self, from: d), s.m.values.allSatisfy({ $0.count == 6 }) else { return nil }
         return s
     }
 }
@@ -30,7 +30,7 @@ public enum HATemplate {
         let ha = HAConfig(url: ha0.url, tokenName: ha0.tokenName, autoSwitch: ok(ha0.autoSwitch), sun: ok(ha0.sun),
                           cover: ok(ha0.cover), lights: ok(ha0.lights), light: ok(ha0.light))
         let mons = mons0.map { m in (uuid: m.uuid, ha: m.ha.map { MonitorHA(sensor: ok($0.sensor), day: ok($0.day), blindDown: ok($0.blindDown),
-                                                                              night: ok($0.night), set: ok($0.set)) }) }
+                                                                              night: ok($0.night), set: ok($0.set), nightLights: ok($0.nightLights)) }) }
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(-1)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
         let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null
@@ -41,10 +41,10 @@ public enum HATemplate {
         let lightUnit = ha.light.map { "{{ state_attr('\($0)','unit_of_measurement') | tojson }}" } ?? "null"
         let lightAge = ha.light.map { "{{ (now() - states['\($0)'].last_updated).total_seconds() | round(0) if states['\($0)'] else -1 }}" } ?? "-1"
         let m = mons.compactMap { mon -> String? in
-            guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil else { return nil }
+            guard let h = mon.ha, h.day != nil || h.blindDown != nil || h.night != nil || h.set != nil || h.nightLights != nil else { return nil }
             // states['…'] is None when the entity is missing, so a typo gives "no set helper", not an error.
             let set = h.set.map { "\(num($0)), {{ as_timestamp(states['\($0)'].last_changed) if states['\($0)'] else 0 }}" } ?? "-1, 0"
-            return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night)), \(set)]"
+            return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night)), \(num(h.nightLights)), \(set)]"
         }.joined(separator: ", ")
         return """
         {"elev": {{ state_attr('\(ha.sun ?? "sun.sun")','elevation') | float(-10) }},

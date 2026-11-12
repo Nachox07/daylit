@@ -177,3 +177,32 @@ final class NightLightsConfigTests: XCTestCase {
         XCTAssertEqual(m["nightLights"] as? Int, 100)
     }
 }
+
+final class NightLightsHomeAssistantTests: XCTestCase {
+    func testTheTemplateAsksForTheHelperAsTheFourthNumber() {
+        let t = HATemplate.build(HAConfig(url: "http://x"), [("U", MonitorHA(nightLights: "input_number.lit"))])
+        XCTAssertTrue(t.contains(#""U": [-1, -1, -1, {{ states('input_number.lit') | float(-1) }}, -1, 0]"#), t)
+    }
+    func testAMonitorWithoutTheHelperGetsMinusOneThere() {
+        let t = HATemplate.build(HAConfig(url: "http://x"), [("U", MonitorHA(day: "input_number.d"))])
+        XCTAssertTrue(t.contains(#""U": [{{ states('input_number.d') | float(-1) }}, -1, -1, -1, -1, 0]"#), t)
+    }
+    func testABadHelperIdIsDroppedFromTheTemplate() {
+        let t = HATemplate.build(HAConfig(url: "http://x"), [("U", MonitorHA(day: "input_number.d", nightLights: "input_number.x'}}"))])
+        XCTAssertFalse(t.contains("input_number.x"))
+    }
+    func testTheAnswerHasSixNumbersPerMonitor() {
+        let ok = #"{"elev": 1, "pos": 1, "lights": true, "auto": null, "bri": 0, "sat": 0, "m": {"U": [80, 40, 20, 72, -1, 0]}}"#
+        XCTAssertEqual(HAState.parse(Data(ok.utf8))?.m["U"], [80, 40, 20, 72, -1, 0])
+        let old = #"{"elev": 1, "pos": 1, "lights": true, "auto": null, "bri": 0, "sat": 0, "m": {"U": [80, 40, 20, -1, 0]}}"#
+        XCTAssertNil(HAState.parse(Data(old.utf8)))
+    }
+    func testTheSunFallbackKeepsNightLightsButNotTheSetHelper() {
+        let row: [Double] = [94, 60, 30, 72, 55, 1_700_000_000]
+        let kept = fallbackLevels(row)
+        XCTAssertEqual(kept, [94, 60, 30, 72])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: kept), [94, 60, 30, 72])
+        XCTAssertEqual(RemoteSet(row: row), RemoteSet(value: 55, changed: 1_700_000_000))
+        XCTAssertNil(RemoteSet(row: kept))
+    }
+}

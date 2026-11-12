@@ -56,19 +56,19 @@ public func roomLights(reported: Bool, fromHA: Bool, last: Bool?, hasNightLights
     return hasNightLights ? last ?? false : false
 }
 
-/// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night]. The "set" helper
-/// is dropped, so an old remote value is never replayed while Home Assistant is down.
-public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(3)) }
+/// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night, nightLights]. The "set"
+/// helper is dropped, so an old remote value is never replayed while Home Assistant is down.
+public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(4)) }
 
 /// A value of a monitor's Home Assistant "set" helper and when it last changed (Unix seconds).
 public struct RemoteSet: Equatable {
     public var value: Double
     public var changed: Double
     public init(value: Double, changed: Double) { self.value = value; self.changed = changed }
-    /// From the template's per-monitor row [day, blindDown, night, set, setChanged]; nil without a helper.
+    /// From the template's per-monitor row [day, blindDown, night, nightLights, set, setChanged]; nil without a helper.
     public init?(row: [Double]?) {
-        guard let r = row, r.count == 5, r[3] >= 0, r[4] > 0 else { return nil }
-        value = r[3]; changed = r[4]
+        guard let r = row, r.count == 6, r[4] >= 0, r[5] > 0 else { return nil }
+        value = r[4]; changed = r[5]
     }
 }
 
