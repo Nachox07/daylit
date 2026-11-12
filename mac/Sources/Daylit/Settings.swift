@@ -453,7 +453,8 @@ struct SettingsView: View {
         let snapshot = Self.fixedNow != nil
         return BrightnessChart(latitude: l.0, longitude: l.1, now: Self.now,
                                timeZone: snapshot ? TimeZone(identifier: "UTC")! : .current,   // snapshots: the same on every machine
-                               monitors: monitors.map { ChartMonitor(id: $0.id, label: $0.label.isEmpty ? $0.name : $0.label, day: $0.day, blindDown: $0.blindDown, night: $0.night) },
+                               monitors: monitors.map { ChartMonitor(id: $0.id, label: $0.label.isEmpty ? $0.name : $0.label, day: $0.day, blindDown: $0.blindDown, night: $0.night,
+                                                                    nightLights: nightLightsValue($0)) },
                                hasBlind: source == "homeAssistant" && !cover.trimmingCharacters(in: .whitespaces).isEmpty,
                                tuning: t, live: snapshot ? nil : m.live,
                                set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) })
@@ -519,6 +520,10 @@ struct SettingsView: View {
 
     /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
     var showsNightLights: Bool { source == "homeAssistant" && !lights.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// The typed "Lights on" level, while its row shows; nil when empty or not a level.
+    func nightLightsValue(_ d: MonitorDraft) -> Double? {
+        showsNightLights ? ContrastRule.parseField(d.nightLights).value.map(Double.init) : nil
+    }
     static let nightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost."
 
     func caption(_ d: MonitorDraft) -> String {

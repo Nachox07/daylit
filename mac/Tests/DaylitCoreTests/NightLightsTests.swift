@@ -262,3 +262,25 @@ final class FieldUnchangedTests: XCTestCase {
         XCTAssertFalse(ContrastRule.parseField("x", unchangedFrom: "72.5").ok)
     }
 }
+
+final class NightLightsExplainTests: XCTestCase {
+    func testTheLightsStepShowsTheLightsOnLevel() {
+        let d = explain(day: 95, blindDown: 62, night: 60, elev: -10, pos: 100, lights: true, nightLights: 80)
+        XCTAssertEqual(d.level, 80)
+        XCTAssertEqual(d.steps.first { $0.title == "Lights" }?.value, "on → 80")
+    }
+    func testLightsOffShowOffUntilTheSunIsFullyUp() {
+        XCTAssertEqual(explain(day: 95, blindDown: 62, night: 60, elev: 5, pos: 100, lights: false, nightLights: 80)
+                        .steps.first { $0.title == "Lights" }?.value, "off")
+        XCTAssertEqual(explain(day: 95, blindDown: 62, night: 60, elev: 30, pos: 100, lights: false, nightLights: 80)
+                        .steps.first { $0.title == "Lights" }?.value, "no effect by day")
+    }
+    func testTheLevelEqualsTheTarget() {
+        for e in stride(from: -8.0, through: 20, by: 0.5) {
+            for lights in [false, true] {
+                XCTAssertEqual(explain(day: 95, blindDown: 62, night: 60, elev: e, pos: 40, lights: lights, light: 0.7, nightLights: 80).level,
+                               target(day: 95, blindDown: 62, night: 60, elev: e, pos: 40, lights: lights, light: 0.7, nightLights: 80))
+            }
+        }
+    }
+}
