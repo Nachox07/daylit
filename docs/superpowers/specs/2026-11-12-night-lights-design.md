@@ -49,7 +49,7 @@ Then, in every case, clamp to 0–100 and round, as now.
 Example (day 95, blind down 62, night 60, nightLights 80):
 
 - cloudy morning (`s` 0.5), blind 40% → 68
-- blind 58% → 70
+- blind 58% → 71
 - blind open, `s` 0.55 → 79
 - dark evening with the lights on → 80
 
