@@ -103,3 +103,30 @@ final class SuggestFitTests: XCTestCase {
         XCTAssertLessThanOrEqual(f[0], 100)
     }
 }
+
+final class SuggestRoundingTests: XCTestCase {
+    func testALocalLevelRoundsToAWholeNumber() {
+        XCTAssertEqual(Suggest.roundToStep(61.42, .whole), 61)
+        XCTAssertEqual(Suggest.roundToStep(61.5, .whole), 62)
+        XCTAssertEqual(Suggest.roundToStep(-3, .whole), 0)
+        XCTAssertEqual(Suggest.roundToStep(104, .whole), 100)
+    }
+
+    func testAHomeAssistantLevelRoundsToItsStepInsideItsRange() {
+        let st = NumberStep(min: 10, max: 90, step: 5)
+        XCTAssertEqual(Suggest.roundToStep(62.4, st), 60)
+        XCTAssertEqual(Suggest.roundToStep(63, st), 65)
+        XCTAssertEqual(Suggest.roundToStep(3, st), 10)
+        XCTAssertEqual(Suggest.roundToStep(97, st), 90)
+        XCTAssertEqual(Suggest.roundToStep(61.3, NumberStep(min: 0, max: 100, step: 0.5)), 61.5)
+        XCTAssertEqual(Suggest.roundToStep(120, NumberStep(min: 0, max: 255, step: 1)), 100)   // never above 100
+    }
+
+    func testTheStepIsReadFromTheEntityAttributes() {
+        let d = Data(#"{"entity_id": "input_number.x", "state": "62.0", "attributes": {"min": 10, "max": 90, "step": 5, "mode": "slider"}}"#.utf8)
+        XCTAssertEqual(NumberStep.parse(d), NumberStep(min: 10, max: 90, step: 5))
+        XCTAssertNil(NumberStep.parse(Data(#"{"state": "62.0", "attributes": {"min": 0}}"#.utf8)))
+        XCTAssertNil(NumberStep.parse(Data(#"{"state": "62.0", "attributes": {"min": 0, "max": 100, "step": 0}}"#.utf8)))
+        XCTAssertNil(NumberStep.parse(Data("not json".utf8)))
+    }
+}

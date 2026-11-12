@@ -94,3 +94,32 @@ extension Suggest {
         return (0..<n).map { b[$0] / a[$0][$0] }
     }
 }
+
+/// The values a level can be stored as. A Home Assistant input_number has its own min, max and step;
+/// a local level is a whole number 0–100.
+public struct NumberStep: Equatable {
+    public var min: Double
+    public var max: Double
+    public var step: Double
+    public init(min: Double, max: Double, step: Double) { self.min = min; self.max = max; self.step = step }
+    public static let whole = NumberStep(min: 0, max: 100, step: 1)
+
+    /// From the answer to GET /api/states/<input_number>: its min, max and step attributes. nil when one is missing.
+    public static func parse(_ d: Data) -> NumberStep? {
+        guard let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let a = o["attributes"] as? [String: Any],
+              let lo = (a["min"] as? NSNumber)?.doubleValue, let hi = (a["max"] as? NSNumber)?.doubleValue,
+              let st = (a["step"] as? NSNumber)?.doubleValue, st > 0, hi >= lo else { return nil }
+        return NumberStep(min: lo, max: hi, step: st)
+    }
+}
+
+extension Suggest {
+    /// The nearest value `st` accepts, inside both its range and 0–100. Halves round up.
+    public static func roundToStep(_ v: Double, _ st: NumberStep) -> Double {
+        let lo = max(st.min, 0), hi = min(st.max, 100)
+        let first = ((lo - st.min) / st.step - 1e-9).rounded(.up), last = ((hi - st.min) / st.step + 1e-9).rounded(.down)
+        guard last >= first else { return min(max(v, lo), hi) }   // a step coarser than the range: just clamp
+        let n = min(max(((v - st.min) / st.step).rounded(), first), last)
+        return ((st.min + n * st.step) * 1e6).rounded() / 1e6   // no 61.500000001 from the multiplication
+    }
+}
