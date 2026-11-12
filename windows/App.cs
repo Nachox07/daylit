@@ -393,7 +393,7 @@ sealed partial class Controller {
         var l = Cfg.Location!;
         bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
-                          mons.Select(m => (keep ? m.HaLevels : null) ?? m.LocalLevels).ToArray(), null,
+                          mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(), null,
                           keep && lastHaPos != null);
     }
     double? lastHaPos;
@@ -573,7 +573,7 @@ sealed partial class Controller {
         if (!haDown) { haDownSince = null; haLoggedAt = null; }
         if (!haDown && Source == Source.HomeAssistant && s != null) {
             if (s.HasBlind) s = s with { Pos = Rules.BlindPosition(s.Pos, lastHaPos) };
-            for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.Levels[i];
+            for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.FromHa is { } haRow && i < haRow.Length ? haRow[i] : s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
             lastHaLights = s.Lights;
         }

@@ -522,7 +522,10 @@ struct SettingsView: View {
     var showsNightLights: Bool { source == "homeAssistant" && !lights.trimmingCharacters(in: .whitespaces).isEmpty }
     /// The typed "Lights on" level, while its row shows; nil when empty or not a level.
     func nightLightsValue(_ d: MonitorDraft) -> Double? {
-        showsNightLights ? ContrastRule.parseField(d.nightLights).value.map(Double.init) : nil
+        guard showsNightLights else { return nil }
+        // An untouched box keeps the file's value (a decimal stays a decimal), as save does.
+        if d.nightLights == d.nightLightsLoaded { return Double(d.nightLights.replacingOccurrences(of: ",", with: ".")) }
+        return ContrastRule.parseField(d.nightLights).value.map(Double.init)
     }
     static let nightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost."
 

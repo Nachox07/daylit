@@ -57,7 +57,7 @@ Home Assistant helper). Then:
 
 - **Lights off:** the blend goes toward *night*, with no boost.
 - **Lights on:** the blend goes toward a point that slides from *night* (sun high) to *Lights on* (sun
-  down). In daylight the lamps change nothing; after sunset the monitor sits at *Lights on*; there is no
+  down), so the lights start to count before sunset, as the sun goes down, not only below the old boost cutoff. In daylight the lamps change nothing; after sunset the monitor sits at *Lights on*; there is no
   jump at dusk.
 
 Example, day 95, blind closed 62, night 60, lights on 80: a cloudy morning (daylight counted at half) with

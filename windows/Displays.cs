@@ -149,7 +149,7 @@ sealed class Mon {
     public string Key => D.Key;
     public string Label => !string.IsNullOrWhiteSpace(Spec?.Label) ? Spec!.Label! : D.Friendly != "" ? D.Friendly : D.Gdi.Replace(@"\\.\", "");
     public bool On => Cur != null;
-    public double[]? HaLevels;                 // last levels from Home Assistant (with nightLights when set), for the sun fallback
+    public double[]? HaLevels;                 // Home Assistant's last raw row [day, blindDown, night, nightLights] (-1: none), merged with the local levels each tick in the sun fallback
     public double Day => Spec?.Day ?? Config.DefaultDay;
     public double BlindDown => Spec?.BlindDown ?? Config.DefaultBlindDown;
     public double Night => Spec?.Night ?? Config.DefaultNight;
