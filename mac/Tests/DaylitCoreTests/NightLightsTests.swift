@@ -206,3 +206,44 @@ final class NightLightsHomeAssistantTests: XCTestCase {
         XCTAssertNil(RemoteSet(row: kept))
     }
 }
+
+final class NightLightsSuggestTests: XCTestCase {
+    let four: [Double] = [95, 62, 60, 80]
+    func sample(elev: Double, lights: Bool, levels: [Double]) -> Sample? {
+        Suggest.makeSample(monitor: "m", chosen: 70, auto: 75, elev: elev, pos: 40, lights: lights, light: 1,
+                           levels: levels, tuning: Tuning(), now: 1_000, context: SampleContext())
+    }
+    func testNoSampleWhileTheLightsAreOnAndTheSunIsNotFullyUp() {
+        for e in [-10.0, 0, 5, 11.9] { XCTAssertNil(sample(elev: e, lights: true, levels: four), "elev \(e)") }
+    }
+    func testSamplesWithTheLightsOffOrTheSunFullyUp() {
+        XCTAssertEqual(sample(elev: 5, lights: false, levels: four)?.levels, four)
+        XCTAssertEqual(sample(elev: 12, lights: true, levels: four)?.levels, four)
+    }
+    func testAMonitorWithoutNightLightsStillRecordsThoseTicks() {
+        // At 5° the boost no longer applies, so the three-level rule decides and the tick is a sample.
+        XCTAssertNotNil(sample(elev: 5, lights: true, levels: [95, 62, 60]))
+    }
+    func testChangingNightLightsMakesOlderSamplesStale() {
+        let x = sample(elev: 30, lights: false, levels: four)!
+        XCTAssertEqual(Suggest.dropStale([x], current: ["m": [95, 62, 60, 85]]), [])
+        XCTAssertEqual(Suggest.dropStale([x], current: ["m": [95, 62, 60]]), [])
+        XCTAssertEqual(Suggest.dropStale([x], current: ["m": four]), [x])
+        var r = Recorder()
+        r.handChanged(monitor: "m", sample: x)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: [95, 62, 60, 85], now: x.at + 400))
+    }
+    func testTheFitKeepsNightLightsAsItIs() {
+        let samples = (0..<6).map { i in
+            Sample(monitor: "m", chosen: 55, auto: 62, s: 1, p: 0, elev: 30, lights: false, levels: four, at: Double(i) * 86400)
+        }
+        let fitted = Suggest.fit(samples, levels: four, candidates: [.blindDown])
+        XCTAssertEqual(fitted.count, 4)
+        XCTAssertEqual(fitted[3], 80)
+        XCTAssertEqual(fitted[1], 56, accuracy: 0.01)   // (6 · 55 + 62) / 7
+    }
+    func testFourLevelSamplesSurviveTheFile() {
+        let x = sample(elev: 30, lights: false, levels: four)!
+        XCTAssertEqual(Suggest.decode(Suggest.encode([x])), [x])
+    }
+}

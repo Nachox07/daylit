@@ -50,6 +50,10 @@ extension Daylit {
         for l in Level.allCases where haEntity(l, of: m) != nil {
             guard inp.fromHA, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return true }
         }
+        // The nightLights helper is part of the levels snapshot too (row index 3).
+        if source == .homeAssistant, let e = m.ha?.nightLights, Config.isEntityId(e) {
+            guard inp.fromHA, let row = inp.levels[m.uuid], row.count > 3, row[3] >= 0 else { return true }
+        }
         return false
     }
 
