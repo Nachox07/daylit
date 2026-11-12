@@ -420,3 +420,14 @@ public enum ContrastRule {
         return (true, Int(v.rounded()))
     }
 }
+
+/// Keyboard shortcuts that would fight over the same keys.
+public enum ShortcutRule {
+    /// Indices of the first two combinations with the same key and modifiers, or nil.
+    public static func clash(_ combos: [(key: UInt32, mods: UInt32)]) -> (first: Int, second: Int)? {
+        for i in combos.indices {
+            for j in combos.indices where j > i && combos[i].key == combos[j].key && combos[i].mods == combos[j].mods { return (i, j) }
+        }
+        return nil
+    }
+}

@@ -118,7 +118,7 @@ and when night starts, and shows each step with the numbers right now
   how much brighter or darker it was when you switched it on ([details](docs/setup.md#sync-monitors)).
 - **A short panel.** It holds what you touch every day: a slider per monitor and *Automatic*.
   Everything set once is in the gear menu: **Settings…** (source, location, levels per monitor, Home
-  Assistant), light/dark from daylight, pause on battery, open at login and shortcuts. Levels you set by hand survive a restart.
+  Assistant), light/dark from daylight, pause on battery, open at login and shortcuts (including one that switches light and dark mode). Levels you set by hand survive a restart.
 - **The built-in screen is left to the system**, whose light sensor does a better job than any
   schedule. On a Mac with the lid open, the panel still shows its slider for quick manual changes
   (on Windows, the quick-settings slider covers it).

@@ -88,7 +88,7 @@ import DaylitCore
         corrections = Self.loadCorrections()
         reload()
         if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt
-        HotKeys.shared.start { [weak self] up, fine in self?.hotkey(up: up, fine: fine) }
+        HotKeys.shared.start({ [weak self] up, fine in self?.hotkey(up: up, fine: fine) }, theme: { [weak self] in self?.toggleDark() })
         // A cheap check every 5 s; the real work runs every 30 s (120 s on battery) or on an event.
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in Task { @MainActor in self.check() } }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
@@ -413,7 +413,7 @@ import DaylitCore
 
     /// Manual switch; it stays until the automatic decision next changes.
     func toggleDark() {
-        if let e = Appearance.setDark(!Appearance.isDark) { problem = e }
+        if let e = Appearance.setDark(!Appearance.isDark) { problem = e; Log.write("theme: " + e) }
         Task { @MainActor in try? await Task.sleep(nanoseconds: 500_000_000); self.dark = Appearance.isDark }
     }
 

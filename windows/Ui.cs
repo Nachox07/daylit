@@ -256,8 +256,9 @@ sealed class Flyout : Window {
     string KeysHint {
         get {
             string keys = Shortcut.Pair(Settings.Up, Settings.Down);
-            return app.HotkeysOk ? $"{keys}: the screen with the active window. Add Shift for fine steps."
-                                 : $"{keys} are taken by another app. Change them in the gear menu.";
+            string hint = app.HotkeysOk ? $"{keys}: the screen with the active window. Add Shift for fine steps."
+                                        : $"{keys} are taken by another app. Change them in the gear menu.";
+            return app.ThemeKeyOk ? hint : $"{hint} {Settings.ThemeKey} (light/dark) is taken by another app; change it in the gear menu.";
         }
     }
 
@@ -501,9 +502,11 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
     [DllImport("user32")] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
     [DllImport("user32")] static extern bool UnregisterHotKey(IntPtr h, int id);
     readonly Action<bool, bool> on;
+    readonly Action onTheme;
 
-    public HotkeyWindow(Action<bool, bool> on) {
+    public HotkeyWindow(Action<bool, bool> on, Action onTheme) {
         this.on = on;
+        this.onTheme = onTheme;
         CreateHandle(new WF.CreateParams { Parent = new IntPtr(-3) });   // HWND_MESSAGE
     }
     /// Registers up/down and their Shift variants (fine steps). False if any is taken.
@@ -513,9 +516,14 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
         return RegisterHotKey(Handle, 1, (uint)up.Mods, (uint)up.Vk) & RegisterHotKey(Handle, 2, (uint)down.Mods, (uint)down.Vk)
              & RegisterHotKey(Handle, 3, (uint)up.Mods | S, (uint)up.Vk) & RegisterHotKey(Handle, 4, (uint)down.Mods | S, (uint)down.Vk);
     }
-    public void Unregister() { for (int i = 1; i <= 4; i++) UnregisterHotKey(Handle, i); }
+    /// Light/dark mode: id 5, no Shift variant. False if taken.
+    public bool RegisterTheme(Shortcut t) {
+        UnregisterHotKey(Handle, 5);
+        return RegisterHotKey(Handle, 5, (uint)t.Mods, (uint)t.Vk);
+    }
+    public void Unregister() { for (int i = 1; i <= 5; i++) UnregisterHotKey(Handle, i); }
     protected override void WndProc(ref WF.Message m) {
-        if (m.Msg == 0x0312 /* WM_HOTKEY */) { int id = (int)m.WParam; on(id is 1 or 3, id >= 3); }
+        if (m.Msg == 0x0312 /* WM_HOTKEY */) { int id = (int)m.WParam; if (id == 5) onTheme(); else on(id is 1 or 3, id >= 3); }
         base.WndProc(ref m);
     }
     public void Dispose() { Unregister(); DestroyHandle(); }
@@ -525,6 +533,7 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
 readonly record struct Shortcut(int Mods, int Vk) {
     public const int Alt = 1, Ctrl = 2, Shift = 4, Win = 8;
     public static readonly Shortcut DefaultUp = new(Ctrl | Alt, 0x21), DefaultDown = new(Ctrl | Alt, 0x22);   // PgUp, PgDn
+    public static readonly Shortcut DefaultTheme = new(Ctrl | Alt, 0x44);   // D
 
     public string ModsText {
         get {
@@ -547,15 +556,16 @@ readonly record struct Shortcut(int Mods, int Vk) {
     public static string Pair(Shortcut up, Shortcut down) => up.Mods == down.Mods ? $"{up} / {down.KeyText}" : $"{up} / {down}";
 }
 
-/// Pick the brightness hotkeys: click a box, press the combination.
+/// Pick the hotkeys: click a box, press the combination. Brighter and Dimmer change the screen with the active
+/// window (Shift adds fine steps); the third row switches light and dark mode.
 static class ShortcutDialog {
-    /// tryApply registers the pair and returns false if another app owns it.
-    public static void Edit(Shortcut up, Shortcut down, Func<Shortcut, Shortcut, bool> tryApply) {
-        Shortcut newUp = up, newDown = down;
+    /// tryApply registers the shortcuts and returns null, or what another app owns ("brightness", "light/dark").
+    public static void Edit(Shortcut up, Shortcut down, Shortcut theme, Func<Shortcut, Shortcut, Shortcut, string?> tryApply) {
+        Shortcut newUp = up, newDown = down, newTheme = theme;
         var error = new TextBlock { Foreground = Palette.Error, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
         void Fail(string? msg) { error.Text = msg ?? ""; error.Visibility = msg == null ? Visibility.Collapsed : Visibility.Visible; }
 
-        TextBox Capture(Func<Shortcut> get, Action<Shortcut> set) {
+        TextBox Capture(Func<Shortcut> get, Action<Shortcut> set, string shiftMsg = "Leave Shift out: it is added automatically for steps of 1.") {
             var box = new TextBox { Text = get().ToString(), IsReadOnly = true, IsReadOnlyCaretVisible = false, MinWidth = 220, Cursor = WI.Cursors.Hand };
             box.PreviewKeyDown += (_, e) => {
                 var k = e.Key == WI.Key.System ? e.SystemKey : e.Key;
@@ -564,7 +574,7 @@ static class ShortcutDialog {
                 e.Handled = true;
                 if (k is WI.Key.LeftCtrl or WI.Key.RightCtrl or WI.Key.LeftAlt or WI.Key.RightAlt or WI.Key.LeftShift or WI.Key.RightShift or WI.Key.LWin or WI.Key.RWin) return;
                 int mods = (km.HasFlag(WI.ModifierKeys.Control) ? Shortcut.Ctrl : 0) | (km.HasFlag(WI.ModifierKeys.Alt) ? Shortcut.Alt : 0) | (km.HasFlag(WI.ModifierKeys.Windows) ? Shortcut.Win : 0);
-                if (km.HasFlag(WI.ModifierKeys.Shift)) { Fail("Leave Shift out: it is added automatically for steps of 1."); return; }
+                if (km.HasFlag(WI.ModifierKeys.Shift)) { Fail(shiftMsg); return; }
                 if (mods == 0) { Fail("Use Ctrl, Alt or Win with the key, so it does not clash with typing."); return; }
                 var sc = new Shortcut(mods, WI.KeyInterop.VirtualKeyFromKey(k));
                 set(sc); box.Text = sc.ToString(); Fail(null);
@@ -574,10 +584,11 @@ static class ShortcutDialog {
         }
         var upBox = Capture(() => newUp, v => newUp = v);
         var downBox = Capture(() => newDown, v => newDown = v);
+        var themeBox = Capture(() => newTheme, v => newTheme = v, "Leave Shift out: Brighter and Dimmer use it for steps of 1.");
 
         Grid Row(string label, TextBox box) {
             var g = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             var t = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(box, 1);
@@ -601,15 +612,21 @@ static class ShortcutDialog {
                 Margin = new Thickness(24), MaxWidth = 460,
                 Children = {
                     new TextBlock { Text = "Click a box and press the new combination.", TextWrapping = TextWrapping.Wrap },
-                    new TextBlock { Text = "They change the screen with the active window. Hold Shift as well for steps of 1.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 8) },
-                    Row("Brighter", upBox), Row("Dimmer", downBox), error, buttons,
+                    new TextBlock { Text = "Brighter and Dimmer change the screen with the active window; hold Shift as well for steps of 1. The third one switches light and dark mode.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 8) },
+                    Row("Brighter", upBox), Row("Dimmer", downBox), Row("Light / dark mode", themeBox), error, buttons,
                 },
             },
         };
-        reset.Click += (_, _) => { newUp = Shortcut.DefaultUp; newDown = Shortcut.DefaultDown; upBox.Text = newUp.ToString(); downBox.Text = newDown.ToString(); Fail(null); };
+        reset.Click += (_, _) => { newUp = Shortcut.DefaultUp; newDown = Shortcut.DefaultDown; newTheme = Shortcut.DefaultTheme; upBox.Text = newUp.ToString(); downBox.Text = newDown.ToString(); themeBox.Text = newTheme.ToString(); Fail(null); };
         save.Click += (_, _) => {
-            if (newUp == newDown) { Fail("Brighter and Dimmer need different combinations."); return; }
-            if (!tryApply(newUp, newDown)) { Fail($"{Shortcut.Pair(newUp, newDown)} is taken by another app or by Windows. Try another."); return; }
+            var clash = ShortcutRule.Clash([(newUp.Mods, newUp.Vk), (newDown.Mods, newDown.Vk), (newTheme.Mods, newTheme.Vk)]);
+            if (clash is { } c) {
+                string[] names = ["Brighter", "Dimmer", "Light / dark mode"];
+                Fail($"{names[c.Item1]} and {names[c.Item2]} need different combinations.");
+                return;
+            }
+            var taken = tryApply(newUp, newDown, newTheme);
+            if (taken != null) { Fail($"The {taken} shortcut is taken by another app or by Windows. Try another."); return; }
             w.DialogResult = true;
         };
         w.ShowDialog();

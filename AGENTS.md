@@ -133,7 +133,8 @@ computer right now, or no token stored yet) and which config entry matched which
   Windows keeps it in Credential Manager, macOS in the keychain. On macOS the user can also store it
   from Terminal: `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
-  gear menu → *Keyboard shortcuts…*. On macOS the brightness keys also work once the user grants
+  gear menu → *Keyboard shortcuts…*. `⌃⌥⌘D` / `Ctrl+Alt+D` switch light and dark mode (same switch as the
+  gear menu item). On macOS the brightness keys also work once the user grants
   Accessibility permission.
 - The gear menu's *Settings…* window lets the user change the source, location, levels, contrast (DDC
   monitors) and Home Assistant entities later without editing JSON; it keeps every other key in the file.
