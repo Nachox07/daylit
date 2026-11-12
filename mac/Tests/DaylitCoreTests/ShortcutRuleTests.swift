@@ -11,6 +11,6 @@ final class ShortcutRuleTests: XCTestCase {
         XCTAssertEqual(c?.second, 2)
     }
     func testTheSameKeyWithOtherModifiersIsNotAClash() {
-        XCTAssertNil(ShortcutRule.clash([(2, 4096), (2, 4096 | 2048)]))
+        XCTAssertNil(ShortcutRule.clash([(2, 4096), (2, 6144)]))
     }
 }
