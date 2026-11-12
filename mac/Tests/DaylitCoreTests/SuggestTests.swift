@@ -452,3 +452,45 @@ final class SuggestFixtureTests: XCTestCase {
         }
     }
 }
+
+final class SuggestConfigTests: XCTestCase {
+    func json(_ d: Data) -> [String: Any] { (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:] }
+
+    func testApplyWritesOneLocalLevelAndKeepsEverythingElse() throws {
+        let file = Data("""
+        { "source": "sun", "location": { "latitude": 51.48, "longitude": 0.00 }, "custom": true,
+          "monitors": [ { "match": "Monitor", "label": "Desk", "day": 100, "blindDown": 78, "night": 75, "contrast": 60 },
+                        { "match": "Other", "day": 50 } ] }
+        """.utf8)
+        let out = try ConfigPatch.setLevels(["blindDown": 61], display: "Generic Monitor", suggestedMatch: "Monitor", in: file)
+        let root = json(out)
+        let mons = root["monitors"] as? [[String: Any]] ?? []
+        XCTAssertEqual(mons.count, 2)
+        XCTAssertEqual(mons[0]["blindDown"] as? Int, 61)
+        XCTAssertEqual(mons[0]["day"] as? Int, 100)
+        XCTAssertEqual(mons[0]["night"] as? Int, 75)
+        XCTAssertEqual(mons[0]["label"] as? String, "Desk")
+        XCTAssertEqual(mons[0]["contrast"] as? Int, 60)
+        XCTAssertEqual(mons[1]["day"] as? Int, 50)
+        XCTAssertEqual(root["custom"] as? Bool, true)
+        XCTAssertTrue(String(decoding: out, as: UTF8.self).contains("51.48"))
+        XCTAssertFalse(String(decoding: out, as: UTF8.self).contains("51.479"))
+    }
+
+    func testApplyAddsAnEntryForAMonitorWithoutOne() throws {
+        let out = try ConfigPatch.setLevels(["blindDown": 30, "day": 65], display: "Generic Monitor", suggestedMatch: "Monitor",
+                                            in: Data(#"{ "source": "sun", "location": { "latitude": 51.48, "longitude": 0 } }"#.utf8))
+        let mons = json(out)["monitors"] as? [[String: Any]] ?? []
+        XCTAssertEqual(mons.count, 1)
+        XCTAssertEqual(mons[0]["match"] as? String, "Monitor")
+        XCTAssertEqual(mons[0]["blindDown"] as? Int, 30)
+        XCTAssertEqual(mons[0]["day"] as? Int, 65)
+        XCTAssertNil(mons[0]["night"])
+    }
+
+    func testApplyRefusesAFileThatIsNotAnObject() {
+        XCTAssertThrowsError(try ConfigPatch.setLevels(["day": 60], display: "Monitor", suggestedMatch: "Monitor", in: Data("[1]".utf8)))
+        XCTAssertThrowsError(try ConfigPatch.setLevels(["day": 60], display: "Monitor", suggestedMatch: "Monitor",
+                                                       in: Data(#"{ "monitors": 3 }"#.utf8)))
+    }
+}

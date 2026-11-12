@@ -156,3 +156,41 @@ public enum ConfigPatch {
     static func number(_ v: Double) -> Any { v == v.rounded() && abs(v) < 1e9 ? Int(v) : NSDecimalNumber(string: String(v)) }
     static func clamp(_ v: Int) -> Int { min(100, max(0, v)) }
 }
+
+extension ConfigPatch {
+    /// The file with some of one monitor's local levels changed (keys "day", "blindDown", "night"; whole
+    /// numbers, clamped to 0–100) and everything else kept, as a suggestion's Apply needs. The entry is
+    /// found as `apply` finds it (its match is part of `display`, the connected display's name); without one,
+    /// an entry with `suggestedMatch` is added. Comments are not kept (check ConfigText.hasComments first).
+    /// Throws when the file is not a JSON object or the result would not load.
+    public static func setLevels(_ levels: [String: Int], display: String, suggestedMatch: String, in original: Data?) throws -> Data {
+        var root: [String: Any] = [:]
+        if let d = original, !d.isEmpty {
+            guard let o = try JSONSerialization.jsonObject(with: ConfigText.relaxed(d)) as? [String: Any] else {
+                throw ConfigEditError.notAnObject
+            }
+            root = o
+        }
+        if let raw = root["monitors"], !(raw is [[String: Any]]) {
+            throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
+        }
+        var list = root["monitors"] as? [[String: Any]] ?? []
+        let i = list.indices.first { j in
+            guard let match = list[j]["match"] as? String, !match.isEmpty else { return false }
+            return display.localizedCaseInsensitiveContains(match.trimmingCharacters(in: .whitespaces))
+        }
+        var entry = i.map { list[$0] } ?? ["match": suggestedMatch]
+        for (k, v) in levels where Level.allCases.contains(where: { $0.key == k }) { entry[k] = clamp(v) }
+        if let i { list[i] = entry } else { list.append(entry) }
+        root["monitors"] = list
+        // Written as typed: a coordinate read back as a Double would come out as 51.479999999999997.
+        if var loc = root["location"] as? [String: Any] {
+            for k in ["latitude", "longitude"] { if let v = (loc[k] as? NSNumber)?.doubleValue { loc[k] = round2(v) } }
+            root["location"] = loc
+        }
+        let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        let c = try JSONDecoder().decode(Config.self, from: out)
+        if let err = c.validate() { throw ConfigEditError.invalid(err) }
+        return out
+    }
+}
