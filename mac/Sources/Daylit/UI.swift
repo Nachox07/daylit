@@ -31,7 +31,11 @@ struct Panel: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
 
-            if let p = m.problem {
+            if let s = m.suggestion, let mon = m.mons.first(where: { $0.uuid == s.monitor }) {
+                suggestionCard(s, label: mon.label)
+            }
+
+            if let p = m.problem ?? m.suggestError {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
@@ -106,6 +110,26 @@ struct Panel: View {
                 .accessibilityLabel("Automatic brightness").accessibilityHint(m.detail)
         }
         .padding(.horizontal, 2)
+    }
+
+    /// New levels Daylit noticed from repeated hand changes (DaylitCore.Suggest). Nothing changes without Apply.
+    func suggestionCard(_ s: Suggestion, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(s.sentence(label: label))
+                .font(.callout).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button("Apply") { Task { await m.applySuggestion() } }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .help("Set the new level. A level from Home Assistant changes there; otherwise in config.json.")
+                Button("Not now") { m.dismissSuggestion() }
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .help("No suggestion for this monitor for 7 days")
+                Spacer()
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+        .accessibilityElement(children: .contain)
     }
 
     /// Shown on hover over a slider instead of a paragraph in the panel.
