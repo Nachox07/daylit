@@ -607,7 +607,7 @@ import DaylitCore
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
         func ownTarget(_ m: Mon) -> Int {
-            let lv = effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+            let lv = levels(of: m, inp)
             return target(day: lv[0], blindDown: lv[1], night: lv[2], elev: inp.elev, pos: inp.pos, lights: inp.lights,
                           tuning: config.tuned, light: inp.light)
         }
@@ -658,6 +658,22 @@ import DaylitCore
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }
             mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
+            // Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
+            if step.remote != nil {
+                // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
+                recorder.drop(m.uuid)
+            } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
+                let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
+                                        sunFallback: source == .homeAssistant && !inp.fromHA)
+                // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
+                recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
+                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: inp.lights,
+                                       light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
+                })
+            }
+            if let done = recorder.settle(monitor: m.uuid, held: auto && st.offset != nil, levels: levels(of: m, inp), now: now) {
+                corrections.append(done); saveCorrections(); suggestDirty = true
+            }
             if ok, let v = step.level { mons[i].level = Double(v) }
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = ok ? step.applied : c0, manual = step.manual
