@@ -128,7 +128,7 @@ sealed partial class Controller {
         SystemEvents.DisplaySettingsChanged += OnDisplays;
         SystemEvents.UserPreferenceChanged += OnPrefs;
 
-        push = new PushClient(ui, () => _ = Tick("push"), () => lastTick, () => HAClient.Token ?? Cred.Read(Cfg.TokenName),   // a failed read at Load is retried here
+        push = new PushClient(ui, () => _ = Tick("push"), () => lastTick, () => HAClient.Token ?? Cred.Read(Cfg.TokenName),   // null: nothing stored (wait); "": stored but unreadable (push retries on backoff)
                               () => Win.OnBattery, () => PushRule.DaylightLimit(Win.OnBattery, Cfg.Tuned));
         push.HealthChanged += StartTimers;
         StartTimers();
@@ -145,7 +145,7 @@ sealed partial class Controller {
         (Cfg, ConfigError) = Config.Load();
         // A removed or changed lights entity must not keep its last state alive through an outage.
         if (Cfg.HomeAssistant?.Lights != previousLights) lastHaLights = null;
-        HAClient.Token = Source == Source.HomeAssistant ? Cred.Read(Cfg.TokenName) : null;
+        HAClient.Token = Source == Source.HomeAssistant ? Cred.ReadUsable(Cfg.TokenName) : null;
         HAClient.LastError = null;
         AutoOn = Settings.Auto;
         lookDark = null; look.Reset();
@@ -158,8 +158,8 @@ sealed partial class Controller {
     public void Reload() {
         Load();
         panel.Rebuild();
+        forcePush = true;   // a reload rebuilds the entity list and resubscribes (StartTimers → SyncPush, once)
         StartTimers();
-        SyncPush(force: true);   // a reload rebuilds the entity list and resubscribes
         _ = Tick("reload");
         if (Source == Source.HomeAssistant && HAClient.Token == null) AskToken();
     }
@@ -215,8 +215,10 @@ sealed partial class Controller {
     }
 
     /// Opens or closes the push socket for the current config, source, pause, Automatic and monitors (PushRule.Wanted).
-    void SyncPush(bool force = false) {
+    bool forcePush;
+    void SyncPush() {
         if (push == null) return;
+        bool force = forcePush; forcePush = false;
         if (!PushRule.Wanted(Cfg.HomeAssistant?.Push, Source, Paused, AutoOn, Mons.Count > 0) || PushRule.SocketUrl(Cfg.HomeAssistant?.Url) is not { } url) {
             push.Update(null);
             WatchNetwork(false);
@@ -231,15 +233,30 @@ sealed partial class Controller {
     void WatchNetwork(bool on) {
         if (on == watchingNetwork) return;
         watchingNetwork = on;
-        if (on) NetworkChange.NetworkAddressChanged += OnNetwork; else NetworkChange.NetworkAddressChanged -= OnNetwork;
+        if (on) { netKey = NetKey(); NetworkChange.NetworkAddressChanged += OnNetwork; } else NetworkChange.NetworkAddressChanged -= OnNetwork;
     }
 
     // NetworkChange raises on a thread-pool thread.
-    void OnNetwork(object? s, EventArgs e) => ui.BeginInvoke(() => push?.NetworkChanged());
+    // It also fires for IPv6 privacy-address rotation and the like: only a change in the up interfaces or their IPv4 addresses reconnects.
+    string netKey = "";
+    void OnNetwork(object? s, EventArgs e) {
+        var key = NetKey();
+        _ = ui.BeginInvoke(() => { if (key == netKey) return; netKey = key; push?.NetworkChanged(); });
+    }
+
+    static string NetKey() {
+        try {
+            return string.Join(";", NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .Select(n => n.Id + "=" + string.Join(",", n.GetIPProperties().UnicastAddresses
+                    .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork).Select(a => a.Address.ToString()).OrderBy(x => x, StringComparer.Ordinal)))
+                .OrderBy(x => x, StringComparer.Ordinal));
+        } catch { return ""; }
+    }
 
     // SystemEvents may raise on another thread: always hop to the UI thread.
     void OnPower(object? s, PowerModeChangedEventArgs e) => ui.BeginInvoke(() => {
-        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); push?.Reconnect("wake"); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
+        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); push?.ReconnectSoon("wake", 3); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
         else if (e.Mode == PowerModes.StatusChange) {   // plugged in / unplugged
             bool was = timer.IsEnabled;
             StartTimers();

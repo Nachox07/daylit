@@ -46,7 +46,7 @@ sealed class PushClient {
         this.ui = ui; this.tick = tick; this.lastTick = lastTick; this.token = token;
         this.onBattery = onBattery; this.daylightLimit = daylightLimit;
         auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout);
-        auth.Tick += (_, _) => { auth.Stop(); Lost("auth timeout", conn); };
+        auth.Tick += (_, _) => { auth.Stop(); Lost("no auth reply", conn); };
         retry.Tick += (_, _) => { retry.Stop(); Open(); };
         ping.Tick += (_, _) => SendPing();
         pong.Interval = TimeSpan.FromSeconds(PushRule.PongTimeout);
@@ -57,8 +57,7 @@ sealed class PushClient {
         };
         tickTimer.Tick += (_, _) => { tickTimer.Stop(); pending.Clear(); tick(); };
         // NetworkAddressChanged fires several times for one change: reconnect once, 2 s after the last.
-        network.Interval = TimeSpan.FromSeconds(2);
-        network.Tick += (_, _) => { network.Stop(); Reconnect("network change"); };
+        network.Tick += (_, _) => { network.Stop(); Reconnect(reconnectWhy); };
     }
 
     /// Opens, keeps or closes the socket. `force` reconnects even when nothing changed (a config reload resubscribes).
@@ -84,12 +83,20 @@ sealed class PushClient {
     /// Wake from sleep or a network change: the old connection may be dead without knowing it.
     public void Reconnect(string why) {
         if (target == null || stopped) return;
+        Log.Write($"push: reconnecting ({why})");
         Close(); attempt = 0;
         Open();
     }
 
     /// From NetworkChange.NetworkAddressChanged (on the UI thread).
-    public void NetworkChanged() { network.Stop(); network.Start(); }
+    public void NetworkChanged() => ReconnectSoon("network change", 2);
+
+    /// Reconnects `seconds` from now (the last request wins): after wake the network needs a moment to come back.
+    public void ReconnectSoon(string why, double seconds) {
+        reconnectWhy = why;
+        network.Stop(); network.Interval = TimeSpan.FromSeconds(seconds); network.Start();
+    }
+    string reconnectWhy = "network change";
 
     void Open() {
         if (target is not { } t || stopped) return;
@@ -125,6 +132,7 @@ sealed class PushClient {
                 var r = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), stop).ConfigureAwait(false);
                 if (r.MessageType == WebSocketMessageType.Close) { reason = "closed by Home Assistant"; break; }
                 message.Write(buffer, 0, r.Count);
+                if (message.Length > 1 << 20) { reason = "message too large"; break; }   // 1 MiB: Home Assistant's frames are far smaller
                 if (!r.EndOfMessage) continue;
                 var text = Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
                 message.SetLength(0);
@@ -191,8 +199,8 @@ sealed class PushClient {
         if (ws == null) return;
         awaitingPong = true;
         ping.Interval = TimeSpan.FromSeconds(PushRule.PingInterval(onBattery()));   // battery may have changed since the last ping
+        pong.Stop(); pong.Start();   // before the send: a send that fails at once closes (and stops this timer), not the reverse
         _ = SendOrLose(PushRule.PingMessage(nextId++), conn);
-        pong.Stop(); pong.Start();
     }
 
     void Request(IReadOnlySet<string> ids, Target t) {
@@ -233,7 +241,7 @@ sealed class PushClient {
         cts?.Cancel(); cts = null;   // not disposed: the receive loop may still hold its token
         try { ws?.Abort(); ws?.Dispose(); } catch { }
         ws = null; sendGate = null;
-        retry.Stop(); ping.Stop(); pong.Stop(); tickTimer.Stop(); auth.Stop();
+        retry.Stop(); ping.Stop(); pong.Stop(); tickTimer.Stop(); auth.Stop(); network.Stop();
         pending.Clear();
         SetHealthy(false);
     }
@@ -241,7 +249,7 @@ sealed class PushClient {
     void SetHealthy(bool h) {
         if (Healthy == h) return;
         Healthy = h;
-        HealthChanged?.Invoke();
+        _ = ui.BeginInvoke(() => HealthChanged?.Invoke());   // never re-enter Update/Lost from inside them
     }
 
     static double Secs(DateTime t) => (t - DateTime.UnixEpoch).TotalSeconds;

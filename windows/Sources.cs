@@ -139,12 +139,16 @@ static class Cred {
     [DllImport("advapi32")] static extern void CredFree(IntPtr p);
 
     public static string? Read(string target) {
-        if (!CredReadW(target, 1 /* GENERIC */, 0, out var p)) return null;
+        if (!CredReadW(target, 1 /* GENERIC */, 0, out var p))
+            // Only "not found" means nothing is stored; any other failure returns "" (stored but unreadable), which push retries on backoff.
+            return Marshal.GetLastWin32Error() == 1168 /* ERROR_NOT_FOUND */ ? null : "";
         try {
             var c = Marshal.PtrToStructure<CREDENTIAL>(p);
             return c.BlobSize == 0 ? null : Marshal.PtrToStringUni(c.Blob, (int)c.BlobSize / 2).Trim();
         } finally { CredFree(p); }
     }
+    /// The stored token, or null when none is stored or it could not be read: for the REST client, which treats both as "no token".
+    public static string? ReadUsable(string target) => Read(target) is { Length: > 0 } t ? t : null;
     /// False when Windows refused to store it (the caller must not treat the token as saved).
     public static bool Write(string target, string user, string secret) {
         var b = Encoding.Unicode.GetBytes(secret); var h = Marshal.AllocHGlobal(b.Length);

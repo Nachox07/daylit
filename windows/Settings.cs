@@ -625,7 +625,7 @@ sealed class SettingsWindow : Window {
         if (ids.FirstOrDefault(s => !Config.IsEntityId(s)) is { } bad) { Say($"\"{bad}\" is not an entity id like light.office.", true); return; }
         var (c, _) = Config.Load(path);
         var probe = new Config { HomeAssistant = new HaConfig { Url = haUrl.Text.Trim(), TokenName = c.HomeAssistant?.TokenName } };
-        HAClient.Token ??= Cred.Read(probe.TokenName);
+        HAClient.Token ??= Cred.ReadUsable(probe.TokenName);
         string template = ids.Count == 0 ? "ok" : string.Join(" ", ids.Select(id => $"{{{{ '{id}' if states('{id}') in ['unknown', 'unavailable'] else '' }}}}"));
         test.IsEnabled = false; Say("Testing…", false);
         var answer = await HAClient.Call(probe, "/api/template", new { template });
