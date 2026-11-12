@@ -206,3 +206,98 @@ final class SuggestTriggerTests: XCTestCase {
         XCTAssertEqual(up.sentence(label: "Monitor"), "You raise Monitor by about 8 in the evening. Set night 20 → 30?")
     }
 }
+
+final class SuggestRecorderTests: XCTestCase {
+    let levels: [Double] = [100, 78, 75]
+
+    func testAChangeSettlesAfterFiveMinutes() {
+        var r = Recorder()
+        let x = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels)
+        r.handChanged(monitor: "m", sample: x)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: x.at + 299))
+        XCTAssertEqual(r.settle(monitor: "m", held: true, levels: levels, now: x.at + 300), x)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: x.at + 330))   // once
+    }
+
+    func testASecondChangeWithinFiveMinutesReplacesTheFirst() {
+        var r = Recorder()
+        let first = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels)
+        var second = first; second.chosen = 66; second.at = first.at + 120
+        r.handChanged(monitor: "m", sample: first)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: first.at + 60))
+        r.handChanged(monitor: "m", sample: second)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: first.at + 300))   // 3 minutes after the second
+        XCTAssertEqual(r.settle(monitor: "m", held: true, levels: levels, now: second.at + 300)?.chosen, 66)
+    }
+
+    func testAClearedOffsetDropsThePendingChange() {
+        var r = Recorder()
+        let x = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels)
+        r.handChanged(monitor: "m", sample: x)
+        XCTAssertNil(r.settle(monitor: "m", held: false, levels: levels, now: x.at + 60))
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: x.at + 400))
+        // A level change drops it too.
+        r.handChanged(monitor: "m", sample: x)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: [100, 62, 75], now: x.at + 400))
+        XCTAssertTrue(r.pending.isEmpty)
+        // And so does an excluded change (or one put back) right after it.
+        r.handChanged(monitor: "m", sample: x)
+        r.handChanged(monitor: "m", sample: nil)
+        XCTAssertNil(r.settle(monitor: "m", held: true, levels: levels, now: x.at + 400))
+    }
+
+    func sample(_ chosen: Int = 70, auto: Int = 86, elev: Double = 30, lights: Bool = false, levels l: [Double]? = nil,
+                context: SampleContext = SampleContext()) -> Sample? {
+        Suggest.makeSample(monitor: "m", chosen: chosen, auto: auto, elev: elev, pos: 35, lights: lights, light: 1,
+                           levels: l ?? levels, tuning: Tuning(), now: 1000, context: context)
+    }
+
+    func testAnOrdinaryHandChangeIsASample() {
+        let x = Suggest.makeSample(monitor: "m", chosen: 70, auto: 86, elev: 30, pos: 35, lights: false, light: 0.8,
+                                   levels: levels, tuning: Tuning(), now: 1000, context: SampleContext())
+        XCTAssertEqual(x, Sample(monitor: "m", chosen: 70, auto: 86, s: 0.8, p: 0.35, elev: 30, lights: false, levels: levels, at: 1000))
+    }
+
+    func testEachExclusionIsNotRecorded() {
+        XCTAssertNotNil(sample())
+        XCTAssertNil(sample(context: SampleContext(follower: true)))
+        XCTAssertNil(sample(context: SampleContext(writeFailed: true)))
+        XCTAssertNil(sample(context: SampleContext(idle: true)))
+        XCTAssertNil(sample(context: SampleContext(paused: true)))
+        XCTAssertNil(sample(context: SampleContext(sunFallback: true)))
+        XCTAssertNil(sample(0)); XCTAssertNil(sample(100))
+        XCTAssertNil(sample(auto: 0)); XCTAssertNil(sample(auto: 100))
+        // The lights boost decided the target: sun 0°, lights on, night 30 + 5 above the blend.
+        XCTAssertNil(sample(40, auto: 35, elev: 0, lights: true, levels: [32, 32, 30]))
+        XCTAssertNotNil(sample(40, auto: 35, elev: 0, lights: false, levels: [32, 32, 30]))
+    }
+
+    func testAHomeAssistantSetIsNotAHandChange() {
+        let before = HoldState(lastSet: 80, lastTarget: 80)
+        let after = HoldState(lastSet: 50, lastTarget: 80, offset: -30, offsetSun: 1, offsetAt: 1000)
+        XCTAssertTrue(Suggest.isHandChange(before: before, after: after, remote: nil, now: 1000))
+        XCTAssertFalse(Suggest.isHandChange(before: before, after: after, remote: 50, now: 1000))
+        XCTAssertFalse(Suggest.isHandChange(before: after, after: after, remote: nil, now: 1030))   // held from an earlier tick
+    }
+
+    func testDecideMarksAHandChangeWithItsTime() {
+        let before = HoldState(lastSet: 86, lastTarget: 86)
+        let step = decide(current: 70, want: 86, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1,
+                          touched: true, now: 1000, dayOf: { _ in 0 })
+        XCTAssertEqual(step.state.offset, -16)
+        XCTAssertTrue(Suggest.isHandChange(before: before, after: step.state, remote: step.remote, now: 1000))
+    }
+
+    func testApplyClearsTheOffsetSoTheCorrectionIsNotDoubled() {
+        // Target 85, the user set 70 (offset −15). The new levels give 70.
+        let held = HoldState(lastSet: 70, lastTarget: 85, offset: -15, offsetSun: 1, offsetAt: 1000)
+        let kept = decide(current: 70, want: 70, remote: nil, state: held, here: true, auto: true, dragging: false, sun: 1,
+                          touched: false, now: 1060, dayOf: { _ in 0 })
+        XCTAssertEqual(kept.applied, 55)   // what would happen without clearing
+        let cleared = decide(current: 70, want: 70, remote: nil, state: Suggest.afterApply(held), here: true, auto: true, dragging: false,
+                             sun: 1, touched: false, now: 1060, dayOf: { _ in 0 })
+        XCTAssertEqual(cleared.applied, 70)
+        XCTAssertNil(cleared.write)
+        XCTAssertNil(cleared.state.offset)
+    }
+}

@@ -223,3 +223,77 @@ extension Suggest {
                           samples: mine.count, days: Set(mine.map { dayOf($0.at) }).count)
     }
 }
+
+/// Why a tick's hand change is not a sample (each of these hides what the user really wanted).
+public struct SampleContext: Equatable {
+    public var follower: Bool      // a linked follower: its level comes from the leader
+    public var writeFailed: Bool   // this tick's write to the monitor failed
+    public var idle: Bool          // this machine is idle
+    public var paused: Bool        // paused on battery
+    public var sunFallback: Bool   // the source is Home Assistant but it is down: the sun is standing in
+    public init(follower: Bool = false, writeFailed: Bool = false, idle: Bool = false, paused: Bool = false, sunFallback: Bool = false) {
+        self.follower = follower; self.writeFailed = writeFailed; self.idle = idle; self.paused = paused; self.sunFallback = sunFallback
+    }
+}
+
+/// Hand changes waiting to settle, one per monitor. A change becomes a sample after `settle` seconds with
+/// no further hand change on that monitor, while its offset is still held.
+public struct Recorder: Equatable {
+    public static let settle: Double = 300
+    public private(set) var pending: [String: Sample] = [:]
+    public init() {}
+
+    /// A hand change on `monitor` this tick. `sample` is nil when the tick may not be recorded (see
+    /// Suggest.makeSample) or the user put it back to automatic: either way it ends the gesture before it.
+    public mutating func handChanged(monitor: String, sample: Sample?) { pending[monitor] = sample }
+
+    /// Every tick, per monitor. Returns the sample that became final now, if any.
+    /// - held: the hand-set offset is still set and automatic mode is on (false drops the pending change)
+    /// - levels: the monitor's levels now (a change drops it too)
+    public mutating func settle(monitor: String, held: Bool, levels: [Double], now: Double) -> Sample? {
+        guard let p = pending[monitor] else { return nil }
+        if !held || !Suggest.sameLevels(p.levels, levels) { pending[monitor] = nil; return nil }
+        guard now - p.at >= Self.settle else { return nil }
+        pending[monitor] = nil
+        return p
+    }
+
+    /// Forget a monitor's pending change (Apply, Automatic switched, back to automatic).
+    public mutating func drop(_ monitor: String) { pending[monitor] = nil }
+}
+
+extension Suggest {
+    /// The room lights' boost decided the target (it lifted the level above the blend).
+    public static func boostDecides(levels l: [Double], elev: Double, pos: Double, lights: Bool, tuning t: Tuning, light: Double) -> Bool {
+        guard lights, elev < t.lightsBoostSunBelow, l.count == 3 else { return false }
+        let s = min(daylightFraction(elevation: elev, tuning: t), light)
+        let daytime = l[1] + (l[0] - l[1]) * pos / 100
+        return l[2] + t.lightsBoost > l[2] + (daytime - l[2]) * s
+    }
+
+    /// The sample for a tick where decide recorded a new hand-set level, or nil when it may not be recorded:
+    /// see SampleContext, the lights boost deciding the target, or `chosen` / `auto` at 0 or 100 (the clamp
+    /// hides the true wish). `pos` is the blind position 0–100 (100 without a blind), `light` the cloud cap (1 without a sensor).
+    public static func makeSample(monitor: String, chosen: Int, auto: Int, elev: Double, pos: Double, lights: Bool, light: Double,
+                                  levels: [Double], tuning: Tuning, now: Double, context: SampleContext) -> Sample? {
+        if context.follower || context.writeFailed || context.idle || context.paused || context.sunFallback { return nil }
+        guard levels.count == 3, (1...99).contains(chosen), (1...99).contains(auto) else { return nil }
+        if boostDecides(levels: levels, elev: elev, pos: pos, lights: lights, tuning: tuning, light: light) { return nil }
+        return Sample(monitor: monitor, chosen: chosen, auto: auto, s: min(daylightFraction(elevation: elev, tuning: tuning), light),
+                      p: min(max(pos, 0), 100) / 100, elev: elev, lights: lights, levels: levels, at: now)
+    }
+
+    /// Whether this tick's decide took a new hand-set level (moved by hand): it stamps offsetAt with now.
+    /// A level from the Home Assistant "set" helper (`remote`) stamps it too, but is not a hand change.
+    public static func isHandChange(before: HoldState, after: HoldState, remote: Int?, now: Double) -> Bool {
+        remote == nil && now > 0 && after.offsetAt == now && before.offsetAt != now
+    }
+
+    /// The hold state after Apply: the hand-set offset is cleared, or it would be applied again on top of
+    /// the new level (target 85, set 70, new level gives 70: the monitor would go to 55).
+    public static func afterApply(_ s: HoldState) -> HoldState {
+        var r = s
+        r.lastSet = nil; r.offset = nil; r.offsetSun = nil; r.offsetAt = nil
+        return r
+    }
+}
