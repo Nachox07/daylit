@@ -125,7 +125,10 @@ readonly record struct NumberStep(double Min, double Max, double Step) {
 
 static partial class Suggest {
     /// The nearest value `st` accepts, inside both its range and 0–100. Halves round up.
-    public static double RoundToStep(double v, NumberStep st) {
+    /// null when `st` cannot be used: a step that is not positive, min above max, a non-finite number, or a range outside 0–100.
+    public static double? RoundToStep(double v, NumberStep st) {
+        if (!double.IsFinite(v) || !double.IsFinite(st.Min) || !double.IsFinite(st.Max) || !double.IsFinite(st.Step) ||
+            st.Step <= 0 || st.Min > st.Max || st.Max < 0 || st.Min > 100) return null;
         double lo = Math.Max(st.Min, 0), hi = Math.Min(st.Max, 100);
         double first = Math.Ceiling((lo - st.Min) / st.Step - 1e-9), last = Math.Floor((hi - st.Min) / st.Step + 1e-9);
         if (last < first) return Math.Min(Math.Max(v, lo), hi);   // a step coarser than the range: just clamp
@@ -193,14 +196,14 @@ static partial class Suggest {
         if (levels.Length != 3 || steps.Length != 3) return null;
         t ??= new Tuning();
         Func<double, int> day = dayOf ?? Rules.LocalDay;
-        var mine = all.Where(x => x.Monitor == monitor && SameLevels(x.Levels, levels)).ToList();
+        var mine = DropOld(all, now).Where(x => x.Monitor == monitor && SameLevels(x.Levels, levels)).ToList();
         var cand = Candidates(mine, day).Where(l => steps[(int)l] != null).ToList();
         if (cand.Count == 0) return null;
         var fitted = Fit(mine, levels, cand);
         var proposed = (double[])levels.Clone();
         var changes = new List<LevelChange>();
         foreach (var l in cand) {
-            double v = RoundToStep(fitted[(int)l], steps[(int)l]!.Value);
+            if (RoundToStep(fitted[(int)l], steps[(int)l]!.Value) is not double v) continue;
             if (Math.Abs(v - levels[(int)l]) >= MinMove - 1e-9) {
                 proposed[(int)l] = v;
                 changes.Add(new LevelChange(l, levels[(int)l], v));
@@ -214,9 +217,12 @@ static partial class Suggest {
         var mainLevel = main.Level;
         var ordered = new List<LevelChange> { main };
         ordered.AddRange(changes.Where(ch => ch.Level != mainLevel));
-        var dom = mine.Where(x => Dominates(x, mainLevel)).ToList();
-        double mean = dom.Sum(x => (double)(x.Chosen - x.Auto)) / Math.Max(dom.Count, 1);
-        return new Suggestion(monitor, ordered, (int)Math.Round(Math.Abs(mean), MidpointRounding.AwayFromZero), mean < 0,
+        // The sentence follows the change: only the samples that pull the same way as the proposal count for the amount.
+        bool lower = main.To < main.From;
+        var agree = mine.Where(x => Dominates(x, mainLevel) && (lower ? x.Chosen < x.Auto : x.Chosen > x.Auto)).ToList();
+        if (agree.Count == 0) return null;
+        double mean = agree.Sum(x => (double)Math.Abs(x.Chosen - x.Auto)) / agree.Count;
+        return new Suggestion(monitor, ordered, (int)Math.Round(mean, MidpointRounding.AwayFromZero), lower,
                               mine.Count, mine.Select(x => day(x.At)).Distinct().Count());
     }
 }
@@ -272,7 +278,8 @@ static partial class Suggest {
     public static Sample? MakeSample(string monitor, int chosen, int auto, double elev, double pos, bool lights, double light,
                                      double[] levels, Tuning t, double now, SampleContext context) {
         if (context.Follower || context.WriteFailed || context.Idle || context.Paused || context.SunFallback) return null;
-        if (levels.Length != 3 || chosen < 1 || chosen > 99 || auto < 1 || auto > 99) return null;
+        if (levels.Length != 3 || !levels.All(double.IsFinite) || !double.IsFinite(elev) || !double.IsFinite(pos) || !double.IsFinite(light) ||
+            chosen < 1 || chosen > 99 || auto < 1 || auto > 99) return null;
         if (BoostDecides(levels, elev, pos, lights, t, light)) return null;
         return new Sample(monitor, chosen, auto, Math.Min(t.Fraction(elev), light), Math.Clamp(pos, 0, 100) / 100, elev, lights, levels, now);
     }
@@ -316,5 +323,9 @@ static partial class Suggest {
     }
 
     /// corrections.json's content.
-    public static string Encode(IEnumerable<Sample> samples) => JsonSerializer.Serialize(new CorrectionsFile(samples.ToList()), Json);
+    public static string Encode(IEnumerable<Sample> samples) => JsonSerializer.Serialize(new CorrectionsFile(samples.Where(Storable).ToList()), Json);
+
+    /// A sample with a NaN or infinite number cannot be written as JSON: it is left out and the rest is kept.
+    static bool Storable(Sample x) => double.IsFinite(x.S) && double.IsFinite(x.P) && double.IsFinite(x.Elev) && double.IsFinite(x.At) &&
+                                      x.Levels is { Length: 3 } && x.Levels.All(double.IsFinite);
 }

@@ -28,7 +28,7 @@ public class SuggestCandidateTests {
     }
 
     [Fact]
-    public void ABlindExactlyFortyPercentOpenStillCountsForBlindDown() {
+    public void ALevelDominatesFromAWeightOfPointFiveFive() {
         Assert.True(Suggest.Dominates(SuggestData.Make(0, 9, 30, 0.45, 70, Levels), Level.BlindDown));    // weight 0.55
         Assert.False(Suggest.Dominates(SuggestData.Make(0, 9, 30, 0.46, 70, Levels), Level.BlindDown));   // weight 0.54
         Assert.True(Suggest.Dominates(SuggestData.Make(0, 9, 30, 0.40, 70, Levels), Level.BlindDown));
@@ -97,8 +97,11 @@ public class SuggestFitTests {
     [Fact]
     public void AFitIsClampedToTheRange() {
         double[] levels = [100, 78, 75];
-        var high = Enumerable.Range(0, 12).Select(d => SuggestData.Make(d % 3, 12, 30, 1, 99, levels)).ToList();
-        Assert.True(Suggest.Fit(high, levels, [Level.Day])[0] <= 100);
+        // Changes far above anything storable (chosen is only an int): the unclamped fit would be near 500.
+        var wild = Enumerable.Range(0, 30).Select(d => SuggestData.Make(d % 3, 12, 30, 1, 500, levels)).ToList();
+        Assert.Equal(100, Suggest.Fit(wild, levels, [Level.Day])[0]);
+        var low = Enumerable.Range(0, 30).Select(d => SuggestData.Make(d % 3, 12, 30, 1, -400, levels)).ToList();
+        Assert.Equal(0, Suggest.Fit(low, levels, [Level.Day])[0]);
     }
 }
 
@@ -492,5 +495,114 @@ public class SuggestConfigTests {
     public void ApplyRefusesAFileThatIsNotAnObject() {
         Assert.Throws<InvalidDataException>(() => ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 60 }, "Monitor", "Monitor", "[1]"));
         Assert.Throws<InvalidDataException>(() => ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 60 }, "Monitor", "Monitor", """{ "monitors": 3 }"""));
+    }
+}
+
+public class SuggestReviewTests {
+    static readonly NumberStep?[] Whole = [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole];
+    static Suggestion? Suggested(IReadOnlyList<Sample> samples, double[] levels, double? now = null, NumberStep?[]? steps = null) =>
+        Suggest.SuggestionFor("m", samples, levels, steps ?? Whole, now ?? SuggestData.T0 + 5 * 86400, null, dayOf: SuggestData.UtcDay);
+
+    [Fact]
+    public void TheSentenceNeverContradictsTheChange() {
+        // Blind-down samples ask for 1 lower, but twenty half-open ones pull blind down up: no honest sentence, so no suggestion.
+        double[] l = [90, 50, 40];
+        var few = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 63, l));
+        var many = Enumerable.Range(0, 20).Select(d => SuggestData.Make(d % 4, 10, 30, 0.5, 95, l));
+        Assert.Null(Suggested(few.Concat(many).ToList(), l));
+    }
+
+    [Fact]
+    public void TheAmountIsTheMeanOfTheChangesThatPullTheSameWay() {
+        double[] l = [100, 78, 75];
+        // auto 86: three days lowered by 16, one day raised by 4. The proposal lowers, so the 4 does not count.
+        var lowered = Enumerable.Range(0, 9).Select(d => SuggestData.Make(d % 3, 9, 30, 0.35, 70, l));
+        var raised = new[] { SuggestData.Make(3, 9, 30, 0.35, 90, l) };
+        var s = Suggested(lowered.Concat(raised).ToList(), l);
+        Assert.NotNull(s);
+        Assert.True(s!.Lower);
+        Assert.Equal(16, s.Amount);
+    }
+
+    [Fact]
+    public void SamplesOlderThanFourteenDaysDoNotSuggest() {
+        double[] l = [100, 78, 75];
+        var samples = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 70, l)).ToList();
+        Assert.NotNull(Suggested(samples, l, SuggestData.T0 + 5 * 86400));
+        Assert.Null(Suggested(samples, l, SuggestData.T0 + 60 * 86400));
+    }
+
+    [Fact]
+    public void AMoveOfExactlyFivePointsIsProposed() {
+        // Blind fully down (auto 78), 60 changes at 73: the fit rounds to 73, a move of exactly 5, and the error falls by 5.
+        double[] l = [100, 78, 75];
+        var samples = Enumerable.Range(0, 60).Select(d => SuggestData.Make(d % 3, 9, 30, 0, 73, l)).ToList();
+        Assert.Equal(73, Suggest.RoundToStep(Suggest.Fit(samples, l, [Level.BlindDown])[1], NumberStep.Whole));
+        Assert.Equal(new[] { new LevelChange(Level.BlindDown, 78, 73) }, Suggested(samples, l)?.Changes);
+    }
+
+    [Fact]
+    public void AGainOfExactlyThreeIsProposed() {
+        // Chosen 70, 73 and 76 in equal numbers with the blind down (auto 78): blind down 73, error 5 to 2.
+        double[] l = [100, 78, 75];
+        var samples = Enumerable.Range(0, 60).Select(d => SuggestData.Make(d % 3, 9, 30, 0, new[] { 70, 73, 76 }[d % 3], l)).ToList();
+        Assert.Equal(3, Suggest.MeanAbsError(samples, l) - Suggest.MeanAbsError(samples, [100, 73, 75]), 1e-9);
+        Assert.Equal(new[] { new LevelChange(Level.BlindDown, 78, 73) }, Suggested(samples, l)?.Changes);
+    }
+
+    [Fact]
+    public void TheLightsBoostCountsWhenScoringAProposal() {
+        // Sun 0 degrees (daylight 0.2), lights on, levels 32 / 32 / 30: the automatic level is 35 (the boost). The user asks
+        // for 40; night would have to go to 41, but then the boost makes it 46: worse than now, so nothing is offered.
+        double[] l = [32, 32, 30];
+        var samples = Enumerable.Range(0, 12).Select(d => SuggestData.Make(d % 3, 20, 0, 1, 40, l, lights: true)).ToList();
+        Assert.Equal(35, samples[0].Auto);
+        Assert.Equal(41, Math.Round(Suggest.Fit(samples, l, [Level.Night])[2], MidpointRounding.AwayFromZero));
+        Assert.Null(Suggested(samples, l));
+    }
+
+    [Fact]
+    public void NonFiniteInputIsNotRecorded() {
+        static Sample? Make(int chosen = 70, int auto = 86, double elev = 30, double pos = 35, double light = 1, double[]? levels = null) =>
+            Suggest.MakeSample("m", chosen, auto, elev, pos, false, light, levels ?? new[] { 100.0, 78, 75 }, new Tuning(), 1000, new SampleContext());
+        Assert.NotNull(Make());
+        Assert.Null(Make(elev: double.NaN)); Assert.Null(Make(elev: double.PositiveInfinity));
+        Assert.Null(Make(pos: double.NaN)); Assert.Null(Make(light: double.NaN));
+        Assert.Null(Make(levels: [100, double.NaN, 75]));
+    }
+
+    [Fact]
+    public void OneBrokenSampleDoesNotEmptyTheFile() {
+        var good = SuggestData.Make(0, 9, 30, 0.35, 70, [100, 78, 75]);
+        var bad = good with { Elev = double.NaN };
+        Assert.Equal(new[] { good, good }, Suggest.Decode(Suggest.Encode([good, bad, good])));
+    }
+
+    [Fact]
+    public void AnUnusableStepIsNotProposed() {
+        Assert.Null(Suggest.RoundToStep(50, new NumberStep(0, 100, 0)));
+        Assert.Null(Suggest.RoundToStep(50, new NumberStep(0, 100, -5)));
+        Assert.Null(Suggest.RoundToStep(50, new NumberStep(90, 10, 1)));
+        Assert.Null(Suggest.RoundToStep(50, new NumberStep(150, 300, 1)));
+        Assert.Null(Suggest.RoundToStep(50, new NumberStep(-50, -10, 1)));
+        Assert.Equal(50, Suggest.RoundToStep(50, new NumberStep(-50, 150, 1)));
+        double[] l = [100, 78, 75];
+        var samples = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 70, l)).ToList();
+        Assert.Null(Suggested(samples, l, steps: [NumberStep.Whole, new NumberStep(0, 100, 0), NumberStep.Whole]));
+    }
+
+    [Fact]
+    public void SettingLevelsWritesOtherNumbersAsTyped() {
+        const string file = """
+            { "source": "sun", "location": { "latitude": 51.4812, "longitude": -0.0034 },
+              "tuning": { "cloudyDaylight": 0.35 },
+              "monitors": [ { "match": "Monitor", "day": 100, "blindDown": 78, "night": 75 } ] }
+            """;
+        string text = ConfigPatch.SetLevels(new Dictionary<string, int> { ["blindDown"] = 61 }, "Monitor", "Monitor", file);
+        Assert.Contains("51.4812", text);
+        Assert.Contains("-0.0034", text);
+        Assert.Contains("0.35", text);
+        Assert.DoesNotContain("0.3499", text);
+        Assert.Contains("61", text);
     }
 }
