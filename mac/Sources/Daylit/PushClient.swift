@@ -40,6 +40,7 @@ import DaylitCore
     private let session = URLSession(configuration: .ephemeral)
     private var path: NWPathMonitor?
     private var lastPath: String?
+    private var waitingForPath = false   // the network went away: reconnect when it is back
 
     init(tick: @escaping () -> Void, lastTick: @escaping () -> Date, daylightLimit: @escaping () -> Double) {
         self.tick = tick
@@ -57,7 +58,7 @@ import DaylitCore
         attempt = 0; lastReason = nil; loggedAt = nil
         guard t != nil else {
             if was != nil { Log.write(PushRule.offLine) }
-            path?.cancel(); path = nil; lastPath = nil   // no target: stop watching the network
+            path?.cancel(); path = nil; lastPath = nil; waitingForPath = false   // no target: stop watching the network
             return
         }
         watchNetwork()
@@ -75,7 +76,7 @@ import DaylitCore
     /// Wake from sleep or a network change: the old connection may be dead without knowing it.
     func reconnect(_ why: String) {
         guard target != nil, !stopped else { return }
-        log("push: reconnecting (\(why))")
+        Log.write("push: reconnecting (\(why))")
         close(); attempt = 0
         open()
     }
@@ -243,16 +244,23 @@ import DaylitCore
         guard path == nil else { return }
         let m = NWPathMonitor()
         m.pathUpdateHandler = { [weak self] p in
-            let key = "\(p.status) " + p.availableInterfaces.map(\.name).joined(separator: ",")
-            Task { @MainActor in self?.pathChanged(key) }
+            // Status, interfaces and gateways: joining another Wi-Fi on the same interface changes the gateway. The key is
+            // only compared, never logged. Limit: a network with the same gateway address (two home routers at 192.168.x.1)
+            // looks unchanged; the missed-pong check then catches the dead connection within about 70 s.
+            let key = "\(p.status) " + p.availableInterfaces.map(\.name).joined(separator: ",") + " " + p.gateways.map { "\($0)" }.joined(separator: ",")
+            let up = p.status == .satisfied
+            Task { @MainActor in self?.pathChanged(key, satisfied: up) }
         }
         m.start(queue: .main)
         path = m
     }
 
-    private func pathChanged(_ key: String) {
+    private func pathChanged(_ key: String, satisfied: Bool) {
         defer { lastPath = key }
-        guard let was = lastPath, was != key else { return }   // the first report is the current network
+        guard let was = lastPath else { return }   // the first report is the current network
+        if !satisfied { if was != key { waitingForPath = true }; return }   // no network: wait for it, do not dial
+        guard was != key || waitingForPath else { return }
+        waitingForPath = false
         reconnect("network change")
     }
 

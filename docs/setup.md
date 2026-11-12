@@ -348,7 +348,9 @@ switch yet.
 - **A rejected token** stops it until you save a new token (gear menu / tray menu → *Home Assistant
   token…*) or the config changes; the panel says so.
 - **The log** shows `push: connected (N entities)`, `push: lost (<reason>), retrying in Ns` (once, then
-  every 10 minutes while it keeps failing) and `push: off`. The token is never logged.
+  every 10 minutes while it keeps failing), `push: reconnecting (wake)` or `(network change)`,
+  `push: token rejected (<reason>), not retrying until the token or config changes`,
+  `push: no token stored, waiting for one` and `push: off`. The token is never logged.
 - **Behind a reverse proxy,** the proxy must pass WebSockets on `/api/websocket` (Home Assistant's own
   app needs that too).
 - `--check-config` shows `"push": true` in its `homeAssistant` block.
