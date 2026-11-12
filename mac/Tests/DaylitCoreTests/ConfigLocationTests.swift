@@ -215,3 +215,25 @@ final class DataForPatchTests: XCTestCase {
         }
     }
 }
+
+final class OpenedTests: XCTestCase {
+    func testWhatTheWindowSawAndWhenItChanged() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("daylit-opened-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("config.json")
+        XCTAssertEqual(ConfigLocation.open(at: f), .file(nil))
+        try Data().write(to: ConfigLocation.placeholder(for: f))
+        let evicted = ConfigLocation.open(at: f)
+        XCTAssertEqual(evicted, .blocked("config.json is still downloading from iCloud Drive"))
+        XCTAssertEqual(evicted.blockedReason, "config.json is still downloading from iCloud Drive")
+        XCTAssertNil(evicted.data)
+        try Data("{}".utf8).write(to: f)   // the download finished
+        XCTAssertNotEqual(ConfigLocation.open(at: f), evicted)
+        XCTAssertEqual(ConfigLocation.open(at: f).data, Data("{}".utf8))
+        try FileManager.default.removeItem(at: f)
+        try FileManager.default.createDirectory(at: f, withIntermediateDirectories: false)
+        let bad = ConfigLocation.open(at: f)
+        XCTAssertTrue(bad.blockedReason?.hasPrefix("config.json could not be read (") == true)
+    }
+}
