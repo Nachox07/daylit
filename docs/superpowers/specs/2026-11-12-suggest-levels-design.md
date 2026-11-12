@@ -103,6 +103,24 @@ tests to pass again.
 A level that comes from Home Assistant but is unavailable right now (the helper reads below 0, or
 HA is down) is not proposed.
 
+**Protecting situations the user did not correct.** A proposal must not change the target by more
+than 3 points in a reference situation unless the user's samples cover it. The references are:
+
+- a sunny day with the blind fully down (`s = 1`, `p = 0`, lights off)
+- a sunny day with the blind open (`s = 1`, `p = 1`, lights off)
+- an evening with the lights on (`s = 0`, lights on, the sun below `lightsBoostSunBelow`)
+
+A sample covers a reference when the level that reference depends on most carries at least 0.55 of
+the sample's weight: blind down for the first, day for the second, night for the third. That level
+is then a candidate, so in this design the check only fails when a fit moves a level with no
+support. It never should, because only candidate levels move. It is kept as a test that guards the
+evenings and sunny days against a later change to the fit, not as an extra filter.
+
+Cloudy mornings with the blind partly open are a known gap. At blind 40%, day 95 and blind down 62
+mix to 75.2, the same as night 75. The target is then about 75 whatever the light, so no level can
+explain a change to 63 without hurting sunny days or evenings. This design makes no suggestion for
+them. A separate control for dim daylight is tracked in its own issue.
+
 ## 5. The panel line
 
 A one-line card at the bottom of the panel, only while a suggestion is pending:
@@ -167,6 +185,11 @@ A one-line card at the bottom of the panel, only while a suggestion is pending:
 - **Trigger:** the 5-point and 3-point thresholds, scored through `target`, including a sample
   where the boost applies; *Not now* hides for 7 days.
 - **Rounding** to an HA step (for example step 5, min 10, max 90).
+- **Cloudy mornings make no suggestion:** the second day's two changes replayed on three
+  different days, at levels day 95, blind down 62 and night 75, with `s` 0.5–0.7 and the blind
+  40–58% open, produce no suggestion.
+- **References stay put:** for every fixture that does produce a suggestion, the evening-with-lights
+  target and the target of any level that was not proposed move by no more than 3 points.
 - **Apply clears the offset:** no doubled correction on the next `decide`.
 - **The motivating week as a fixture**, anonymised, with the levels day 100 / blind down 78 /
   night 75. Blind down is proposed lower by at least 5, in the 45–65 range. Night is not proposed.
