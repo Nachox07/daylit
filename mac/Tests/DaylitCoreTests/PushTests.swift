@@ -280,3 +280,14 @@ final class PushTimingTests: XCTestCase {
         XCTAssertFalse(PushRule.wanted(push: true, source: .homeAssistant, paused: false, auto: true, hasMonitors: false))
     }
 }
+
+final class PushAuthTimeoutTests: XCTestCase {
+    func testNoAuthReplyAfterTenSecondsIsATimeout() {
+        XCTAssertEqual(PushRule.authTimeout, 10)
+        XCTAssertFalse(PushRule.authTimedOut(elapsed: 9.9, authenticated: false))
+        XCTAssertTrue(PushRule.authTimedOut(elapsed: 10, authenticated: false))
+    }
+    func testAnAuthenticatedConnectionNeverTimesOut() {
+        XCTAssertFalse(PushRule.authTimedOut(elapsed: 60, authenticated: true))
+    }
+}

@@ -113,6 +113,9 @@ extension PushRule {
     /// not tell Daylit the link is dead; our ping does. On battery it runs half as often, to wake the Mac less.
     public static func pingInterval(onBattery: Bool) -> Double { onBattery ? 2 * pingEvery : pingEvery }
     public static let pongTimeout: Double = 10
+    /// auth_required/auth_ok must arrive within this many seconds of connecting, else the connection counts as lost.
+    public static let authTimeout: Double = 10
+    public static func authTimedOut(elapsed: Double, authenticated: Bool) -> Bool { !authenticated && elapsed >= authTimeout }
     /// Waits before each reconnect attempt; the last one repeats.
     public static let backoff: [Double] = [2, 5, 15, 60]
 

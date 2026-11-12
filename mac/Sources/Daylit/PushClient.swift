@@ -31,6 +31,8 @@ import DaylitCore
     private var stopped = false
     private var nextId = 1, subscribeId = 0
     private var awaitingPong = false
+    private var authenticated = false
+    private var authTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?, pingTask: Task<Void, Never>?, tickTask: Task<Void, Never>?
     private var timer = PushTimer()
     /// The once-then-every-10-minutes rule (HAErrorRule.shouldLog) for "lost" lines.
@@ -96,9 +98,12 @@ import DaylitCore
                 Log.write("push: no token stored, waiting for one")
                 return
             }
+            guard self.task == nil else { return }   // never two sockets: a reload closes the old one first
             let ws = self.session.webSocketTask(with: t.url)
             self.task = ws
+            self.authenticated = false
             ws.resume()
+            self.startAuthTimer(c)
             self.receive(ws, c, token, t)
         }
     }
@@ -121,6 +126,7 @@ import DaylitCore
                     token = nil
                     self.send(ws, PushRule.authMessage(token: tk), c)
                 case .authOk:
+                    self.authenticated = true; self.authTask?.cancel()
                     self.subscribeId = self.nextId; self.nextId += 1
                     self.send(ws, PushRule.subscribeMessage(id: self.subscribeId, entities: t.entities), c)
                 case .authInvalid(let why):
@@ -139,6 +145,17 @@ import DaylitCore
                     break
                 }
             }
+        }
+    }
+
+    /// No auth_required/auth_ok within PushRule.authTimeout of connecting: treat the connection as lost.
+    private func startAuthTimer(_ c: Int) {
+        let started = Date()
+        authTask?.cancel()
+        authTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(PushRule.authTimeout * 1_000_000_000))
+            guard c == self.conn, !Task.isCancelled else { return }
+            if PushRule.authTimedOut(elapsed: Date().timeIntervalSince(started), authenticated: self.authenticated) { self.lost("no auth reply", c) }
         }
     }
 
@@ -216,8 +233,8 @@ import DaylitCore
         conn += 1
         healthy = false; awaitingPong = false
         task?.cancel(with: .goingAway, reason: nil); task = nil
-        retryTask?.cancel(); pingTask?.cancel(); tickTask?.cancel()
-        retryTask = nil; pingTask = nil; tickTask = nil
+        retryTask?.cancel(); pingTask?.cancel(); tickTask?.cancel(); authTask?.cancel()
+        authTask = nil; retryTask = nil; pingTask = nil; tickTask = nil
         timer.clear()
     }
 
