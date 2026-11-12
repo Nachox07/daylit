@@ -3,6 +3,7 @@
 // locally, or Home Assistant (sun, a window blind, room lights). Same behaviour as mac/; see README.md.
 using System.Diagnostics;
 using System.IO;
+using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -76,6 +77,9 @@ sealed partial class Controller {
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
     DateTime? haLoggedAt;   // when the current outage was last written to the log (HaErrorRule.ShouldLog)
+    /// Push updates from Home Assistant (experimental): says when to tick. Null in snapshots.
+    PushClient? push;
+    DateTime lastTick = DateTime.MinValue;   // UTC, when the last tick started (push: the daylight sensor's limit)
 
     /// Fixed state and nothing else: no tray, hotkeys, timers, monitors or network (UI snapshots).
     public Controller(Config cfg, List<Mon> mons, string subtitle) {
@@ -123,7 +127,10 @@ sealed partial class Controller {
         SystemEvents.PowerModeChanged += OnPower;
         SystemEvents.DisplaySettingsChanged += OnDisplays;
         SystemEvents.UserPreferenceChanged += OnPrefs;
+        NetworkChange.NetworkAddressChanged += OnNetwork;
 
+        push = new PushClient(ui, () => _ = Tick("push"), () => lastTick, () => HAClient.Token);
+        push.HealthChanged += StartTimers;
         StartTimers();
         _ = Tick("start");
         if (Program.ShowSignal is { } sig)
@@ -152,6 +159,7 @@ sealed partial class Controller {
         Load();
         panel.Rebuild();
         StartTimers();
+        SyncPush(force: true);   // a reload rebuilds the entity list and resubscribes
         _ = Tick("reload");
         if (Source == Source.HomeAssistant && HAClient.Token == null) AskToken();
     }
@@ -179,11 +187,14 @@ sealed partial class Controller {
             return;
         }
         HAClient.Token = t;
+        push?.TokenChanged();
         _ = Tick("token");
     }
 
     public void Quit() {
         timer.Stop(); idleWatch.Stop();
+        if (push is { } p) { p.HealthChanged -= StartTimers; p.Update(null); push = null; }   // closing must not restart the timers or reopen
+        NetworkChange.NetworkAddressChanged -= OnNetwork;
         SystemEvents.PowerModeChanged -= OnPower;
         SystemEvents.DisplaySettingsChanged -= OnDisplays;
         SystemEvents.UserPreferenceChanged -= OnPrefs;
@@ -194,16 +205,31 @@ sealed partial class Controller {
 
     // MARK: timing
 
-    /// 30 s on mains power, 2 min on battery. Nothing periodic when there is no automatic source.
+    /// 30 s on mains power, 2 min on battery, 5 min while push updates are connected. Nothing periodic when there
+    /// is no automatic source.
     void StartTimers() {
+        SyncPush();
         if (Source == Source.Off || Paused) { timer.Stop(); idleWatch.Stop(); return; }
-        timer.Interval = TimeSpan.FromSeconds(Win.OnBattery ? Cfg.Tuned.BatteryPollSeconds : Cfg.Tuned.PollSeconds);
+        timer.Interval = TimeSpan.FromSeconds(PushRule.PollInterval(push?.Healthy == true, Win.OnBattery, Cfg.Tuned));
         timer.Start(); idleWatch.Start();
     }
 
+    /// Opens or closes the push socket for the current config, source, pause, Automatic and monitors (PushRule.Wanted).
+    void SyncPush(bool force = false) {
+        if (push == null) return;
+        if (!PushRule.Wanted(Cfg.HomeAssistant?.Push, Source, Paused, AutoOn, Mons.Count > 0) || PushRule.SocketUrl(Cfg.HomeAssistant?.Url) is not { } url) {
+            push.Update(null);
+            return;
+        }
+        push.Update(new PushClient.Target(url, PushRule.Entities(Cfg), Cfg.HomeAssistant!.Light), force);
+    }
+
+    // NetworkChange raises on a thread-pool thread.
+    void OnNetwork(object? s, EventArgs e) => ui.BeginInvoke(() => push?.NetworkChanged());
+
     // SystemEvents may raise on another thread: always hop to the UI thread.
     void OnPower(object? s, PowerModeChangedEventArgs e) => ui.BeginInvoke(() => {
-        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
+        if (e.Mode == PowerModes.Resume) { ForgetHandSet(); push?.Reconnect("wake"); _ = Later(5000, "wake", ForgetContrast); }   // DDC needs a moment after wake
         else if (e.Mode == PowerModes.StatusChange) {   // plugged in / unplugged
             bool was = timer.IsEnabled;
             StartTimers();
@@ -366,6 +392,7 @@ sealed partial class Controller {
             Log.Write($"tick ({why}): {e}");
         } finally {
             busy = false;
+            SyncPush();   // Automatic (also from Home Assistant) and the monitors may have changed
             var on = Mons.Where(m => m.On).Select(m => $"{m.Label} {m.Cur}%");
             var tip = "Daylit · " + (on.Any() ? string.Join(" · ", on) : "no external monitor");
             tray.Text = tip.Length > 127 ? tip[..127] : tip;
@@ -535,6 +562,7 @@ sealed partial class Controller {
     }
 
     async Task TickOnce() {
+        lastTick = DateTime.UtcNow;
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
         await ApplyContrast(mons);
@@ -590,6 +618,7 @@ sealed partial class Controller {
             lastHaLights = s.Lights;
         }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
+        Error ??= push?.Problem;   // after the REST errors, like the Mac
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         s = ApplyLight(s, !haDown && Source == Source.HomeAssistant, out double light);

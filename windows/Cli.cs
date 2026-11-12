@@ -93,6 +93,8 @@ static class Cli {
             notes.Add($"no Home Assistant token stored yet as \"{cfg.TokenName}\": the app asks for it on start (the user pastes it)");
         if (cfg.Effective == Source.HomeAssistant && cfg.HomeAssistant?.Url is { } haUrl && Config.IsCleartextToNonLocal(haUrl))
             notes.Add("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://");
+        if (cfg.Effective != Source.HomeAssistant && cfg.HomeAssistant?.Push == true)
+            notes.Add($"homeAssistant.push is on but the source is {cfg.Effective}: push updates only run with Home Assistant");
         var result = new {
             ok = problems.Count == 0,
             path = Config.DisplayPath,
@@ -104,7 +106,7 @@ static class Cli {
             // the numbers in use, defaults included
             tuning = TuningField.All.ToDictionary(f => f.Id, f => TuningField.SetValues(cfg.Tuning).GetValueOrDefault(f.Id, f.Default))
                 .Append(new KeyValuePair<string, double>("theme.room", cfg.Tuned.Room ? 1 : 0)).ToDictionary(),
-            homeAssistant = cfg.Effective == Source.HomeAssistant ? new { url = cfg.HomeAssistant?.Url, tokenName = cfg.TokenName, tokenStored } : null,
+            homeAssistant = cfg.Effective == Source.HomeAssistant ? new { url = cfg.HomeAssistant?.Url, tokenName = cfg.TokenName, tokenStored, push = cfg.HomeAssistant?.Push == true } : null,
         };
         return (JsonSerializer.Serialize(result, Out), problems.Count == 0 ? 0 : 1);
     }
