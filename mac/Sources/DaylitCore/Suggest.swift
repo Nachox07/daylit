@@ -50,3 +50,47 @@ public enum Suggest {
         Level.allCases.filter { l in Set(samples.filter { dominates($0, l) }.map { dayOf($0.at) }).count >= minDays }
     }
 }
+
+extension Suggest {
+    /// Least squares for the candidate levels, the others held at their current values, with a pull of
+    /// weight 1 toward the current value (as one extra sample at the current level):
+    ///     minimise Σ (chosen − x·L)² + Σ_candidates (L_k − current_k)²
+    /// Returns all three levels, each fitted one clamped to 0–100 (not rounded: see roundToStep).
+    public static func fit(_ samples: [Sample], levels: [Double], candidates: [Level]) -> [Double] {
+        let c = candidates.map(\.rawValue), n = c.count
+        guard n > 0, levels.count == 3 else { return levels }
+        var a = [[Double]](repeating: [Double](repeating: 0, count: n), count: n)
+        var b = [Double](repeating: 0, count: n)
+        for x in samples {
+            let w = weights(s: x.s, p: x.p)
+            var y = Double(x.chosen)
+            for k in 0..<3 where !c.contains(k) { y -= w[k] * levels[k] }
+            for i in 0..<n {
+                b[i] += w[c[i]] * y
+                for j in 0..<n { a[i][j] += w[c[i]] * w[c[j]] }
+            }
+        }
+        for i in 0..<n { a[i][i] += 1; b[i] += levels[c[i]] }   // the pull toward the current value
+        let solved = solve(a, b)
+        var out = levels
+        for i in 0..<n { out[c[i]] = min(max(solved[i], 0), 100) }
+        return out
+    }
+
+    /// Gaussian elimination with partial pivoting. The pull adds 1 to the diagonal, so the matrix is
+    /// positive definite and no pivot is 0.
+    static func solve(_ a0: [[Double]], _ b0: [Double]) -> [Double] {
+        var a = a0, b = b0
+        let n = b.count
+        for col in 0..<n {
+            let piv = (col..<n).max { abs(a[$0][col]) < abs(a[$1][col]) }!
+            a.swapAt(col, piv); b.swapAt(col, piv)
+            for r in 0..<n where r != col {
+                let f = a[r][col] / a[col][col]
+                for k in col..<n { a[r][k] -= f * a[col][k] }
+                b[r] -= f * b[col]
+            }
+        }
+        return (0..<n).map { b[$0] / a[$0][$0] }
+    }
+}
