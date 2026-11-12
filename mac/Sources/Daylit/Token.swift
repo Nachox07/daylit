@@ -92,6 +92,7 @@ struct TokenView: View {
             if saved {
                 HAClient.tokenCache = [:]
                 Log.write("token: saved to the keychain")
+                model.push.tokenChanged()
                 model.refresh()
             }
         })

@@ -80,6 +80,8 @@ import DaylitCore
     var lastTick = Date.distantPast
     var timer: Timer?
     var screenDebounce: DispatchWorkItem?
+    /// Push updates from Home Assistant (experimental): says when to tick. Created on first use, so previews have none.
+    lazy var push = PushClient(tick: { [weak self] in self?.refresh() }, lastTick: { [weak self] in self?.lastTick ?? .distantPast })
 
     /// A model with fixed state and no side effects (no displays, keys, timers or network): snapshots.
     init(preview: Void) {}
@@ -94,7 +96,7 @@ import DaylitCore
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in
                 log("wake"); for i in self.mons.indices { self.mons[i].lastSet = nil }   // as after idle
-                try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect() }
+                try? await Task.sleep(nanoseconds: 3_000_000_000); self.redetect(); self.push.reconnect("wake") }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in self.screensChanged() }
@@ -132,6 +134,15 @@ import DaylitCore
             log(String(format: "sun elevation now %.2f° at %.3f, %.3f", solarElevation(latitude: l.latitude, longitude: l.longitude), l.latitude, l.longitude))
         }
         redetect()
+        syncPush(force: true)   // a reload rebuilds the entity list and resubscribes
+    }
+
+    /// Opens or closes the push socket for the current config, source, pause, Automatic and monitors (PushRule.wanted).
+    func syncPush(force: Bool = false) {
+        guard PushRule.wanted(push: config.homeAssistant?.push, source: source, paused: paused, auto: auto, hasMonitors: !mons.isEmpty),
+              let ha = config.homeAssistant, let url = PushRule.socketURL(ha.url ?? "") else { push.update(nil); return }
+        push.update(.init(url: url, tokenName: ha.tokenName ?? "daylit-home-assistant", entities: PushRule.entities(config), daylight: ha.light),
+                    force: force)
     }
 
     func screensChanged() {
@@ -238,6 +249,7 @@ import DaylitCore
                 detail = "Paused on battery"
             }
         }
+        syncPush()   // pause, Automatic (also from Home Assistant) and monitors can change between checks
         if paused || mons.isEmpty { return }   // nothing to do until power or a monitor comes back
         let here = idleSeconds() < config.tuned.idleSeconds
         if here && !wasHere {
@@ -251,7 +263,7 @@ import DaylitCore
         if !here && wasHere && source != .off { Log.write("idle: paused") }
         wasHere = here
         guard source != .off else { return }
-        let interval: Double = Power.onBattery ? config.tuned.batteryPollSeconds : config.tuned.pollSeconds
+        let interval = PushRule.pollInterval(healthy: push.healthy, onBattery: Power.onBattery, tuning: config.tuned)
         if Date().timeIntervalSince(lastTick) >= interval { refresh() }
     }
 
@@ -384,6 +396,7 @@ import DaylitCore
             UserDefaults.standard.set(on, forKey: "auto")
         }
         if on { for i in mons.indices { forgetHandSet(i) } }
+        syncPush()
         refresh()
     }
 
@@ -404,6 +417,7 @@ import DaylitCore
         pauseOnBattery = on
         UserDefaults.standard.set(on, forKey: "pauseOnBattery")
         Log.write("pause on battery: " + (on ? "on" : "off"))
+        syncPush()
         refresh()
     }
 
@@ -791,7 +805,7 @@ import DaylitCore
             }
             switch result {
             case .success(let s):
-                problem = configProblem
+                problem = configProblem ?? push.problem
                 if lastHAError != nil {
                     let mins = haDownSince.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
                     Log.write("home assistant: ok" + (mins > 0 ? " again after \(mins) min" : ""))
@@ -848,7 +862,7 @@ import DaylitCore
                 let transient = f == .unreachable
                 let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
                                                   now: Date().timeIntervalSince1970)
-                problem = show ? message : configProblem
+                problem = show ? message : configProblem ?? push.problem
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= config.tuned.haFallbackSeconds {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
