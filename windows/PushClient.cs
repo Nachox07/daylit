@@ -122,7 +122,7 @@ sealed class PushClient {
                     if (secret is { } s) { secret = null; await Send(socket, gate, PushRule.AuthMessage(s), stop).ConfigureAwait(false); }
                     continue;
                 }
-                ui.BeginInvoke(() => Handle(m, c, t));
+                _ = ui.BeginInvoke(() => Handle(m, c, t));
             }
         } catch (OperationCanceledException) when (stop.IsCancellationRequested) {
             return;   // closed on purpose
@@ -130,7 +130,7 @@ sealed class PushClient {
             // The type and code only: never a message that could quote the request.
             reason = e is WebSocketException we ? $"WebSocket {we.WebSocketErrorCode}" : e.GetType().Name;
         }
-        ui.BeginInvoke(() => Lost(reason, c));
+        _ = ui.BeginInvoke(() => Lost(reason, c));
     }
 
     static async Task Send(ClientWebSocket socket, SemaphoreSlim gate, string text, CancellationToken stop) {
