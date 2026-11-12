@@ -204,6 +204,9 @@ final class SuggestTriggerTests: XCTestCase {
         XCTAssertEqual(s.sentence(label: "Monitor"),
                        "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62, day 100 → 95?")
         XCTAssertEqual(Suggestion.fmt(62.5), "62.5")
+        XCTAssertEqual(Suggestion.fmt(62.25), "62.25")
+        XCTAssertEqual(Suggestion.fmt(62), "62")
+        XCTAssertEqual(Suggestion.fmt(62.004), "62")
         let up = Suggestion(monitor: "m", changes: [LevelChange(level: .night, from: 20, to: 30)], amount: 8, lower: false, samples: 3, days: 3)
         XCTAssertEqual(up.sentence(label: "Monitor"), "You raise Monitor by about 8 in the evening. Set night 20 → 30?")
     }
@@ -321,6 +324,25 @@ final class SuggestStoreTests: XCTestCase {
         let a = Fixture.sample(5, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])    // 15 days old
         let b = Fixture.sample(7, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])    // 13 days old
         XCTAssertEqual(Suggest.dropOld([a, b], now: now), [b])
+    }
+
+    func testSamplesDatedMoreThanADayAheadAreDropped() {
+        let now = Fixture.t0
+        let ok = Fixture.sample(0, 0, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])
+        var soon = ok; soon.at = now + 86400
+        var far = ok; far.at = now + 86401
+        var corrupt = ok; corrupt.at = 1e13
+        XCTAssertEqual(Suggest.dropOld([ok, soon, far, corrupt], now: now), [ok, soon])
+    }
+
+    func testAMissingRequiredKeyRejectsTheFile() {
+        let text = #"{"samples": [{"monitor": "m", "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78, 75], "at": 0}]}"#
+        XCTAssertEqual(Suggest.decode(Data(text.utf8)), [])
+    }
+
+    func testTheScoringCapsDaylightAtTheSampleFraction() {
+        let x = Sample(monitor: "m", chosen: 58, auto: 100, s: 0.4, p: 1, elev: 30, lights: false, levels: [100, 50, 30], at: Fixture.t0)
+        XCTAssertEqual(Suggest.meanAbsError([x], levels: [100, 50, 30]), 0)
     }
 
     func testSamplesSurviveTheFile() {

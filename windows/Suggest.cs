@@ -157,8 +157,8 @@ sealed record Suggestion(string Monitor, IReadOnlyList<LevelChange> Changes, int
     /// "suggest: Monitor blind down 78 → 62 (12 changes on 4 days)"
     public string LogLine(string label) => $"suggest: {label} {ChangeText} ({Samples} changes on {Days} days)";
 
-    /// A whole number without decimals, otherwise one decimal (an input_number with step 0.5).
-    public static string Fmt(double v) => v == Math.Round(v) ? ((long)v).ToString(CultureInfo.InvariantCulture) : v.ToString("0.0", CultureInfo.InvariantCulture);
+    /// Up to two decimals, trailing zeros trimmed: 62.25 → "62.25", 62.5 → "62.5", 62 → "62". Culture-independent.
+    public static string Fmt(double v) => Math.Round(v, 2, MidpointRounding.AwayFromZero).ToString("0.##", CultureInfo.InvariantCulture);
 }
 
 static partial class Suggest {
@@ -173,10 +173,10 @@ static partial class Suggest {
     public static bool SameLevels(double[]? a, double[]? b) =>
         a != null && b != null && a.Length == b.Length && a.Zip(b).All(p => Math.Abs(p.First - p.Second) < 1e-6);
 
-    /// The real target (boost, clamp, rounding) for a sample's moment with other levels. S already holds the
-    /// cloud cap, so light is 1; the boost rule is the tick's: the sun below lightsBoostSunBelow.
+    /// The real target (boost, clamp, rounding) for a sample's moment with other levels. S holds the cloud cap and
+    /// caps the elevation's fraction as in the Mac app, so light is 1; the boost rule is the tick's: the sun below lightsBoostSunBelow.
     public static int Rerun(Sample x, double[] levels, Tuning t) =>
-        Rules.Target(levels, x.P * 100, x.Lights, x.S, t, x.Elev < t.LightsBoostSunBelow, 1);
+        Rules.Target(levels, x.P * 100, x.Lights, Math.Min(t.Fraction(x.Elev), x.S), t, x.Elev < t.LightsBoostSunBelow, 1);
 
     /// Mean of |target − chosen| over the samples, with `levels`.
     public static double MeanAbsError(IReadOnlyList<Sample> samples, double[] levels, Tuning? t = null) {
@@ -301,8 +301,8 @@ static partial class Suggest {
     /// Samples older than this are dropped on load and on save (seconds).
     public const double MaxAge = 14 * 86400;
 
-    /// Without the samples older than MaxAge.
-    public static List<Sample> DropOld(IEnumerable<Sample> samples, double now) => samples.Where(x => now - x.At <= MaxAge).ToList();
+    /// Without the samples older than MaxAge or dated more than a day ahead (a corrupt At).
+    public static List<Sample> DropOld(IEnumerable<Sample> samples, double now) => samples.Where(x => now - x.At <= MaxAge && x.At <= now + 86400).ToList();
 
     /// Without the samples whose levels differ from their monitor's levels now (`current`, by monitor key):
     /// after Apply, a change in Settings or of a Home Assistant helper, a level starts from fresh evidence.
@@ -311,7 +311,8 @@ static partial class Suggest {
         samples.Where(x => !current.TryGetValue(x.Monitor, out var lv) || SameLevels(lv, x.Levels)).ToList();
 
     static readonly JsonSerializerOptions Json = new() {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true };
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true,
+        RespectRequiredConstructorParameters = true };
 
     /// The samples in corrections.json; none when it is missing or broken. Entries without three levels are skipped.
     public static List<Sample> Decode(string? text) {
@@ -319,7 +320,7 @@ static partial class Suggest {
         try {
             var f = JsonSerializer.Deserialize<CorrectionsFile>(text, Json);
             return f?.Samples?.Where(x => x is not null && x.Monitor is not null && x.Levels is { Length: 3 }).ToList() ?? new List<Sample>();
-        } catch (JsonException) { return new List<Sample>(); }
+        } catch (JsonException) { return new List<Sample>(); }   // includes a sample missing a required key, as Swift rejects the file
     }
 
     /// corrections.json's content.

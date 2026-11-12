@@ -159,9 +159,13 @@ public struct Suggestion: Equatable {
     /// "suggest: Monitor blind down 78 → 62 (12 changes on 4 days)"
     public func logLine(label: String) -> String { "suggest: \(label) \(changeText) (\(samples) changes on \(days) days)" }
 
-    /// A whole number without decimals, otherwise one decimal (an input_number with step 0.5).
+    /// Up to two decimals, trailing zeros trimmed: 62.25 → "62.25", 62.5 → "62.5", 62 → "62". Locale-independent.
     public static func fmt(_ v: Double) -> String {
-        v == v.rounded() ? String(Int(v)) : String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), v)
+        let r = (v * 100).rounded() / 100
+        if r == r.rounded() { return String(Int(r)) }
+        var t = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), r)
+        while t.hasSuffix("0") { t.removeLast() }
+        return t
     }
 }
 
@@ -312,8 +316,8 @@ extension Suggest {
     /// Samples older than this are dropped on load and on save (seconds).
     public static let maxAge: Double = 14 * 86400
 
-    /// Without the samples older than `maxAge`.
-    public static func dropOld(_ samples: [Sample], now: Double) -> [Sample] { samples.filter { now - $0.at <= maxAge } }
+    /// Without the samples older than `maxAge` or dated more than a day ahead (a corrupt `at`).
+    public static func dropOld(_ samples: [Sample], now: Double) -> [Sample] { samples.filter { now - $0.at <= maxAge && $0.at <= now + 86400 } }
 
     /// Without the samples whose levels differ from their monitor's levels now (`current`, by monitor key):
     /// after Apply, a change in Settings or of a Home Assistant helper, a level starts from fresh evidence.

@@ -203,6 +203,9 @@ public class SuggestTriggerTests {
         var s = new Suggestion("m", [new LevelChange(Level.BlindDown, 78, 62), new LevelChange(Level.Day, 100, 95)], 12, true, 12, 4);
         Assert.Equal("You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62, day 100 → 95?", s.Sentence("Monitor"));
         Assert.Equal("62.5", Suggestion.Fmt(62.5));
+        Assert.Equal("62.25", Suggestion.Fmt(62.25));
+        Assert.Equal("62", Suggestion.Fmt(62));
+        Assert.Equal("62", Suggestion.Fmt(62.004));
         var up = new Suggestion("m", [new LevelChange(Level.Night, 20, 30)], 8, false, 3, 3);
         Assert.Equal("You raise Monitor by about 8 in the evening. Set night 20 → 30?", up.Sentence("Monitor"));
     }
@@ -323,6 +326,27 @@ public class SuggestStoreTests {
         var a = SuggestData.Make(5, 9, 30, 0.35, 70, [100, 78, 75]);   // 15 days old
         var b = SuggestData.Make(7, 9, 30, 0.35, 70, [100, 78, 75]);   // 13 days old
         Assert.Equal(new[] { b }, Suggest.DropOld([a, b], now));
+    }
+
+    [Fact]
+    public void SamplesDatedMoreThanADayAheadAreDropped() {
+        double now = SuggestData.T0;
+        var ok = SuggestData.Make(0, 0, 30, 0.35, 70, [100, 78, 75]);
+        var soon = ok with { At = now + 86400 };
+        var far = ok with { At = now + 86401 };
+        var corrupt = ok with { At = 1e13 };
+        Assert.Equal(new[] { ok, soon }, Suggest.DropOld([ok, soon, far, corrupt], now));
+    }
+
+    [Fact]
+    public void AMissingRequiredKeyRejectsTheFile() {
+        Assert.Empty(Suggest.Decode("""{"samples": [{"monitor": "m", "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78, 75], "at": 0}]}"""));
+    }
+
+    [Fact]
+    public void TheScoringCapsDaylightAtTheSampleFraction() {
+        var x = new Sample("m", 58, 100, 0.4, 1, 30, false, [100, 50, 30], SuggestData.T0);
+        Assert.Equal(0, Suggest.MeanAbsError([x], [100, 50, 30]));
     }
 
     [Fact]
