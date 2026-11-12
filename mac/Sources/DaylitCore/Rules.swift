@@ -31,11 +31,29 @@ public func target(day: Double, blindDown: Double, night: Double, elev: Double, 
     return Int(min(max(v, 0), 100).rounded())
 }
 
-/// The three levels in effect: Home Assistant's value where it has one (>= 0), else the local number.
+/// The levels in effect: [day, blindDown, night], plus a fourth, nightLights, when the monitor has one.
+/// `local`: [day, blindDown, night], with nightLights as a fourth when the config sets it (below 0: none).
+/// `fromHA`: a template row [day, blindDown, night, nightLights, set, setChanged] or what fallbackLevels kept.
+/// Home Assistant's value wins where it has one (>= 0), else the local number.
 public func effectiveLevels(local: [Double], fromHA: [Double]?) -> [Double] {
-    var lv = local
+    var lv = Array(local.prefix(3))
     if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = ov[k] } }
+    let fromRow = fromHA.flatMap { $0.count > 3 && $0[3] >= 0 ? $0[3] : nil }
+    let own = local.count > 3 && local[3] >= 0 ? local[3] : nil
+    if let nl = fromRow ?? own { lv.append(nl) }
     return lv
+}
+
+/// The nightLights level in a monitor's levels in effect; nil when it has none.
+public func nightLightsLevel(_ levels: [Double]) -> Double? { levels.count > 3 && levels[3] >= 0 ? levels[3] : nil }
+
+/// The room lights for one monitor this tick. Home Assistant's answer while it gives one. In the sun fallback
+/// a monitor with a nightLights level keeps the last state seen (`last`; off when none was seen), as the blind
+/// keeps its last position, so a lit evening does not drop to night during an outage. Every other monitor
+/// counts the lights as off there, as before.
+public func roomLights(reported: Bool, fromHA: Bool, last: Bool?, hasNightLights: Bool) -> Bool {
+    if fromHA { return reported }
+    return hasNightLights ? last ?? false : false
 }
 
 /// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night]. The "set" helper

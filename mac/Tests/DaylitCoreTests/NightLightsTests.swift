@@ -88,3 +88,40 @@ final class NightLightsTargetTests: XCTestCase {
         XCTAssertEqual(target(day: 95, blindDown: 62, night: 75, elev: 30, pos: 40, lights: true, light: 0.5), 75)
     }
 }
+
+final class NightLightsLevelsTests: XCTestCase {
+    func testHomeAssistantValueWinsWhenZeroOrMore() {
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20, 50], fromHA: [-1, -1, -1, 65, -1, 0]), [70, 40, 20, 65])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20, 50], fromHA: [-1, -1, -1, 0, -1, 0]), [70, 40, 20, 0])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20, 50], fromHA: [-1, -1, -1, -1, -1, 0]), [70, 40, 20, 50])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: [-1, -1, -1, 65, -1, 0]), [70, 40, 20, 65])
+    }
+    func testWithNoValueThereIsNoNightLights() {
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: [-1, -1, -1, -1, -1, 0]), [70, 40, 20])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: nil), [70, 40, 20])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20, -1], fromHA: nil), [70, 40, 20])
+        XCTAssertNil(nightLightsLevel([70, 40, 20]))
+        XCTAssertEqual(nightLightsLevel([70, 40, 20, 80]), 80)
+    }
+}
+
+final class NightLightsFallbackTests: XCTestCase {
+    func testHomeAssistantsAnswerIsUsedWhileItGivesOne() {
+        for has in [false, true] {
+            XCTAssertTrue(roomLights(reported: true, fromHA: true, last: false, hasNightLights: has))
+            XCTAssertFalse(roomLights(reported: false, fromHA: true, last: true, hasNightLights: has))
+        }
+    }
+    func testAMonitorWithNightLightsKeepsTheLastLightsStateWhileHomeAssistantIsDown() {
+        XCTAssertTrue(roomLights(reported: false, fromHA: false, last: true, hasNightLights: true))
+        XCTAssertFalse(roomLights(reported: false, fromHA: false, last: false, hasNightLights: true))
+        XCTAssertFalse(roomLights(reported: false, fromHA: false, last: nil, hasNightLights: true))   // none seen yet: off
+    }
+    func testAMonitorWithoutNightLightsCountsTheLightsAsOffInTheFallbackAsBefore() {
+        XCTAssertFalse(roomLights(reported: false, fromHA: false, last: true, hasNightLights: false))
+    }
+    func testALitEveningDoesNotDropToNightDuringAnOutage() {
+        let lit = roomLights(reported: false, fromHA: false, last: true, hasNightLights: true)
+        XCTAssertEqual(target(day: 95, blindDown: 62, night: 60, elev: -10, pos: 100, lights: lit, nightLights: 80), 80)
+    }
+}
