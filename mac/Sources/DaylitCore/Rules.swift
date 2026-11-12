@@ -4,6 +4,7 @@ import Foundation
 /// Target level: the daytime value slides between "blind closed" and "blind open" with the blind
 /// position; the sun then blends it with the night value (0 below -3°, full daytime from 12°).
 /// Room lights on at night add a little.
+/// With nightLights (optional), the room lights move the night end of the blend instead of adding the boost.
 /// `light` (0…1, see lightCap) is the most daylight can count under a cloudy sky; 1 without a sensor.
 /// The blind position to use: a blind that drops off Home Assistant for a moment keeps its last
 /// known position instead of counting as fully open; with none seen yet it counts as open.
@@ -12,11 +13,21 @@ public func blindPosition(reported: Double, last: Double?) -> Double {
 }
 
 public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
-                   tuning t: Tuning = Tuning(), light: Double = 1) -> Int {
-    let sun = min(daylightFraction(elevation: elev, tuning: t), light)
+                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights: Double? = nil) -> Int {
+    let sunUp = daylightFraction(elevation: elev, tuning: t)
+    let sun = min(sunUp, light)
     let daytime = blindDown + (day - blindDown) * pos / 100
-    var v = night + (daytime - night) * sun
-    if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
+    var v: Double
+    if let nl = nightLights {
+        // A monitor with its own lit-evening level: weak daylight blends toward night with the lights off.
+        // With them on it blends toward a point that slides from night (sun high) to nightLights (sun down),
+        // so the lamps change nothing in daylight and there is no step at dusk. No boost.
+        let anchor = lights ? night * sunUp + nl * (1 - sunUp) : night
+        v = anchor + (daytime - anchor) * sun
+    } else {
+        v = night + (daytime - night) * sun
+        if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
+    }
     return Int(min(max(v, 0), 100).rounded())
 }
 
