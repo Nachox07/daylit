@@ -151,9 +151,10 @@ extension Daylit {
         recorder.drop(sg.monitor)
         for f in failed { Log.write("suggest: \(m.label) \(f)") }
         if failed.isEmpty { Log.write("suggest: \(m.label) applied") }
-        else { suggestError = "Could not apply the suggestion: " + failed.joined(separator: "; ") }
+        let applyError = failed.isEmpty ? nil : "Could not apply the suggestion: " + failed.joined(separator: "; ")
+        suggestError = applyError
         suggestDirty = true
-        if wroteFile { reload() } else { refresh() }   // reload: the new local level is in the file now
+        if wroteFile { reload(); suggestError = applyError } else { refresh() }   // reload: the new local level is in the file now (it clears the error, so put it back)
     }
 
     /// Not now: no suggestion for this monitor for 7 days, remembered across restarts.

@@ -115,7 +115,8 @@ import DaylitCore
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
-        suggestDirty = true; stepCache = [:]
+        // A suggestion worked out under the old config must not be applied under the new one.
+        suggestDirty = true; stepCache = [:]; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr
