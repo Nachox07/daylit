@@ -46,7 +46,12 @@ sealed class PushClient {
         this.ui = ui; this.tick = tick; this.lastTick = lastTick; this.token = token;
         this.onBattery = onBattery; this.daylightLimit = daylightLimit;
         auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout);
-        auth.Tick += (_, _) => { auth.Stop(); Lost("no auth reply", conn); };
+        auth.Tick += (_, _) => {
+            auth.Stop();
+            double elapsed = (DateTime.UtcNow - started).TotalSeconds;
+            if (PushRule.AuthTimedOut(elapsed, authenticated)) Lost("no auth reply", conn);
+            else if (!authenticated) { auth.Interval = TimeSpan.FromSeconds(Math.Max(0.1, PushRule.AuthTimeout - elapsed)); auth.Start(); }   // fired a hair early
+        };
         retry.Tick += (_, _) => { retry.Stop(); Open(); };
         ping.Tick += (_, _) => SendPing();
         pong.Interval = TimeSpan.FromSeconds(PushRule.PongTimeout);
@@ -93,10 +98,12 @@ sealed class PushClient {
 
     /// Reconnects `seconds` from now (the last request wins): after wake the network needs a moment to come back.
     public void ReconnectSoon(string why, double seconds) {
+        if (target == null) return;   // push is off: no timer
         reconnectWhy = why;
         network.Stop(); network.Interval = TimeSpan.FromSeconds(seconds); network.Start();
     }
     string reconnectWhy = "network change";
+    DateTime started; bool authenticated;   // this connection: when it began, and whether auth_ok arrived
 
     void Open() {
         if (target is not { } t || stopped) return;
@@ -117,7 +124,8 @@ sealed class PushClient {
         var source = new CancellationTokenSource();
         var gate = new SemaphoreSlim(1, 1);
         ws = socket; cts = source; sendGate = gate;
-        auth.Stop(); auth.Start();   // auth_ok must follow within PushRule.AuthTimeout
+        started = DateTime.UtcNow; authenticated = false;
+        auth.Stop(); auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout); auth.Start();   // auth_ok must follow within PushRule.AuthTimeout
         _ = Run(socket, source.Token, gate, c, secret, t);
     }
 
@@ -172,7 +180,7 @@ sealed class PushClient {
         if (c != conn) return;
         switch (m.Kind) {
             case PushKind.AuthOk:
-                auth.Stop();
+                auth.Stop(); authenticated = true;
                 subscribeId = nextId++;
                 _ = SendOrLose(PushRule.SubscribeMessage(subscribeId, t.Entities), c);
                 break;

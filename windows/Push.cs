@@ -37,6 +37,7 @@ static class PushRule {
     /// auth_ok must arrive this many seconds after connecting (auth_required, the auth message and the answer), or the
     /// connection counts as lost.
     public const double AuthTimeout = 10;
+    public static bool AuthTimedOut(double elapsed, bool authenticated) => !authenticated && elapsed >= AuthTimeout;
     /// Waits before each reconnect attempt; the last one repeats.
     public static readonly double[] Backoff = [2, 5, 15, 60];
 

@@ -84,7 +84,7 @@ static class Cli {
                 lightsNotes.Add($"monitor \"{m.Match}\": nightLights needs homeAssistant.lights; without it the lights count as off");
             return new { match = m.Match, label = m.Label, connected = hit?.Friendly };
         }).ToList();
-        bool tokenStored = cfg.Effective == Source.HomeAssistant && Cred.Read(cfg.TokenName) != null;   // presence only, never printed
+        bool tokenStored = cfg.Effective == Source.HomeAssistant && Cred.ReadUsable(cfg.TokenName) != null;   // presence only, never printed
         var notes = new List<string>();
         notes.AddRange(lightsNotes);
         if (!exists) notes.Add("no config.json: Daylit runs with sliders and hotkeys only");

@@ -328,7 +328,11 @@ public class PushTimingTests {
     }
 
     [Fact]
-    public void AuthHasTenSecondsToComplete() => Assert.Equal(10, PushRule.AuthTimeout);
+    public void AuthHasTenSecondsToComplete() {
+        Assert.False(PushRule.AuthTimedOut(9.9, false));
+        Assert.True(PushRule.AuthTimedOut(10, false));
+        Assert.False(PushRule.AuthTimedOut(60, true));
+    }
 
     [Fact]
     public void TheSocketIsOpenOnlyWhenEverythingAllowsIt() {
