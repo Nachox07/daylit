@@ -696,7 +696,7 @@ import DaylitCore
                 || mons[i].publishedLight != inp.lightRatio.map({ Int(($0 * 10).rounded()) }) {
                 let r = await HAClient.call(ha, "/api/states/" + sensor, ["state": applied, "attributes": [
                     "friendly_name": "\(m.label) brightness", "unit_of_measurement": "%", "icon": "mdi:monitor",
-                    "target": want, "manual": manual, "offset": step.state.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
+                    "target": want, "manual": manual, "offset": st.offset ?? 0, "daylight": (sun * 100).rounded() / 100,
                     "light": inp.lightRatio.map { ($0 * 100).rounded() / 100 as Any } ?? NSNull(),   // how clear the sky is
                     "sun_elevation": inp.elev, "blind": inp.pos, "lights": inp.lights, "source": "macOS"]])
                 guard gen == generation else { return }
