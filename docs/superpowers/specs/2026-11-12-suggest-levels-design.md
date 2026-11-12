@@ -171,9 +171,11 @@ A one-line card at the bottom of the panel, only while a suggestion is pending:
 - **The motivating week as a fixture**, anonymised, with the levels day 100 / blind down 78 /
   night 75. Blind down is proposed lower by at least 5, in the 45–65 range. Night is not proposed.
   Day is not raised.
-- **The day after as a second fixture**, with the levels day 95 / blind down 62 / night 75: three
-  changes, all lower, settling at 63–72 with the blind 40–58% open (a fourth, put back within 3
-  minutes, must not count). Blind down is proposed lower again, in the 35–57 range.
+- **The day after as a second fixture**, with the levels day 95 / blind down 62 / night 75: two
+  changes that held, both lower: 75 → 63 with the blind 40% open and 78 → 72 at 58%. A third
+  (75 → 69) was put back within 3 minutes and must not be recorded. One day is not enough to
+  suggest, so this fixture checks the recorder and the fit's direction: blind down comes out lower,
+  in the 35–57 range.
 
 ## Out of scope
 
