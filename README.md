@@ -92,7 +92,8 @@ flowchart LR
     T -. "optional" .-> P[Sensor back to Home Assistant]
 ```
 
-Every 30 seconds, every 2 minutes on battery (and at once after wake, a display change or opening the panel) each app works out
+Every 30 seconds, every 2 minutes on battery (and at once after wake, a display change or opening the panel; with the experimental
+[push updates](docs/setup.md#push-updates-from-home-assistant), within about 2 seconds of a change in Home Assistant) each app works out
 a target per monitor from three levels you choose: *day*, *blind closed* and *night*, in this order:
 
 1. **The blind** picks the daytime level, between *blind closed* and *day*.
