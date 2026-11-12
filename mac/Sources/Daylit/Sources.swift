@@ -84,11 +84,12 @@ enum HAClient {
         guard Config.isEntityId(entity) else { return .failure(.badAnswer) }
         return await call(ha, "/api/services/input_number/set_value", ["entity_id": entity, "value": value])
     }
-    /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; nil when
-    /// Home Assistant does not answer or the entity has none.
-    static func numberStep(_ ha: HAConfig, _ entity: String) async -> NumberStep? {
-        guard Config.isEntityId(entity), case .success(let d) = await call(ha, "/api/states/" + entity, nil) else { return nil }
-        return NumberStep.parse(d)
+    enum StepRead: Equatable { case step(NumberStep), noAnswer, noAttributes }
+    /// An input_number's min, max and step, so a suggestion rounds to a value it accepts. `noAnswer`: Home
+    /// Assistant did not answer (try again); `noAttributes`: it answered but the entity has none (not an input_number).
+    static func numberStep(_ ha: HAConfig, _ entity: String) async -> StepRead {
+        guard Config.isEntityId(entity), case .success(let d) = await call(ha, "/api/states/" + entity, nil) else { return .noAnswer }
+        return NumberStep.parse(d).map { .step($0) } ?? .noAttributes
     }
     static func describe(_ f: Failure, _ ha: HAConfig) -> String {
         switch f {

@@ -23,6 +23,8 @@ partial class Controller {
     readonly Dictionary<string, int> offsetCleared = new();
     /// input_number min/max/step per entity, kept until the config reloads (a failed read is not kept).
     readonly Dictionary<string, NumberStep> stepCache = new();
+    /// Entities Home Assistant answered for without min/max/step: not asked again until the config reloads.
+    readonly HashSet<string> notNumber = new();
     /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
     Dictionary<string, double[]> suggestLevels = new();
     bool? suggestFromHa;
@@ -38,17 +40,25 @@ partial class Controller {
         string? text = null;
         try { text = File.Exists(CorrectionsPath) ? File.ReadAllText(CorrectionsPath) : null; }
         catch (Exception e) { Log.Write("suggest: corrections.json unreadable, starting empty (" + e.Message + ")"); }
-        if (!string.IsNullOrWhiteSpace(text) && !HasSamplesList(text)) Log.Write("suggest: corrections.json unreadable, starting empty");
-        corrections = Suggest.DropOld(Suggest.Decode(text), Now);
+        var decoded = Suggest.Decode(text);
+        if (!string.IsNullOrWhiteSpace(text) && (!HasSamplesList(text, out int listed) || (listed > 0 && decoded.Count == 0)))
+            Log.Write("suggest: corrections.json unreadable, starting empty");   // not a samples list, or one that decodes to nothing
+        corrections = Suggest.DropOld(decoded, Now);
         suggestDismissed = Settings.SuggestDismissed;
     }
 
     /// The file is a JSON object with a "samples" list (it may be empty).
-    static bool HasSamplesList(string text) {
+    static bool HasSamplesList(string text, out int count) {
+        count = 0;
         try {
             using var d = JsonDocument.Parse(text);
-            return d.RootElement.ValueKind == JsonValueKind.Object && d.RootElement.EnumerateObject()
-                .Any(p => p.Name.Equals("samples", StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Array);
+            if (d.RootElement.ValueKind != JsonValueKind.Object) return false;
+            foreach (var p in d.RootElement.EnumerateObject())
+                if (p.Name.Equals("samples", StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.Array) {
+                    count = p.Value.GetArrayLength();
+                    return true;
+                }
+            return false;
         } catch (JsonException) { return false; }
     }
 
@@ -86,9 +96,13 @@ partial class Controller {
         if (HaEntity(l, m) is not { } e) return (NumberStep.Whole, false);
         if (!HaLevelAvailable(l, i, s, haDown)) return (null, false);
         if (stepCache.TryGetValue(e, out var cached)) return (cached, false);
-        if (await HAClient.GetNumberStep(Cfg, e) is not { } read) return (null, true);
-        stepCache[e] = read;
-        return (read, false);
+        if (notNumber.Contains(e)) return (null, false);
+        var (read, answered) = await HAClient.GetNumberStep(Cfg, e);
+        if (read is { } got) { stepCache[e] = got; return (got, false); }
+        if (!answered) return (null, true);
+        notNumber.Add(e);
+        Log.Write($"suggest: {e} is not an input_number, its level is not offered");
+        return (null, false);
     }
 
     /// At the end of a tick: works the suggestion out again when something changed. The first monitor with one

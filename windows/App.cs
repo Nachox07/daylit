@@ -139,7 +139,7 @@ sealed partial class Controller {
         AutoOn = Settings.Auto;
         lookDark = null; look.Reset();
         // A suggestion worked out under the old config must not be applied under the new one.
-        suggestDirty = true; stepCache.Clear(); suggestEpoch++; Suggestion = null; SuggestError = null;
+        suggestDirty = true; stepCache.Clear(); notNumber.Clear(); suggestEpoch++; Suggestion = null; SuggestError = null;
         foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; m.ContrastSet = null; }
         Log.Write($"config: source {Source}" + (ConfigError != null ? $" — {ConfigError}" : ""));
     }

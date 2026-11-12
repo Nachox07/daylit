@@ -55,7 +55,7 @@ When you keep correcting a monitor the same way, the panel offers new levels:
 
 - A change counts once it has held 5 minutes. Not counted: the Home Assistant `set` helper, a linked
   monitor following another, an idle or paused computer, the sun standing in while Home Assistant is
-  down, the room-lights boost, and levels at 0 or 100.
+  down, the room-lights boost, a write to the monitor that failed, and levels at 0 or 100.
 - A level is offered only with changes on at least 3 days in the situation where it counts most (blind
   down: daylight with the blind mostly closed; day: mostly open; night: the evening), when it moves by at
   least 5, and when the new level would have been at least 3 points closer to what you chose, on average.

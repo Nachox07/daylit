@@ -12,10 +12,13 @@ extension Daylit {
     /// The saved samples, without those older than 14 days.
     static func loadCorrections() -> [Sample] {
         let d = try? Data(contentsOf: correctionsURL)
-        if let d, !d.isEmpty, (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["samples"] as? [Any] == nil {
-            Log.write("suggest: corrections.json unreadable, starting empty")
+        let decoded = Suggest.decode(d)
+        if let d, !d.isEmpty {
+            let list = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["samples"] as? [Any]
+            // Not a samples list, or a list that decodes to nothing (one bad sample rejects the whole file).
+            if list == nil || (!list!.isEmpty && decoded.isEmpty) { Log.write("suggest: corrections.json unreadable, starting empty") }
         }
-        return Suggest.dropOld(Suggest.decode(d), now: Date().timeIntervalSince1970)
+        return Suggest.dropOld(decoded, now: Date().timeIntervalSince1970)
     }
 
     func saveCorrections() {
@@ -57,9 +60,17 @@ extension Daylit {
         guard let e = haEntity(l, of: m) else { return (.whole, false) }
         guard inp.fromHA, let ha = config.homeAssistant, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return (nil, false) }
         if let c = stepCache[e] { return (c, false) }
-        guard let s = await HAClient.numberStep(ha, e) else { return (nil, true) }
-        stepCache[e] = s
-        return (s, false)
+        if notNumber.contains(e) { return (nil, false) }
+        switch await HAClient.numberStep(ha, e) {
+        case .noAnswer: return (nil, true)
+        case .noAttributes:
+            notNumber.insert(e)
+            Log.write("suggest: \(e) is not an input_number, its level is not offered")
+            return (nil, false)
+        case .step(let s):
+            stepCache[e] = s
+            return (s, false)
+        }
     }
 }
 
@@ -125,7 +136,12 @@ extension Daylit {
         if !local.isEmpty {
             let p = Config.path
             do {
-                let original = try? Data(contentsOf: p)
+                let original: Data?
+                do { original = try ConfigLocation.dataForPatch(at: p) } catch ConfigLocation.ReadError.downloading {
+                    throw ConfigEditError.invalid("config.json is still downloading from iCloud Drive")
+                } catch ConfigLocation.ReadError.unreadable(let why) {
+                    throw ConfigEditError.invalid("could not read it (\(why))")
+                }
                 if let d = original, ConfigText.hasComments(d) {
                     throw ConfigEditError.invalid("it has comments, which saving would remove; set the level in Settings instead")
                 }

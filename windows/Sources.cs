@@ -114,14 +114,15 @@ static class HAClient {
 
     /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; null when Home Assistant
     /// does not answer or the entity has none. Leaves LastError and Transient alone, like History.
-    public static async Task<NumberStep?> GetNumberStep(Config c, string entity) {
-        if (c.HomeAssistant?.Url is not { } url || Token == null || !Config.IsEntityId(entity)) return null;
+    /// Answered is true when Home Assistant gave a 200 (Step is null then if the entity has no min/max/step).
+    public static async Task<(NumberStep? Step, bool Answered)> GetNumberStep(Config c, string entity) {
+        if (c.HomeAssistant?.Url is not { } url || Token == null || !Config.IsEntityId(entity)) return (null, false);
         try {
             using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + "/api/states/" + entity);
             req.Headers.Authorization = new("Bearer", Token);
             using var r = await http.SendAsync(req);
-            return r.IsSuccessStatusCode ? NumberStep.Parse(await r.Content.ReadAsStringAsync()) : null;
-        } catch { return null; }
+            return r.IsSuccessStatusCode ? (NumberStep.Parse(await r.Content.ReadAsStringAsync()), true) : (null, false);
+        } catch { return (null, false); }
     }
 
     public static Task<string?> SetSwitch(Config c, bool on) =>

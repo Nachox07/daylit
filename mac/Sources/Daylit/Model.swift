@@ -49,6 +49,8 @@ import DaylitCore
     var offsetCleared: [String: Int] = [:]
     /// input_number min/max/step per entity, kept until the config reloads (a failed read is not kept).
     var stepCache: [String: NumberStep] = [:]
+    /// Entities Home Assistant answered for without min/max/step: not asked again until the config reloads.
+    var notNumber: Set<String> = []
     /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
     var suggestLevels: [String: [Double]] = [:]
     var suggestFromHA: Bool?
@@ -116,7 +118,7 @@ import DaylitCore
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
         // A suggestion worked out under the old config must not be applied under the new one.
-        suggestDirty = true; stepCache = [:]; suggestEpoch += 1; suggestion = nil; suggestError = nil
+        suggestDirty = true; stepCache = [:]; notNumber = []; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr

@@ -196,3 +196,22 @@ final class ConfigLocationTests: XCTestCase {
         XCTAssertFalse(r.kept); XCTAssertNil(r.config.source); XCTAssertNil(r.problem)
     }
 }
+
+final class DataForPatchTests: XCTestCase {
+    func testMissingEvictedAndPresent() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("daylit-patch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("config.json")
+        XCTAssertNil(try ConfigLocation.dataForPatch(at: f))
+        try Data().write(to: ConfigLocation.placeholder(for: f))
+        XCTAssertThrowsError(try ConfigLocation.dataForPatch(at: f)) { XCTAssertEqual($0 as? ConfigLocation.ReadError, .downloading) }
+        try Data("{}".utf8).write(to: f)
+        XCTAssertEqual(try ConfigLocation.dataForPatch(at: f), Data("{}".utf8))
+        try FileManager.default.removeItem(at: f)
+        try FileManager.default.createDirectory(at: f, withIntermediateDirectories: false)   // exists but cannot be read as a file
+        XCTAssertThrowsError(try ConfigLocation.dataForPatch(at: f)) {
+            if case ConfigLocation.ReadError.unreadable = $0 {} else { XCTFail("expected unreadable, got \($0)") }
+        }
+    }
+}

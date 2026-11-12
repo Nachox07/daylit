@@ -127,8 +127,9 @@ A one-line card at the bottom of the panel, only while a suggestion is pending:
 
 > You lower *Monitor* by about 12 with the blind down. Set blind down 78 → 62?   **Apply** · **Not now**
 
-- The direction ("lower" / "raise") and amount are the mean of `chosen − auto` over the samples
-  where the proposed level is the main weight, rounded.
+- The direction ("lower" / "raise") and amount follow the main level: the amount is the mean of
+  `|chosen − auto|` over the samples where that level is the main weight and that pull the same way as the
+  proposal, rounded. With no such sample there is no suggestion.
 - The situation phrase follows the main level: day "with the blind open", blind down "with the blind partly or fully
   down", night "in the evening".
 - Two or three levels: "Set blind down 78 → 62, day 100 → 95?"
