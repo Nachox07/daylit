@@ -129,7 +129,10 @@ static class Settings {
                     : new Dictionary<string, double>();
             } catch { return new Dictionary<string, double>(); }
         }
-        set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SuggestDismissed", System.Text.Json.JsonSerializer.Serialize(value)); }
+        set {
+            try { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SuggestDismissed", System.Text.Json.JsonSerializer.Serialize(value)); }
+            catch (Exception e) { Log.Write("suggest: could not remember Not now: " + e.Message); }
+        }
     }
 
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;

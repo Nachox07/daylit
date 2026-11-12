@@ -143,11 +143,12 @@ partial class Controller {
         try {
             if (Suggestion is not { } sg || Mons.FirstOrDefault(x => x.Key == sg.Monitor) is not { } m) return;
             Suggestion = null; SuggestError = null; suggestEpoch++;
+            if (panel.IsVisible) panel.Sync();   // the card hides at once
             var local = new Dictionary<string, int>();
             var failed = new List<string>();
             foreach (var ch in sg.Changes) {
                 if (HaEntity(ch.Level, m) is { } e) {
-                    if (await HAClient.SetNumber(Cfg, e, ch.To) == null) failed.Add($"{e} failed: {HAClient.LastError ?? "no answer"}");
+                    if (await HAClient.SetNumber(Cfg, e, ch.To) is { } why) failed.Add($"{e} failed: {why}");
                 } else local[ch.Level.Key()] = (int)Math.Round(ch.To, MidpointRounding.AwayFromZero);
             }
             bool wroteFile = false;
@@ -173,7 +174,8 @@ partial class Controller {
             if (failed.Count == 0) Log.Write($"suggest: {m.Label} applied");
             else SuggestError = "Could not apply the suggestion: " + string.Join("; ", failed);
             suggestDirty = true;
-            if (wroteFile) Reload(); else await Tick("suggestion applied");   // Reload: the new local level is in the file now
+            string? applyError = SuggestError;
+            if (wroteFile) { Reload(); SuggestError = applyError; if (panel.IsVisible) panel.Sync(); } else await Tick("suggestion applied");   // Reload: the new local level is in the file now
         } catch (Exception err) { Log.Write("suggest: " + err); }
     }
 
@@ -187,6 +189,7 @@ partial class Controller {
         Settings.SuggestDismissed = suggestDismissed;
         Log.Write($"suggest: {Mons.FirstOrDefault(x => x.Key == sg.Monitor)?.Label ?? "a monitor"} not now");
         Suggestion = null; SuggestError = null; suggestDirty = true;
+        if (panel.IsVisible) panel.Sync();   // the card hides at once
         _ = Tick("not now");
     }
 }

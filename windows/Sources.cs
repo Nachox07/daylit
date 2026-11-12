@@ -104,10 +104,13 @@ static class HAClient {
                 ["light"] = s.LightRatio is double lr ? Math.Round(lr * 100, MidpointRounding.AwayFromZero) / 100 : null,   // how clear the sky is
                 ["sun_elevation"] = s.Elev, ["blind"] = s.Pos, ["lights"] = s.Lights, ["source"] = "Windows" } });
 
-    /// input_number/set_value: a level from an accepted suggestion (Suggest.cs). null when it failed (see LastError).
-    public static Task<string?> SetNumber(Config c, string entity, double value) =>
-        !Config.IsEntityId(entity) ? Task.FromResult<string?>(null) :
-        Call(c, "/api/services/input_number/set_value", new { entity_id = entity, value });
+    /// input_number/set_value: a level from an accepted suggestion (Suggest.cs). Returns null when it worked, otherwise
+    /// why not (read straight after the call, so a tick's own error is not mistaken for it).
+    public static async Task<string?> SetNumber(Config c, string entity, double value) {
+        if (!Config.IsEntityId(entity)) return "not an entity id";
+        var answer = await Call(c, "/api/services/input_number/set_value", new { entity_id = entity, value });
+        return answer != null ? null : LastError ?? "no answer";
+    }
 
     /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; null when Home Assistant
     /// does not answer or the entity has none. Leaves LastError and Transient alone, like History.
