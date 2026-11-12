@@ -92,3 +92,73 @@ extension PushRule {
     /// The problem line shown in the panel after auth_invalid, like the REST token errors.
     public static let rejectedProblem = "Home Assistant rejected the token (push updates)"
 }
+
+/// What a set of changed entities asks for.
+public enum PushTick: Equatable {
+    case now                 // a tick after the 1 s debounce
+    case after(Double)       // the daylight sensor alone: a tick in this many seconds
+    case ignore
+}
+
+extension PushRule {
+    /// A burst of changes within this many seconds runs one tick.
+    public static let debounce: Double = 1
+    /// The daylight sensor alone ticks at most this often (it can report every few seconds).
+    public static let daylightEvery: Double = 60
+    /// While the socket is connected and subscribed, polling is only the safety net.
+    public static let healthyPollSeconds: Double = 300
+    /// An application ping this often; no pong within `pongTimeout` means the connection is gone.
+    public static let pingEvery: Double = 60
+    public static let pongTimeout: Double = 10
+    /// Waits before each reconnect attempt; the last one repeats.
+    public static let backoff: [Double] = [2, 5, 15, 60]
+
+    /// Whether these changes need a tick. `daylight` is homeAssistant.light; `lastTick` is when the last tick
+    /// ran (Unix seconds; any tick reads the daylight sensor too).
+    public static func decide(changed: Set<String>, subscribed: Set<String>, daylight: String?, lastTick: Double?, now: Double) -> PushTick {
+        let relevant = changed.intersection(subscribed)
+        if relevant.isEmpty { return .ignore }
+        if let d = daylight, relevant == [d] {
+            guard let last = lastTick else { return .now }
+            let wait = daylightEvery - (now - last)
+            return wait <= 0 ? .now : .after(wait)
+        }
+        return .now
+    }
+
+    /// The wait before reconnect attempt `attempt` (0 = the first after a drop).
+    public static func retryDelay(attempt: Int) -> Double { backoff[min(max(attempt, 0), backoff.count - 1)] }
+
+    /// The poll interval: today's while the socket is not healthy, else 300 s (or the configured one when longer).
+    public static func pollInterval(healthy: Bool, onBattery: Bool, tuning: Tuning) -> Double {
+        let normal = onBattery ? tuning.batteryPollSeconds : tuning.pollSeconds
+        return healthy ? max(healthyPollSeconds, normal) : normal
+    }
+
+    /// Whether the socket should be open: push on, Home Assistant the source, Automatic on, not paused on
+    /// battery, and a monitor to drive.
+    public static func wanted(push: Bool?, source: Source, paused: Bool, auto: Bool, hasMonitors: Bool) -> Bool {
+        push == true && source == .homeAssistant && !paused && auto && hasMonitors
+    }
+}
+
+/// The one pending push tick. A change asks for a tick in 1 s; more changes before it fires join it,
+/// so a burst runs one tick. A daylight-only change waits for its limit, unless a tick is already due.
+public struct PushTimer: Equatable {
+    public private(set) var due: Double?
+    public init() {}
+    /// Adds a request; true when `due` moved, so the caller reschedules its timer.
+    public mutating func add(_ t: PushTick, now: Double) -> Bool {
+        let at: Double
+        switch t {
+        case .ignore: return false
+        case .now: at = now + PushRule.debounce
+        case .after(let s): at = now + max(s, PushRule.debounce)
+        }
+        if let d = due, d <= at { return false }
+        due = at
+        return true
+    }
+    /// The timer fired (or the socket closed): nothing pending.
+    public mutating func clear() { due = nil }
+}

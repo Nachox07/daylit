@@ -150,3 +150,95 @@ final class PushMessageTests: XCTestCase {
         XCTAssertEqual(PushRule.offLine, "push: off")
     }
 }
+
+final class PushDecisionTests: XCTestCase {
+    let subscribed: Set<String> = ["cover.blind", "light.room", "input_number.day", "input_number.set", "sun.sun", "sensor.solar"]
+    func d(_ changed: Set<String>, lastTick: Double? = 1000, now: Double = 1010) -> PushTick {
+        PushRule.decide(changed: changed, subscribed: subscribed, daylight: "sensor.solar", lastTick: lastTick, now: now)
+    }
+    func testCoverLightsAndHelpersTickAtOnce() {
+        XCTAssertEqual(d(["cover.blind"]), .now)
+        XCTAssertEqual(d(["light.room"]), .now)
+        XCTAssertEqual(d(["input_number.day"]), .now)
+        XCTAssertEqual(d(["input_number.set"]), .now)
+        XCTAssertEqual(d(["sun.sun"]), .now)
+    }
+    func testADaylightOnlyChangeWaitsUntilAMinuteAfterTheLastTick() {
+        XCTAssertEqual(d(["sensor.solar"], lastTick: 1000, now: 1010), .after(50))
+    }
+    func testADaylightOnlyChangeTicksWhenTheLastTickIsAMinuteOld() {
+        XCTAssertEqual(d(["sensor.solar"], lastTick: 1000, now: 1060), .now)
+        XCTAssertEqual(d(["sensor.solar"], lastTick: nil), .now)
+    }
+    func testAMixTicksAtOnce() {
+        XCTAssertEqual(d(["sensor.solar", "cover.blind"]), .now)
+    }
+    func testAnUnknownEntityIsIgnored() {
+        XCTAssertEqual(d(["light.kitchen"]), .ignore)
+        XCTAssertEqual(d([]), .ignore)
+    }
+    func testAnUnknownEntityNextToTheDaylightSensorStillCountsAsDaylightOnly() {
+        XCTAssertEqual(d(["sensor.solar", "light.kitchen"]), .after(50))
+    }
+    func testWithoutADaylightSensorEverythingTicksAtOnce() {
+        XCTAssertEqual(PushRule.decide(changed: ["sensor.solar"], subscribed: subscribed, daylight: nil, lastTick: 1000, now: 1001), .now)
+    }
+}
+
+final class PushTimerTests: XCTestCase {
+    func testABurstRunsOneTick() {
+        var t = PushTimer()
+        XCTAssertTrue(t.add(.now, now: 100))
+        XCTAssertEqual(t.due, 101)
+        XCTAssertFalse(t.add(.now, now: 100.3))
+        XCTAssertFalse(t.add(.now, now: 100.9))
+        XCTAssertEqual(t.due, 101)
+    }
+    func testADaylightWaitDoesNotPushBackATickAlreadyDue() {
+        var t = PushTimer()
+        _ = t.add(.now, now: 100)
+        XCTAssertFalse(t.add(.after(50), now: 100.5))
+        XCTAssertEqual(t.due, 101)
+    }
+    func testAChangeBringsAWaitingDaylightTickForward() {
+        var t = PushTimer()
+        XCTAssertTrue(t.add(.after(50), now: 100))
+        XCTAssertEqual(t.due, 150)
+        XCTAssertTrue(t.add(.now, now: 110))
+        XCTAssertEqual(t.due, 111)
+    }
+    func testIgnoreChangesNothingAndClearEmpties() {
+        var t = PushTimer()
+        XCTAssertFalse(t.add(.ignore, now: 100))
+        XCTAssertNil(t.due)
+        _ = t.add(.now, now: 100); t.clear()
+        XCTAssertNil(t.due)
+    }
+}
+
+final class PushTimingTests: XCTestCase {
+    func testBackoff() {
+        XCTAssertEqual((0..<7).map { PushRule.retryDelay(attempt: $0) }, [2, 5, 15, 60, 60, 60, 60])
+    }
+    func testPollIsFiveMinutesWhileHealthyOnMainsAndBattery() {
+        XCTAssertEqual(PushRule.pollInterval(healthy: true, onBattery: false, tuning: Tuning()), 300)
+        XCTAssertEqual(PushRule.pollInterval(healthy: true, onBattery: true, tuning: Tuning()), 300)
+    }
+    func testPollIsTodaysWhenNotHealthy() {
+        XCTAssertEqual(PushRule.pollInterval(healthy: false, onBattery: false, tuning: Tuning()), 30)
+        XCTAssertEqual(PushRule.pollInterval(healthy: false, onBattery: true, tuning: Tuning()), 120)
+    }
+    func testALongerConfiguredPollIsKeptWhileHealthy() {
+        var t = Tuning(); t.timing = .init(); t.timing?.batteryPollSeconds = 900
+        XCTAssertEqual(PushRule.pollInterval(healthy: true, onBattery: true, tuning: t), 900)
+    }
+    func testTheSocketIsOpenOnlyWhenEverythingAllowsIt() {
+        XCTAssertTrue(PushRule.wanted(push: true, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: nil, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: false, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: true, source: .sun, paused: false, auto: true, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: true, source: .homeAssistant, paused: true, auto: true, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: true, source: .homeAssistant, paused: false, auto: false, hasMonitors: true))
+        XCTAssertFalse(PushRule.wanted(push: true, source: .homeAssistant, paused: false, auto: true, hasMonitors: false))
+    }
+}
