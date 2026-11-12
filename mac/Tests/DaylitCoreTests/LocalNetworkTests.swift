@@ -11,7 +11,7 @@ final class LocalNetworkTests: XCTestCase {
 
     func testPublicHostsAndCloudUrlsAreNotLocal() {
         for h in ["8.8.8.8", "172.15.0.1", "172.32.0.1", "11.0.0.1", "192.169.1.1", "ha.example.com", "abcdef.ui.nabu.casa",
-                  "local", "example.local.com", "2001:db8::1", "", "192.168.1", "192.168.1.300"] {
+                  "example.local.com", "2001:db8::1", "", "192.168.1", "192.168.1.300"] {
             XCTAssertFalse(LocalHost.isLocal(h), h)
         }
     }
@@ -25,19 +25,33 @@ final class LocalNetworkTests: XCTestCase {
         XCTAssertFalse(LocalHost.isLocal(url: nil))
     }
 
-    func testExplicitDenialAlwaysBlocks() {
-        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: nil, generalPathSatisfied: false, hostIsLocal: false, deniedReported: true))
-        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: -1001, generalPathSatisfied: true, hostIsLocal: true, deniedReported: true))
+    func testDotlessHomeArpaLanAndMappedIPv6AreLocal() {
+        for h in ["homeassistant", "ha.home.arpa", "ha.lan", "HA.LAN", "::ffff:192.168.1.5", "::ffff:10.0.0.1", "[::ffff:172.20.0.1]", "::ffff:c0a8:0105"] {
+            XCTAssertTrue(LocalHost.isLocal(h), h)
+        }
+        XCTAssertTrue(LocalHost.isLocal(url: "http://homeassistant:8123"))
+        for h in ["::ffff:8.8.8.8", "::ffff:808:808", "12345", "home.arpa.example.com", "lan"] {
+            XCTAssertFalse(LocalHost.isLocal(h), h)
+        }
     }
 
-    func testOfflineErrorOnAWorkingNetworkToALocalHostIsLikelyBlocked() {
-        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: true, hostIsLocal: true, deniedReported: false))
+    func testDeniedProbeAlwaysBlocks() {
+        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: nil, generalPathSatisfied: false, hostIsLocal: false, probe: .denied))
+        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: -1001, generalPathSatisfied: true, hostIsLocal: true, probe: .denied))
+    }
+
+    func testOfflineErrorWithAnUnknownProbeOnAWorkingNetworkToALocalHostIsLikelyBlocked() {
+        XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: true, hostIsLocal: true, probe: .unknown))
+    }
+
+    func testAProbeThatSaidNotDeniedOverridesTheGuess() {
+        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: true, hostIsLocal: true, probe: .notDenied))
     }
 
     func testRealOutagesAreNotBlamedOnMacOS() {
-        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: false, hostIsLocal: true, deniedReported: false))
-        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: true, hostIsLocal: false, deniedReported: false))
-        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1001, generalPathSatisfied: true, hostIsLocal: true, deniedReported: false))
-        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: nil, generalPathSatisfied: true, hostIsLocal: true, deniedReported: false))
+        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: false, hostIsLocal: true, probe: .unknown))
+        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1009, generalPathSatisfied: true, hostIsLocal: false, probe: .unknown))
+        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: -1001, generalPathSatisfied: true, hostIsLocal: true, probe: .unknown))
+        XCTAssertFalse(LocalNetworkBlock.isBlocked(errorCode: nil, generalPathSatisfied: true, hostIsLocal: true, probe: .unknown))
     }
 }

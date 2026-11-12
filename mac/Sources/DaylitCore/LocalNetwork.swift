@@ -12,6 +12,13 @@ public enum LocalHost {
         if h.hasPrefix("["), h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
         if let z = h.firstIndex(of: "%") { h = String(h[..<z]) }   // fe80::1%en0
         if h.contains(":") {
+            if h.hasPrefix("::ffff:") {   // IPv4-mapped: dotted (::ffff:192.168.1.5) or hex (::ffff:c0a8:0105)
+                let rest = String(h.dropFirst(7))
+                if rest.contains(".") { return isLocal(rest) }
+                let w = rest.split(separator: ":").compactMap { UInt16($0, radix: 16) }
+                if w.count == 2 { return isLocal("\(w[0] >> 8).\(w[0] & 255).\(w[1] >> 8).\(w[1] & 255)") }
+                return false
+            }
             guard let first = h.split(separator: ":", omittingEmptySubsequences: false).first.map(String.init),
                   let v = UInt16(first.isEmpty ? "0" : first, radix: 16) else { return false }
             return (v & 0xFFC0) == 0xFE80 || (v & 0xFE00) == 0xFC00
@@ -22,7 +29,10 @@ public enum LocalHost {
             guard o.count == 4, o.allSatisfy({ $0 <= 255 }) else { return false }
             return o[0] == 10 || (o[0] == 172 && (16...31).contains(o[1])) || (o[0] == 192 && o[1] == 168) || (o[0] == 169 && o[1] == 254)
         }
-        return h.count > ".local".count && h.hasSuffix(".local")
+        if h.isEmpty { return false }
+        for suffix in [".local", ".lan", ".home.arpa"] where h.count > suffix.count && h.hasSuffix(suffix) { return true }
+        // A name with no dot ("homeassistant") only resolves through the local network's own DNS or mDNS.
+        return !h.contains(".") && !h.allSatisfy(\.isNumber) && h != "lan" && h != "local"
     }
 
     /// The same for a URL string such as the configured `homeAssistant.url`.
@@ -37,13 +47,20 @@ public enum LocalNetworkBlock {
     public static let offlineCode = -1009
 
     /// Whether Home Assistant failures are blocked by macOS's Local Network permission.
-    /// `deniedReported`: the system itself said so (a path with `localNetworkDenied`).
-    /// Otherwise a guess: the request failed as "offline" while the Mac's network as a whole is
+    /// `probe.denied`: the system itself said so (a path with `localNetworkDenied`).
+    /// Only when the probe is inconclusive, a guess: the request failed as "offline" while the Mac's network as a whole is
     /// fine and the host is local. A real outage or a cloud URL is never blamed on the permission.
-    public static func isBlocked(errorCode: Int?, generalPathSatisfied: Bool, hostIsLocal: Bool, deniedReported: Bool) -> Bool {
-        if deniedReported { return true }
-        return errorCode == offlineCode && generalPathSatisfied && hostIsLocal
+    public static func isBlocked(errorCode: Int?, generalPathSatisfied: Bool, hostIsLocal: Bool, probe: Probe) -> Bool {
+        switch probe {
+        case .denied: return true
+        case .notDenied: return false   // the connection got through or failed for another reason
+        case .unknown: return errorCode == offlineCode && generalPathSatisfied && hostIsLocal
+        }
     }
+
+    /// What a direct connection to the host said. `unknown`: it did not answer in time (the only case
+    /// where the guess below is used).
+    public enum Probe: Equatable { case denied, notDenied, unknown }
 
     public static let message = "macOS is blocking Daylit from your local network"
     /// The log line (after "home assistant: ").

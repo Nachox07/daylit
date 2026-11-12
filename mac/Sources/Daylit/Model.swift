@@ -13,7 +13,9 @@ import DaylitCore
     @Published var auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
     @Published var detail = ""          // one line under the Automatic switch
     @Published var lightStatus: String?  // the daylight sensor's state, for the Settings window
-    @Published var problem: String?     // config / connection problem, shown as a caption
+    @Published var problem: String? {   // config / connection problem, shown as a caption
+        didSet { if problem != LocalNetworkBlock.message { localNetworkBlocked = false } }   // Open Settings only under its own message
+    }
     @Published var localNetworkBlocked = false   // the problem is macOS's Local Network permission: the panel offers Open Settings
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
