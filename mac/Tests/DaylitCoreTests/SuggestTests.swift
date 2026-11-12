@@ -334,3 +334,121 @@ final class SuggestStoreTests: XCTestCase {
         XCTAssertEqual(Suggest.decode(Data(short.utf8)), [])
     }
 }
+
+/// Anonymised from one real week: every morning the user lowered the monitor 6–15 points with the blind
+/// 30–40% open, with the levels day 100 / blind down 78 / night 75.
+final class SuggestFixtureTests: XCTestCase {
+    static let week: [Double] = [100, 78, 75]
+    static func weekSamples() -> [Sample] {
+        let l = week
+        return [
+            // Mornings, full daylight, the blind 30–40% open: about 15 lower than the automatic level.
+            Fixture.sample(0, 8.5, elev: 20, p: 0.30, chosen: 70, levels: l), Fixture.sample(0, 9.5, elev: 24, p: 0.35, chosen: 72, levels: l),
+            Fixture.sample(1, 8.5, elev: 20, p: 0.35, chosen: 70, levels: l), Fixture.sample(1, 9.0, elev: 22, p: 0.40, chosen: 74, levels: l),
+            Fixture.sample(2, 8.5, elev: 20, p: 0.30, chosen: 71, levels: l), Fixture.sample(2, 9.5, elev: 24, p: 0.35, chosen: 70, levels: l),
+            Fixture.sample(3, 8.5, elev: 20, p: 0.35, chosen: 72, levels: l), Fixture.sample(3, 9.0, elev: 22, p: 0.30, chosen: 73, levels: l),
+            Fixture.sample(4, 8.5, elev: 20, p: 0.40, chosen: 75, levels: l), Fixture.sample(4, 9.5, elev: 24, p: 0.35, chosen: 70, levels: l),
+            // Midday with the blind 60% open: a small lowering.
+            Fixture.sample(1, 13, elev: 30, p: 0.60, chosen: 88, levels: l), Fixture.sample(3, 13, elev: 30, p: 0.60, chosen: 89, levels: l),
+            // Late afternoon, blind open, sun low: raised a little.
+            Fixture.sample(1, 16, elev: 9, p: 1, chosen: 98, levels: l),
+        ]
+    }
+
+    func testTheWeekHasTheAutomaticLevelsTheUserSaw() {
+        XCTAssertEqual(Self.weekSamples().map(\.auto), [85, 86, 86, 87, 85, 86, 86, 85, 87, 86, 91, 91, 95])
+    }
+
+    func testTheWeekProposesALowerBlindDownOnly() {
+        let samples = Self.weekSamples()
+        XCTAssertEqual(Suggest.candidates(samples, dayOf: Fixture.utcDay), [.blindDown])
+        XCTAssertEqual(Suggest.fit(samples, levels: Self.week, candidates: [.blindDown])[1], 61.42, accuracy: 0.01)
+        XCTAssertEqual(Suggest.meanAbsError(samples, levels: Self.week), 11.54, accuracy: 0.01)
+        XCTAssertEqual(Suggest.meanAbsError(samples, levels: [100, 61, 75]), 3.31, accuracy: 0.01)
+        let s = Suggest.suggestion(monitor: "m", samples: samples, levels: Self.week, steps: [.whole, .whole, .whole],
+                                   now: Fixture.t0 + 5 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay)
+        XCTAssertNotNil(s)
+        XCTAssertEqual(s?.changes.map(\.level), [.blindDown])   // night not proposed, day not raised
+        let to = s?.changes.first?.to ?? 0
+        XCTAssertLessThanOrEqual(to, 78 - 5)
+        XCTAssertTrue((45...65).contains(to), "\(to)")
+        XCTAssertEqual(to, 61)
+        XCTAssertEqual(s?.amount, 14)
+        XCTAssertEqual(s?.sentence(label: "Monitor"),
+                       "You lower Monitor by about 14 with the blind partly or fully down. Set blind down 78 → 61?")
+        XCTAssertEqual(s?.logLine(label: "Monitor"), "suggest: Monitor blind down 78 → 61 (13 changes on 5 days)")
+    }
+
+    func testTheDayAfterRecordsTwoChangesAndFitsBlindDownLower() {
+        // Levels day 95 / blind down 62 / night 75. Two changes held, a third was put back within 3 minutes.
+        let l: [Double] = [95, 62, 75]
+        let first = Fixture.sample(5, 8.5, elev: 20, p: 0.40, chosen: 63, levels: l)    // 75 → 63
+        let putBack = Fixture.sample(5, 11, elev: 22, p: 0.40, chosen: 69, levels: l)   // 75 → 69, then back
+        let second = Fixture.sample(5, 15, elev: 4.5, p: 0.58, chosen: 72, levels: l)   // 78 → 72, low afternoon sun
+        XCTAssertEqual([first.auto, putBack.auto, second.auto], [75, 75, 78])
+        var r = Recorder()
+        var finals: [Sample] = []
+        func ticks(_ from: Double, _ seconds: Double, held: Bool) {
+            for t in stride(from: from + 30, through: from + seconds, by: 30) {
+                if let f = r.settle(monitor: "m", held: held, levels: l, now: t) { finals.append(f) }
+            }
+        }
+        r.handChanged(monitor: "m", sample: first); ticks(first.at, 600, held: true)
+        r.handChanged(monitor: "m", sample: putBack); ticks(putBack.at, 150, held: true)
+        r.handChanged(monitor: "m", sample: nil)      // put back to automatic at +3 min: decide clears the offset
+        ticks(putBack.at + 180, 600, held: false)
+        r.handChanged(monitor: "m", sample: second); ticks(second.at, 600, held: true)
+        XCTAssertEqual(finals.map(\.chosen), [63, 72])
+        // One day is not enough to suggest...
+        XCTAssertEqual(Suggest.candidates(finals, dayOf: Fixture.utcDay), [])
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: finals, levels: l, steps: [.whole, .whole, .whole],
+                                        now: second.at + 600, dismissedUntil: nil, dayOf: Fixture.utcDay))
+        // ...but the fit points the right way: blind down lower.
+        let bd = Suggest.fit(finals, levels: l, candidates: [.blindDown])[1]
+        XCTAssertEqual(bd, 55.88, accuracy: 0.01)
+        XCTAssertTrue((35...57).contains(bd), "\(bd)")
+    }
+
+    /// The three situations a proposal must leave alone unless the samples cover them: a sunny day with the
+    /// blind fully down, a sunny day with it open, an evening with the lights on.
+    static let references: [(level: Level, elev: Double, pos: Double, lights: Bool)] = [
+        (.blindDown, 30, 0, false), (.day, 30, 100, false), (.night, -6, 100, true),
+    ]
+    static func referenceTarget(_ l: [Double], _ r: (level: Level, elev: Double, pos: Double, lights: Bool)) -> Int {
+        target(day: l[0], blindDown: l[1], night: l[2], elev: r.elev, pos: r.pos, lights: r.lights)
+    }
+
+    func testCloudyMorningsMakeNoSuggestion() {
+        // The day after's two held changes, replayed on three days with thin daylight (0.5–0.7) at levels 95 / 62 / 75.
+        // At blind 40% day and blind down mix to 75.2, the same as night: no level explains the change.
+        let l: [Double] = [95, 62, 75]
+        let samples = [(4.5, 7.5), (6.0, 6.0), (7.5, 4.5)].enumerated().flatMap { d, e in
+            [Fixture.sample(6 + d, 9, elev: e.0, p: 0.40, chosen: 63, levels: l),
+             Fixture.sample(6 + d, 15, elev: e.1, p: 0.58, chosen: 72, levels: l)]
+        }
+        XCTAssertEqual(samples.map(\.auto), [75, 79, 75, 79, 75, 78])
+        XCTAssertEqual(Suggest.candidates(samples, dayOf: Fixture.utcDay), [])   // no level reaches 0.55 of the weight
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: l, steps: [.whole, .whole, .whole],
+                                        now: Fixture.t0 + 10 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testReferencesStayPut() {
+        // Every fixture that suggests: the evening with the lights on, and the situation of each level not
+        // proposed, keep their target within 3 points.
+        let clear = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: Self.week) }
+        for samples in [Self.weekSamples(), clear] {
+            guard let s = Suggest.suggestion(monitor: "m", samples: samples, levels: Self.week, steps: [.whole, .whole, .whole],
+                                             now: Fixture.t0 + 5 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay) else {
+                return XCTFail("the fixture should suggest")
+            }
+            var after = Self.week
+            for c in s.changes { after[c.level.rawValue] = c.to }
+            let proposed = Set(s.changes.map(\.level))
+            for r in Self.references where r.level == .night || !proposed.contains(r.level) {
+                XCTAssertLessThanOrEqual(abs(Self.referenceTarget(after, r) - Self.referenceTarget(Self.week, r)), 3, "\(r.level)")
+            }
+            XCTAssertEqual(Self.referenceTarget(after, Self.references[2]), 80)   // evening: night 75 + the lights' 5
+            XCTAssertEqual(Self.referenceTarget(after, Self.references[1]), 100)  // sunny, blind open: day 100
+        }
+    }
+}
