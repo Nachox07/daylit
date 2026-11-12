@@ -301,3 +301,36 @@ final class SuggestRecorderTests: XCTestCase {
         XCTAssertNil(cleared.state.offset)
     }
 }
+
+final class SuggestStoreTests: XCTestCase {
+    func testStaleSamplesAreDroppedWhenTheLevelsChange() {
+        let old = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])
+        let fresh = Fixture.sample(1, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 62, 75])
+        let unplugged = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: [90, 50, 30], monitor: "other")
+        let kept = Suggest.dropStale([old, fresh, unplugged], current: ["m": [100, 62, 75]])
+        XCTAssertEqual(kept, [fresh, unplugged])
+        // A suggestion only counts samples taken with the levels in effect now.
+        XCTAssertTrue(Suggest.sameLevels([100, 62.0000001, 75], [100, 62, 75]))
+        XCTAssertFalse(Suggest.sameLevels([100, 62.5, 75], [100, 62, 75]))
+    }
+
+    func testSamplesOlderThanFourteenDaysAreDropped() {
+        let now = Fixture.t0 + 20 * 86400
+        let a = Fixture.sample(5, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])    // 15 days old
+        let b = Fixture.sample(7, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])    // 13 days old
+        XCTAssertEqual(Suggest.dropOld([a, b], now: now), [b])
+    }
+
+    func testSamplesSurviveTheFile() {
+        let x = Fixture.sample(0, 9, elev: 30, p: 0.35, chosen: 70, levels: [100, 78, 75])
+        XCTAssertEqual(Suggest.decode(Suggest.encode([x])), [x])
+        let text = String(decoding: Suggest.encode([x]), as: UTF8.self)
+        for key in ["\"monitor\"", "\"chosen\"", "\"auto\"", "\"s\"", "\"p\"", "\"elev\"", "\"lights\"", "\"levels\"", "\"at\""] {
+            XCTAssertTrue(text.contains(key), key)
+        }
+        XCTAssertEqual(Suggest.decode(nil), [])
+        XCTAssertEqual(Suggest.decode(Data("broken".utf8)), [])
+        let short = #"{"samples": [{"monitor": "m", "chosen": 70, "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78], "at": 0}]}"#
+        XCTAssertEqual(Suggest.decode(Data(short.utf8)), [])
+    }
+}

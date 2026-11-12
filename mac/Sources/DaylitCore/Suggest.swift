@@ -297,3 +297,34 @@ extension Suggest {
         return r
     }
 }
+
+/// corrections.json: {"samples": [...]}.
+private struct CorrectionsFile: Codable { var samples: [Sample] }
+
+extension Suggest {
+    /// Samples older than this are dropped on load and on save (seconds).
+    public static let maxAge: Double = 14 * 86400
+
+    /// Without the samples older than `maxAge`.
+    public static func dropOld(_ samples: [Sample], now: Double) -> [Sample] { samples.filter { now - $0.at <= maxAge } }
+
+    /// Without the samples whose levels differ from their monitor's levels now (`current`, by monitor key):
+    /// after Apply, a change in Settings or of a Home Assistant helper, a level starts from fresh evidence.
+    /// Monitors not in `current` (unplugged) keep theirs.
+    public static func dropStale(_ samples: [Sample], current: [String: [Double]]) -> [Sample] {
+        samples.filter { x in current[x.monitor].map { sameLevels($0, x.levels) } ?? true }
+    }
+
+    /// The samples in corrections.json; none when it is missing or broken. Entries without three levels are skipped.
+    public static func decode(_ d: Data?) -> [Sample] {
+        guard let d, let f = try? JSONDecoder().decode(CorrectionsFile.self, from: d) else { return [] }
+        return f.samples.filter { $0.levels.count == 3 }
+    }
+
+    /// corrections.json's content.
+    public static func encode(_ samples: [Sample]) -> Data {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return (try? e.encode(CorrectionsFile(samples: samples))) ?? Data("{\"samples\":[]}".utf8)
+    }
+}
