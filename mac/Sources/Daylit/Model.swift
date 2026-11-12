@@ -40,11 +40,13 @@ import DaylitCore
     var corrections: [Sample] = []
     /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
     var suggestDirty = true
-    /// Bumped by Apply (at its start and again where it clears the hand-set offset) and by Not now. The tick
-    /// copies a monitor's hold state, awaits the write, then stores the state back: if this changed meanwhile,
-    /// that copy is stale (it still has the offset Apply just cleared) and is not stored. updateSuggestion
-    /// drops its result when it changed during its Home Assistant reads, so a handled card does not return.
+    /// Bumped by Apply and Not now. updateSuggestion drops its result when it changed during its Home
+    /// Assistant reads, so a card the user already handled does not come back.
     var suggestEpoch = 0
+    /// Per monitor, bumped where Apply clears its hand-set offset. The tick copies a monitor's hold state, awaits
+    /// the write, then stores the state back: if this changed meanwhile, the copy still has the offset Apply just
+    /// cleared, so the tick clears it again in its own result (and carries on normally) instead of restoring it.
+    var offsetCleared: [String: Int] = [:]
     /// input_number min/max/step per entity, kept until the config reloads (a failed read is not kept).
     var stepCache: [String: NumberStep] = [:]
     /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
@@ -630,7 +632,7 @@ import DaylitCore
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
-            let epoch = suggestEpoch
+            let clearedAt = offsetCleared[m.uuid]
             var want = ownTarget(m)
             let follower = base != nil && syncOffsets.isMember(m.uuid)
             if let b = base, follower {
@@ -658,10 +660,11 @@ import DaylitCore
                                  : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
                 }
                 mons[i].writeFailing = !ok
-                // Apply cleared this monitor's offset while the write was under way: our copy of its state is stale.
-                guard epoch == suggestEpoch else { continue }
             }
-            let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            var st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
+            // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
+            let appliedMeanwhile = offsetCleared[m.uuid] != clearedAt
+            if appliedMeanwhile { st = Suggest.afterApply(st); recorder.drop(m.uuid) }
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
             mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen; mons[i].remoteValue = st.remoteValue
             if st.offset != m.offset, let o = st.offset {
@@ -686,7 +689,7 @@ import DaylitCore
             }
             if ok, let v = step.level { mons[i].level = Double(v) }
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
-            let applied = ok ? step.applied : c0, manual = step.manual
+            let applied = ok ? step.applied : c0, manual = step.manual && !appliedMeanwhile
             if follower { linkedNow[m.uuid] = applied }
             mons[i].manual = manual
             if source == .homeAssistant, inp.fromHA, let ha = config.homeAssistant, let sensor = m.ha?.sensor, Config.isEntityId(sensor), mons[i].published != applied || mons[i].publishedManual != manual

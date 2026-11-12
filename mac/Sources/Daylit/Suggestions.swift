@@ -141,7 +141,7 @@ extension Daylit {
                 failed.append("config.json failed: \(error.localizedDescription)")
             }
         }
-        suggestEpoch += 1   // a tick in flight must not store back the offset cleared below
+        offsetCleared[sg.monitor, default: 0] += 1   // a tick in flight merges this clear into its own result
         if let i = mons.firstIndex(where: { $0.uuid == sg.monitor }) {
             let cleared = Suggest.afterApply(HoldState(lastSet: mons[i].lastSet, lastTarget: mons[i].lastTarget, offset: mons[i].offset,
                                                        offsetSun: mons[i].offsetSun, offsetAt: mons[i].offsetAt))
