@@ -55,6 +55,10 @@ Week fixture (levels 100 / 78 / 75, 13 samples on 5 UTC days): automatic levels 
 
 Second-day fixture (levels 95 / 62 / 75): automatic levels 75, 75, 78 (the 78 at 58% needs daylight 0.5, sun 4.5°); two samples settle (63 and 72), the put-back 69 does not; no candidates (one day); a blind-down-only fit gives **55.88**.
 
+Cloudy-morning replay (levels 95 / 62 / 75, the two held changes 63 at blind 40% and 72 at blind 58% on three days, daylight 0.5 / 0.6 / 0.7 from sun 4.5° / 6° / 7.5°): automatic levels `75 79 75 79 75 78`. The largest weights are blind down 0.42, day 0.41, night 0.50, all under 0.55, so there are **no candidates and no suggestion**.
+
+References (sunny with the blind fully down, sunny with it open, evening with lights on; levels 100 / 78 / 75): before **78 / 100 / 80**. After the week's proposal (blind down 61): **61 / 100 / 80**. After the four-morning "clear pattern" proposal (blind down 63, fit 62.83): **63 / 100 / 80**. Only the covered, proposed situation moves; the other two move 0.
+
 Other checks: one sample (chosen 60 at blind 30%, auto 85) fits blind down to **66.44**; exact synthetic data (levels 90/50/30, 300 samples) recovers each level within 1.
 
 ## File map
@@ -1013,7 +1017,7 @@ MSG
 
 ### Task 7: Swift core: the two fixtures
 
-Tests only: they check the motivating week and the day after against Tasks 1–6. No new code.
+Tests only: they check the motivating week, the day after, cloudy mornings and the reference situations (spec §4 *Protecting situations the user did not correct*, §7) against Tasks 1–6. No new code. The reference check is a test that guards against a later change to the fit, not a runtime filter.
 
 **Files:**
 - Modify: `mac/Tests/DaylitCoreTests/SuggestTests.swift` (append at the end of the file)
@@ -1096,13 +1100,56 @@ final class SuggestFixtureTests: XCTestCase {
         XCTAssertEqual(bd, 55.88, accuracy: 0.01)
         XCTAssertTrue((35...57).contains(bd), "\(bd)")
     }
+
+    /// The three situations a proposal must leave alone unless the samples cover them: a sunny day with the
+    /// blind fully down, a sunny day with it open, an evening with the lights on.
+    static let references: [(level: Level, elev: Double, pos: Double, lights: Bool)] = [
+        (.blindDown, 30, 0, false), (.day, 30, 100, false), (.night, -6, 100, true),
+    ]
+    static func referenceTarget(_ l: [Double], _ r: (level: Level, elev: Double, pos: Double, lights: Bool)) -> Int {
+        target(day: l[0], blindDown: l[1], night: l[2], elev: r.elev, pos: r.pos, lights: r.lights)
+    }
+
+    func testCloudyMorningsMakeNoSuggestion() {
+        // The day after's two held changes, replayed on three days with thin daylight (0.5–0.7) at levels 95 / 62 / 75.
+        // At blind 40% day and blind down mix to 75.2, the same as night: no level explains the change.
+        let l: [Double] = [95, 62, 75]
+        let samples = [(4.5, 7.5), (6.0, 6.0), (7.5, 4.5)].enumerated().flatMap { d, e in
+            [Fixture.sample(6 + d, 9, elev: e.0, p: 0.40, chosen: 63, levels: l),
+             Fixture.sample(6 + d, 15, elev: e.1, p: 0.58, chosen: 72, levels: l)]
+        }
+        XCTAssertEqual(samples.map(\.auto), [75, 79, 75, 79, 75, 78])
+        XCTAssertEqual(Suggest.candidates(samples, dayOf: Fixture.utcDay), [])   // no level reaches 0.55 of the weight
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: l, steps: [.whole, .whole, .whole],
+                                        now: Fixture.t0 + 10 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testReferencesStayPut() {
+        // Every fixture that suggests: the evening with the lights on, and the situation of each level not
+        // proposed, keep their target within 3 points.
+        let clear = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: Self.week) }
+        for samples in [Self.weekSamples(), clear] {
+            guard let s = Suggest.suggestion(monitor: "m", samples: samples, levels: Self.week, steps: [.whole, .whole, .whole],
+                                             now: Fixture.t0 + 5 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay) else {
+                return XCTFail("the fixture should suggest")
+            }
+            var after = Self.week
+            for c in s.changes { after[c.level.rawValue] = c.to }
+            let proposed = Set(s.changes.map(\.level))
+            for r in Self.references where r.level == .night || !proposed.contains(r.level) {
+                XCTAssertLessThanOrEqual(abs(Self.referenceTarget(after, r) - Self.referenceTarget(Self.week, r)), 3, "\(r.level)")
+            }
+            XCTAssertEqual(Self.referenceTarget(after, Self.references[2]), 80)   // evening: night 75 + the lights' 5
+            XCTAssertEqual(Self.referenceTarget(after, Self.references[1]), 100)  // sunny, blind open: day 100
+        }
+    }
 }
 ```
 
 - [ ] **Step 2: Run them**
 
 Run: `cd mac && swift test --filter SuggestFixtureTests`
-Expected: `Executed 3 tests, with 0 failures` (the numbers are listed under *Numbers the fixtures produce* at the top of this plan). If one fails, **do not change an expected value**: the code from Tasks 1–6 differs from the plan; compare it with the plan and fix the code, or stop and report the failing line.
+Expected: `Executed 5 tests, with 0 failures` (the numbers are listed under *Numbers the fixtures produce* at the top of this plan). If one fails, **do not change an expected value**: the code from Tasks 1–6 differs from the plan; compare it with the plan and fix the code, or stop and report the failing line.
 
 - [ ] **Step 3: Commit**
 
@@ -2255,6 +2302,49 @@ public class SuggestFixtureTests {
         double bd = Suggest.Fit(finals, l, [Level.BlindDown])[1];
         Assert.Equal(55.88, bd, 0.01);
         Assert.InRange(bd, 35, 57);
+    }
+
+    /// The three situations a proposal must leave alone unless the samples cover them: a sunny day with the
+    /// blind fully down, a sunny day with it open, an evening with the lights on.
+    static readonly (Level Level, double Elev, double Pos, bool Lights)[] References = [
+        (Level.BlindDown, 30, 0, false), (Level.Day, 30, 100, false), (Level.Night, -6, 100, true),
+    ];
+    static int ReferenceTarget(double[] l, (Level Level, double Elev, double Pos, bool Lights) r) {
+        var t = new Tuning();
+        return Rules.Target(l, r.Pos, r.Lights, t.Fraction(r.Elev), t, r.Elev < t.LightsBoostSunBelow);
+    }
+
+    [Fact]
+    public void CloudyMorningsMakeNoSuggestion() {
+        // The day after's two held changes, replayed on three days with thin daylight (0.5–0.7) at levels 95 / 62 / 75.
+        // At blind 40% day and blind down mix to 75.2, the same as night: no level explains the change.
+        double[] l = [95, 62, 75];
+        var elevs = new[] { (Morning: 4.5, Afternoon: 7.5), (Morning: 6.0, Afternoon: 6.0), (Morning: 7.5, Afternoon: 4.5) };
+        var samples = elevs.SelectMany((e, d) => new[] {
+            SuggestData.Make(6 + d, 9, e.Morning, 0.40, 63, l), SuggestData.Make(6 + d, 15, e.Afternoon, 0.58, 72, l) }).ToList();
+        Assert.Equal(new[] { 75, 79, 75, 79, 75, 78 }, samples.Select(x => x.Auto));
+        Assert.Empty(Suggest.Candidates(samples, SuggestData.UtcDay));   // no level reaches 0.55 of the weight
+        Assert.Null(Suggest.SuggestionFor("m", samples, l, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                          SuggestData.T0 + 10 * 86400, null, dayOf: SuggestData.UtcDay));
+    }
+
+    [Fact]
+    public void ReferencesStayPut() {
+        // Every fixture that suggests: the evening with the lights on, and the situation of each level not
+        // proposed, keep their target within 3 points.
+        var clear = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 70, Week)).ToList();
+        foreach (var samples in new[] { WeekSamples(), clear }) {
+            var s = Suggest.SuggestionFor("m", samples, Week, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                          SuggestData.T0 + 5 * 86400, null, dayOf: SuggestData.UtcDay);
+            Assert.NotNull(s);   // the fixture should suggest
+            var after = (double[])Week.Clone();
+            foreach (var ch in s!.Changes) after[(int)ch.Level] = ch.To;
+            var proposed = s.Changes.Select(ch => ch.Level).ToHashSet();
+            foreach (var r in References.Where(x => x.Level == Level.Night || !proposed.Contains(x.Level)))
+                Assert.InRange(Math.Abs(ReferenceTarget(after, r) - ReferenceTarget(Week, r)), 0, 3);
+            Assert.Equal(80, ReferenceTarget(after, References[2]));    // evening: night 75 + the lights' 5
+            Assert.Equal(100, ReferenceTarget(after, References[1]));   // sunny, blind open: day 100
+        }
     }
 }
 ```
@@ -3597,7 +3687,7 @@ cd mac && swift test 2>&1 | tail -3
 mac/build.sh /tmp/daylit-build 2>&1 | grep -E "warning|error|Build complete"
 ```
 
-Expected: `Executed N tests, with 0 failures` (N = the tests before this branch + 36 new ones); only `Build complete!`.
+Expected: `Executed N tests, with 0 failures` (N = the tests before this branch + 38 new ones); only `Build complete!`.
 
 - [ ] **Step 2: A quick run on a test config (no Home Assistant, nothing of yours touched)**
 
@@ -3622,4 +3712,4 @@ Expected: the macOS and Windows jobs both pass, tests, build and UI snapshots.
 
 - [ ] **Step 4: Spec walk-through**
 
-Read `docs/superpowers/specs/2026-11-12-suggest-levels-design.md` once more and tick each point against the code: recording rules and every exclusion (Tasks 5, 19, 24), candidates (1, 9), fit and pull (2, 10), rounding to an input_number step (3, 11, 17, 22), the 5-point and 3-point tests and Not now for 7 days (4, 12, 20, 25), the sentence and log lines (4, 12, 20, 25), Apply clearing the offset (5, 13, 20, 25), stale and old samples and corrections.json (6, 14, 18, 23), both fixtures (7, 15), the card and `panel-one-suggestion` (21, 26). Report anything missing instead of adding scope.
+Read `docs/superpowers/specs/2026-11-12-suggest-levels-design.md` once more and tick each point against the code: recording rules and every exclusion (Tasks 5, 19, 24), candidates (1, 9), fit and pull (2, 10), rounding to an input_number step (3, 11, 17, 22), the 5-point and 3-point tests and Not now for 7 days (4, 12, 20, 25), the sentence and log lines (4, 12, 20, 25), Apply clearing the offset (5, 13, 20, 25), stale and old samples and corrections.json (6, 14, 18, 23), both fixtures, cloudy mornings and the references (7, 15), the card and `panel-one-suggestion` (21, 26). Report anything missing instead of adding scope.
