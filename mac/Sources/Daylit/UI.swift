@@ -294,7 +294,8 @@ struct ShortcutsView: View {
     // Passed in by the caller (main actor): older compilers treat @State defaults as nonisolated.
     @State var up: HotKeys.Combo
     @State var down: HotKeys.Combo
-    @State var recording: Int? = nil     // 0 up, 1 down
+    @State var theme: HotKeys.Combo
+    @State var recording: Int? = nil     // 0 up, 1 down, 2 light/dark
     @State var error: String? = nil
     @State var monitor: Any? = nil
     let done: () -> Void
@@ -307,29 +308,36 @@ struct ShortcutsView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow { Text("Brighter"); box(0, up) }
                 GridRow { Text("Dimmer"); box(1, down) }
+                GridRow { Text("Light / dark mode"); box(2, theme) }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
-                Button("Reset to Defaults") { up = HotKeys.defaultUp; down = HotKeys.defaultDown; error = nil }
+                Button("Reset to Defaults") { up = HotKeys.defaultUp; down = HotKeys.defaultDown; theme = HotKeys.defaultTheme; error = nil }
                 Spacer()
                 Button("Cancel") { stop(); done() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
                     stop()
-                    if HotKeys.shared.apply(up, down) { done() }
-                    else { error = "\(up.text) or \(down.text) is taken by another app (or not allowed by macOS). Try another." }
+                    if let c = ShortcutRule.clash([up, down, theme].map { ($0.key, $0.mods) }) {
+                        let names = ["Brighter", "Dimmer", "Light / dark mode"]
+                        error = "\(names[c.first]) and \(names[c.second]) need different combinations."
+                        return
+                    }
+                    let taken = HotKeys.shared.apply(up, down, theme)
+                    if taken.isEmpty { done() }
+                    else { error = "The \(taken.joined(separator: " and ")) shortcut is taken by another app (or not allowed by macOS). Try another." }
                 }.keyboardShortcut(.defaultAction)
             }.padding(.top, 6)
         }
         .padding(20).frame(width: 380)
         .onAppear { HotKeys.shared.unregister() }   // so pressing the current keys records them instead of firing
-        .onDisappear { stop(); HotKeys.shared.ok = HotKeys.shared.register(HotKeys.shared.up, HotKeys.shared.down) }
+        .onDisappear { stop(); HotKeys.shared.registerAll(log: false) }
     }
 
     func box(_ i: Int, _ c: HotKeys.Combo) -> some View {
         Button { start(i) } label: {
             Text(recording == i ? "Press keys…" : c.text).frame(minWidth: 160).monospaced()
         }
-        .accessibilityLabel(i == 0 ? "Brighter shortcut" : "Dimmer shortcut")
+        .accessibilityLabel(["Brighter shortcut", "Dimmer shortcut", "Light or dark mode shortcut"][i])
     }
 
     func start(_ i: Int) {
@@ -346,7 +354,7 @@ struct ShortcutsView: View {
                                         kVK_PageUp: "⇞", kVK_PageDown: "⇟", kVK_Home: "↖", kVK_End: "↘"]
             let ch = names[Int(e.keyCode)] ?? (e.charactersIgnoringModifiers ?? "?").uppercased()
             let c = HotKeys.Combo(key: UInt32(e.keyCode), mods: mods, char: ch)
-            if recording == 0 { up = c } else { down = c }
+            switch recording { case 0: up = c; case 1: down = c; default: theme = c }
             error = nil; stop()
             return nil
         }
@@ -361,7 +369,7 @@ struct ShortcutsView: View {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Keyboard Shortcuts"; w.isReleasedWhenClosed = false
-        w.contentViewController = NSHostingController(rootView: ShortcutsView(up: HotKeys.shared.up, down: HotKeys.shared.down) { window?.close() })
+        w.contentViewController = NSHostingController(rootView: ShortcutsView(up: HotKeys.shared.up, down: HotKeys.shared.down, theme: HotKeys.shared.theme) { window?.close() })
         w.center(); window = w
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
             Task { @MainActor in window = nil; StatusController.shared?.model.objectWillChange.send() }

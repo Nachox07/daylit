@@ -84,7 +84,7 @@ final class Keys {
 }
 
 /// Global shortcuts through Carbon's RegisterEventHotKey: no Accessibility permission needed, and the
-/// key press is consumed. Up, down, and each with Shift for steps of 1.
+/// key press is consumed. Up, down, and each with Shift for steps of 1; plus one for light/dark mode.
 @MainActor final class HotKeys {
     static let shared = HotKeys()
     struct Combo: Codable, Equatable {
@@ -99,13 +99,18 @@ final class Keys {
     static let mods = UInt32(controlKey | optionKey | cmdKey)
     static let defaultUp = Combo(key: UInt32(kVK_UpArrow), mods: mods, char: "↑")
     static let defaultDown = Combo(key: UInt32(kVK_DownArrow), mods: mods, char: "↓")
+    static let defaultTheme = Combo(key: UInt32(kVK_ANSI_D), mods: mods, char: "D")
 
     var up: Combo = load("hotkeyUp") ?? defaultUp
     var down: Combo = load("hotkeyDown") ?? defaultDown
+    var theme: Combo = load("hotkeyTheme") ?? defaultTheme
     var ok = false
+    var themeOk = false
+    var themeRef: EventHotKeyRef?
     var refs: [EventHotKeyRef] = []
     var handler: EventHandlerRef?
     var action: ((Bool, Bool) -> Void)?   // (up, fine)
+    var themeAction: (() -> Void)?
 
     static func load(_ k: String) -> Combo? {
         UserDefaults.standard.data(forKey: k).flatMap { try? JSONDecoder().decode(Combo.self, from: $0) }
@@ -113,23 +118,45 @@ final class Keys {
     func save() {
         UserDefaults.standard.set(try? JSONEncoder().encode(up), forKey: "hotkeyUp")
         UserDefaults.standard.set(try? JSONEncoder().encode(down), forKey: "hotkeyDown")
+        UserDefaults.standard.set(try? JSONEncoder().encode(theme), forKey: "hotkeyTheme")
     }
     /// "⌃⌥⌘↑ / ↓" when both share modifiers.
     var pairText: String { up.mods == down.mods ? "\(up.text) / \(down.char)" : "\(up.text) / \(down.text)" }
 
-    func start(_ act: @escaping (Bool, Bool) -> Void) {
-        action = act
+    func start(_ act: @escaping (Bool, Bool) -> Void, theme toggle: @escaping () -> Void) {
+        action = act; themeAction = toggle
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
             var hk = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &hk)
             let id = hk.id
-            DispatchQueue.main.async { MainActor.assumeIsolated { HotKeys.shared.action?(id == 1 || id == 3, id >= 3) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                if id == 5 { HotKeys.shared.themeAction?() } else { HotKeys.shared.action?(id == 1 || id == 3, id >= 3) }
+            } }
             return noErr
         }, 1, &spec, nil, &handler)
+        registerAll()
+    }
+
+    /// Brightness and light/dark are registered apart, so a taken theme combination never stops the brightness ones.
+    func registerAll(log: Bool = true) {
         ok = register(up, down)
+        themeOk = registerTheme(theme)
+        guard log else { return }
         Log.write("hotkeys: \(pairText)" + (ok ? "" : " are taken by another app"))
+        if !themeOk { Log.write("hotkeys: \(theme.text) (light/dark) is taken by another app") }
+    }
+
+    /// Light/dark mode, hot key id 5 (no Shift variant). False (and not registered) if taken.
+    @discardableResult func registerTheme(_ c: Combo) -> Bool {
+        if let r = themeRef { UnregisterEventHotKey(r); themeRef = nil }
+        var ref: EventHotKeyRef?
+        let st = RegisterEventHotKey(c.key, c.mods, EventHotKeyID(signature: 0x444C_5954 /* DLYT */, id: 5),
+                                     GetApplicationEventTarget(), 0, &ref)
+        guard st == noErr, let ref else { return false }
+        themeRef = ref
+        return true
     }
 
     /// Registers all four; false (and nothing registered) if any is taken or not allowed.
@@ -145,12 +172,20 @@ final class Keys {
         }
         return true
     }
-    func unregister() { refs.forEach { UnregisterEventHotKey($0) }; refs = [] }
+    func unregister() {
+        refs.forEach { UnregisterEventHotKey($0) }; refs = []
+        if let r = themeRef { UnregisterEventHotKey(r); themeRef = nil }
+    }
 
-    /// Tries a new pair live; on failure the saved pair comes back.
-    func apply(_ u: Combo, _ d: Combo) -> Bool {
-        if register(u, d) { up = u; down = d; ok = true; save(); Log.write("hotkeys: \(pairText)"); return true }
-        ok = register(up, down)
-        return false
+    /// Tries new shortcuts live. Returns what is taken ("brightness", "light/dark"); empty means saved.
+    /// On failure the saved ones come back.
+    func apply(_ u: Combo, _ d: Combo, _ t: Combo) -> [String] {
+        unregister()
+        var taken: [String] = []
+        if !register(u, d) { taken.append("brightness") }
+        if !registerTheme(t) { taken.append("light/dark") }
+        if taken.isEmpty { up = u; down = d; theme = t; ok = true; themeOk = true; save(); Log.write("hotkeys: \(pairText), \(theme.text) (light/dark)"); return [] }
+        registerAll(log: false)
+        return taken
     }
 }
