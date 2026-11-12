@@ -14,6 +14,7 @@ import DaylitCore
     @Published var detail = ""          // one line under the Automatic switch
     @Published var lightStatus: String?  // the daylight sensor's state, for the Settings window
     @Published var problem: String?     // config / connection problem, shown as a caption
+    @Published var localNetworkBlocked = false   // the problem is macOS's Local Network permission: the panel offers Open Settings
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
     @Published var hasBattery = Power.hasBattery
@@ -798,6 +799,7 @@ import DaylitCore
                     lastHAError = nil
                 }
                 haDownSince = nil; haLoggedAt = nil
+                localNetworkBlocked = false
                 lastHALevels = s.m.mapValues(fallbackLevels)
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
@@ -835,20 +837,24 @@ import DaylitCore
                 }
                 return i
             case .failure(let f):
-                let message = HAClient.describe(f, ha)
-                if HAErrorRule.shouldLog(message: message, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
+                var blocked = false
+                if f == .unreachable { blocked = await LocalNetworkProbe.blocked(url: ha.url, errorCode: HAClient.lastCode) }
+                let message = blocked ? LocalNetworkBlock.message : HAClient.describe(f, ha)
+                let logMessage = blocked ? LocalNetworkBlock.logMessage : message
+                if HAErrorRule.shouldLog(message: logMessage, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
                                          now: Date().timeIntervalSince1970) {
-                    let still = haLoggedAt != nil && message == lastHAError
-                    Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? "")
+                    let still = haLoggedAt != nil && logMessage == lastHAError
+                    Log.write("home assistant: \(logMessage)" + (HAClient.lastCause.map { " (\($0))" } ?? "")
                               + (still ? ", still, for \(Int(Date().timeIntervalSince(haDownSince ?? Date()) / 60)) min" : ""))
                     haLoggedAt = Date()
                 }
-                lastHAError = message
+                lastHAError = logMessage
                 if haDownSince == nil { haDownSince = Date() }
                 let transient = f == .unreachable
                 let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
                                                   now: Date().timeIntervalSince1970)
                 problem = show ? message : configProblem
+                localNetworkBlocked = blocked && show
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= config.tuned.haFallbackSeconds {
                     auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
