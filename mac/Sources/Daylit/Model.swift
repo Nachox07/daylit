@@ -32,6 +32,19 @@ import DaylitCore
         guard let d = UserDefaults.standard.data(forKey: "holds"), let h = try? JSONDecoder().decode(SavedHolds.self, from: d) else { return SavedHolds() }
         return h
     }()
+    /// A change of levels to offer in the panel (DaylitCore.Suggest), and why the last Apply failed.
+    @Published var suggestion: Suggestion?
+    @Published var suggestError: String?
+    /// Hand changes waiting to settle, and the settled ones (corrections.json, this Mac only).
+    var recorder = Recorder()
+    var corrections: [Sample] = []
+    /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
+    var suggestDirty = true
+    /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
+    var suggestLevels: [String: [Double]] = [:]
+    var suggestFromHA: Bool?
+    /// "Not now": per monitor key, no suggestion until then (Unix seconds).
+    var suggestDismissed: [String: Double] = UserDefaults.standard.dictionary(forKey: "suggestDismissed") as? [String: Double] ?? [:]
     var lookDark: Bool?
     var look = LookRule()          // light/dark decision with hysteresis (DaylitCore)
     /// On battery with the pause switch on: no automatic work at all (sliders and keys still work).
@@ -61,6 +74,7 @@ import DaylitCore
     init(preview: Void) {}
 
     init() {
+        corrections = Self.loadCorrections()
         reload()
         if ProcessInfo.processInfo.environment["DAYLIT_NO_KEYS"] != "1" { Keys.shared.start(self) }   // tests: no Accessibility prompt
         HotKeys.shared.start { [weak self] up, fine in self?.hotkey(up: up, fine: fine) }
@@ -92,6 +106,7 @@ import DaylitCore
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
+        suggestDirty = true
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr
@@ -365,8 +380,9 @@ import DaylitCore
         refresh()
     }
 
-    private func forgetHandSet(_ i: Int) {
+    func forgetHandSet(_ i: Int) {
         mons[i].lastSet = nil; mons[i].offset = nil; mons[i].offsetSun = nil; mons[i].offsetAt = nil; mons[i].manual = false
+        recorder.drop(mons[i].uuid)   // a change waiting to become a suggestion sample ends here too
     }
 
     func setPause(_ on: Bool) {
