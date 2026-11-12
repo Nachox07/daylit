@@ -132,7 +132,9 @@ struct MonitorDraft: Identifiable {
     let haLevels: Bool             // Home Assistant helpers set these levels
     let contrastApplies: Bool      // DDC monitor: the contrast box is shown
     var contrast = ""              // empty = not set
+    var contrastLoaded = ""        // what the box showed on load: unchanged text keeps the file's value, decimals included
     var nightLights = ""           // "Lights on": empty = not set (night + the room-lights boost)
+    var nightLightsLoaded = ""
 }
 
 struct SettingsView: View {
@@ -542,9 +544,11 @@ struct SettingsView: View {
             let ha = cfg?.homeAssistant
             return MonitorDraft(id: mon.uuid, name: mon.name, label: cfg?.label ?? mon.name,
                                 day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20,
-                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil,
+                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil || ha?.nightLights != nil,
                                 contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "",
-                                nightLights: cfg?.nightLights.map { Self.fmt($0) } ?? "")
+                                contrastLoaded: cfg?.contrast.map { Self.fmt($0) } ?? "",
+                                nightLights: cfg?.nightLights.map { Self.fmt($0) } ?? "",
+                                nightLightsLoaded: cfg?.nightLights.map { Self.fmt($0) } ?? "")
         }
         error = nil
         note = opened.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
@@ -567,15 +571,15 @@ struct SettingsView: View {
             var me = SettingsEdit.Monitor(name: d.name, suggestedMatch: CLI.suggestMatch(d.name), label: d.label,
                                          day: Int(d.day.rounded()), blindDown: Int(d.blindDown.rounded()), night: Int(d.night.rounded()))
             if d.contrastApplies {
-                let (ok, v) = ContrastRule.parseField(d.contrast)
+                let (ok, v, keep) = ContrastRule.parseField(d.contrast, unchangedFrom: d.contrastLoaded)
                 if !ok { error = "Contrast for \(d.label) is 0 to 100, or empty to leave it unset."; return nil }
-                me.contrastEditable = true; me.contrast = v
+                me.contrastEditable = !keep; me.contrast = v
             }
             if showsNightLights {
                 // The same rule as contrast: 0 to 100, or empty for none.
-                let (ok, v) = ContrastRule.parseField(d.nightLights)
+                let (ok, v, keep) = ContrastRule.parseField(d.nightLights, unchangedFrom: d.nightLightsLoaded)
                 if !ok { error = "Lights on for \(d.label) is 0 to 100, or empty to keep Night plus the room-lights boost."; return nil }
-                me.nightLightsEditable = true; me.nightLights = v
+                me.nightLightsEditable = !keep; me.nightLights = v
             }
             mons.append(me)
         }

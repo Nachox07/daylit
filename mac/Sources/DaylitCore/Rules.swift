@@ -448,4 +448,11 @@ public enum ContrastRule {
         guard let v = Double(t), v.isFinite, (0...100).contains(v) else { return (false, nil) }
         return (true, Int(v.rounded()))
     }
+    /// The same box when the file may hold a decimal: text equal to what the window loaded (`original`) means
+    /// "not edited", so the file keeps its value (`keep`); only an edited box is parsed and rounded.
+    public static func parseField(_ text: String, unchangedFrom original: String) -> (ok: Bool, value: Int?, keep: Bool) {
+        if text == original { return (true, nil, true) }
+        let r = parseField(text)
+        return (r.ok, r.value, false)
+    }
 }

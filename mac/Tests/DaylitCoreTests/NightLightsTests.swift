@@ -247,3 +247,18 @@ final class NightLightsSuggestTests: XCTestCase {
         XCTAssertEqual(Suggest.decode(Suggest.encode([x])), [x])
     }
 }
+
+final class FieldUnchangedTests: XCTestCase {
+    func testUntouchedTextKeepsTheFilesValue() {
+        let r = ContrastRule.parseField("72.5", unchangedFrom: "72.5")
+        XCTAssertTrue(r.ok); XCTAssertTrue(r.keep); XCTAssertNil(r.value)
+        XCTAssertTrue(ContrastRule.parseField("", unchangedFrom: "").keep)
+    }
+    func testAnEditedBoxIsParsedAndRounded() {
+        let r = ContrastRule.parseField("73.4", unchangedFrom: "72.5")
+        XCTAssertTrue(r.ok); XCTAssertFalse(r.keep); XCTAssertEqual(r.value, 73)
+        XCTAssertNil(ContrastRule.parseField("", unchangedFrom: "72.5").value)
+        XCTAssertFalse(ContrastRule.parseField("", unchangedFrom: "72.5").keep)
+        XCTAssertFalse(ContrastRule.parseField("x", unchangedFrom: "72.5").ok)
+    }
+}

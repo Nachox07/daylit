@@ -114,6 +114,8 @@ import DaylitCore
         let (c, err, kept) = Config.reload(from: p, lastGood: lastGood)
         if !kept && ConfigLocation.state(of: p) == .present { lastGood = c }
         if kept { Log.write("config: keeping the last settings that loaded") }
+        // A removed or changed lights entity must not keep its last state alive through an outage.
+        if c.homeAssistant?.lights != config.homeAssistant?.lights { lastHALights = nil }
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
