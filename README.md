@@ -103,7 +103,9 @@ a target per monitor from three levels you choose: *day*, *blind closed* and *ni
 5. **Your hand.** A level you set keeps its distance from the target, so Daylit does not fight you:
    turn the screen 20 points down on a grey morning and it stays 20 below while the blind opens and the
    sun climbs. The distance fades out at sunset, so the next day starts clean; *Manual ✕* on the
-   monitor's row goes back to automatic at once.
+   monitor's row goes back to automatic at once. When you keep correcting a monitor the same way
+   on several days, the panel offers to change its level, with *Apply* and *Not now*; nothing changes
+   without the click ([details](docs/setup.md#suggested-levels)).
 
 Settings → *Automatic* draws all of this for today, with handles to choose when full brightness starts
 and when night starts, and shows each step with the numbers right now

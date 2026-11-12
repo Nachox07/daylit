@@ -47,6 +47,30 @@ the order the rules apply:
 
 The levels themselves are per monitor (Settings → *Displays*, or Home Assistant's helpers).
 
+### Suggested levels
+
+When you keep correcting a monitor the same way, the panel offers new levels:
+
+> You lower *Monitor* by about 12 with the blind partly or fully down. Set blind down 78 → 62?
+
+- A change counts once it has held 5 minutes. Not counted: the Home Assistant `set` helper, a linked
+  monitor following another, an idle or paused computer, the sun standing in while Home Assistant is
+  down, the room-lights boost, and levels at 0 or 100.
+- A level is offered only with changes on at least 3 days in the situation where it counts most (blind
+  down: daylight with the blind mostly closed; day: mostly open; night: the evening), when it moves by at
+  least 5, and when the new level would have been at least 3 points closer to what you chose, on average.
+- **Apply** sets the level where it lives: its `input_number` in Home Assistant (rounded to the helper's
+  step), otherwise `config.json`. A `config.json` with comments is not edited; set the level in
+  Settings instead. Your hand-set distance is cleared at the same time, so it is not added twice.
+  **Not now** hides that monitor's suggestions for 7 days.
+- The changes stay on this computer for 14 days (macOS `~/Library/Application Support/Daylit/corrections.json`,
+  Windows `%LOCALAPPDATA%\Daylit\corrections.json`); nothing goes to Home Assistant or iCloud. When a
+  level changes (Apply, Settings, a Home Assistant helper), it starts again from new changes.
+- The log shows `suggest:` lines.
+- Known gap: on a cloudy morning with the blind partly open, the blend of day and blind down lands
+  near the night level whatever the light, so no level explains the change and there is no suggestion
+  (issue #40).
+
 **Short winter days and the far north.** When today's sun never reaches a handle's height, there is no
 time to put it on: it rests on the day's highest (or lowest) point with a note such as *No full
 brightness today: the sun stays under 12°*. Clicking it changes nothing. Dragging it away picks a
