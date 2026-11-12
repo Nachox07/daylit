@@ -130,3 +130,79 @@ final class SuggestRoundingTests: XCTestCase {
         XCTAssertNil(NumberStep.parse(Data("not json".utf8)))
     }
 }
+
+final class SuggestTriggerTests: XCTestCase {
+    let levels: [Double] = [100, 78, 75]
+    let local: [NumberStep?] = [.whole, .whole, .whole]
+
+    func testScoringRunsTheRealTargetIncludingTheLightsBoost() {
+        // Sun 0° (daylight 0.2), lights on: the blend gives 30.4, the boost lifts it to 35.
+        let x = Sample(monitor: "m", chosen: 35, auto: 35, s: 0.2, p: 1, elev: 0, lights: true, levels: [32, 32, 30], at: 0)
+        XCTAssertEqual(Suggest.meanAbsError([x], levels: [32, 32, 30]), 0)
+        var off = x; off.lights = false
+        XCTAssertEqual(Suggest.meanAbsError([off], levels: [32, 32, 30]), 5)
+    }
+
+    func testAMoveUnderFivePointsIsNotProposed() {
+        // Blind fully down, three days at 74 against 78: the fit gives 75, which would cut the error from 4 to 1.
+        let samples = (0..<3).map { Fixture.sample($0, 9, elev: 30, p: 0, chosen: 74, levels: levels) }
+        XCTAssertEqual(Suggest.fit(samples, levels: levels, candidates: [.blindDown])[1], 75, accuracy: 1e-9)
+        XCTAssertEqual(Suggest.meanAbsError(samples, levels: levels) - Suggest.meanAbsError(samples, levels: [100, 75, 75]), 3)
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: local, now: Fixture.t0 + 5 * 86400,
+                                        dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testAMoveThatDoesNotCutTheErrorByThreeIsNotProposed() {
+        // Half the changes ask for 20 less, half for none: blind down moves 11, but the mean error stays 10.
+        let samples = (0..<3).flatMap { d in [66, 86].map { Fixture.sample(d, 9, elev: 30, p: 0.35, chosen: $0, levels: levels) } }
+        XCTAssertEqual(Suggest.fit(samples, levels: levels, candidates: [.blindDown])[1].rounded(), 67)
+        XCTAssertEqual(Suggest.meanAbsError(samples, levels: [100, 67, 75]), 10)
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: local, now: Fixture.t0 + 5 * 86400,
+                                        dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testAClearPatternIsProposedWithItsSentence() {
+        let samples = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels) }   // auto 86
+        let s = Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: local, now: Fixture.t0 + 5 * 86400,
+                                   dismissedUntil: nil, dayOf: Fixture.utcDay)
+        XCTAssertEqual(s?.changes.map(\.level), [.blindDown])
+        XCTAssertEqual(s?.amount, 16)
+        XCTAssertEqual(s?.lower, true)
+        XCTAssertEqual(s?.days, 4)
+        XCTAssertEqual(s?.samples, 4)
+        let to = s.map { Suggestion.fmt($0.changes[0].to) } ?? ""
+        XCTAssertEqual(s?.sentence(label: "Monitor"),
+                       "You lower Monitor by about 16 with the blind partly or fully down. Set blind down 78 → \(to)?")
+        XCTAssertEqual(s?.logLine(label: "Monitor"), "suggest: Monitor blind down 78 → \(to) (4 changes on 4 days)")
+    }
+
+    func testOtherMonitorsAndUnavailableLevelsAreLeftOut() {
+        let samples = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels) }
+        XCTAssertNil(Suggest.suggestion(monitor: "other", samples: samples, levels: levels, steps: local, now: Fixture.t0 + 5 * 86400,
+                                        dismissedUntil: nil, dayOf: Fixture.utcDay))
+        // Blind down comes from Home Assistant and is unavailable right now.
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: [.whole, nil, .whole], now: Fixture.t0 + 5 * 86400,
+                                        dismissedUntil: nil, dayOf: Fixture.utcDay))
+    }
+
+    func testNotNowHidesTheSuggestionForSevenDays() {
+        let samples = (0..<4).map { Fixture.sample($0, 9, elev: 30, p: 0.35, chosen: 70, levels: levels) }
+        let clicked = Fixture.t0 + 5 * 86400
+        let until = clicked + Suggest.notNow
+        XCTAssertEqual(Suggest.notNow, 7 * 86400)
+        XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: local, now: until - 60,
+                                        dismissedUntil: until, dayOf: Fixture.utcDay))
+        XCTAssertNotNil(Suggest.suggestion(monitor: "m", samples: samples, levels: levels, steps: local, now: until,
+                                           dismissedUntil: until, dayOf: Fixture.utcDay))
+    }
+
+    func testTwoLevelsAreListedMainFirst() {
+        let s = Suggestion(monitor: "m", changes: [LevelChange(level: .blindDown, from: 78, to: 62), LevelChange(level: .day, from: 100, to: 95)],
+                           amount: 12, lower: true, samples: 12, days: 4)
+        XCTAssertEqual(s.sentence(label: "Monitor"),
+                       "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62, day 100 → 95?")
+        XCTAssertEqual(Suggestion.fmt(62.5), "62.5")
+        let up = Suggestion(monitor: "m", changes: [LevelChange(level: .night, from: 20, to: 30)], amount: 8, lower: false, samples: 3, days: 3)
+        XCTAssertEqual(up.sentence(label: "Monitor"), "You raise Monitor by about 8 in the evening. Set night 20 → 30?")
+    }
+}

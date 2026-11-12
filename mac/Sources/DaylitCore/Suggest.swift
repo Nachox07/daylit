@@ -123,3 +123,103 @@ extension Suggest {
         return ((st.min + n * st.step) * 1e6).rounded() / 1e6   // no 61.500000001 from the multiplication
     }
 }
+
+/// One level to change: from its current value to the proposed one.
+public struct LevelChange: Equatable {
+    public var level: Level
+    public var from: Double
+    public var to: Double
+    public init(level: Level, from: Double, to: Double) { self.level = level; self.from = from; self.to = to }
+}
+
+/// What the panel offers for one monitor.
+public struct Suggestion: Equatable {
+    public var monitor: String          // the monitor's key
+    public var changes: [LevelChange]   // the main level (the one that moves most) first
+    public var amount: Int              // how far the user moves it: mean of chosen − auto where the main level dominates, rounded, no sign
+    public var lower: Bool              // the user lowers it (true) or raises it
+    public var samples: Int             // the hand changes behind it
+    public var days: Int                // on this many local days
+    public init(monitor: String, changes: [LevelChange], amount: Int, lower: Bool, samples: Int, days: Int) {
+        self.monitor = monitor; self.changes = changes; self.amount = amount; self.lower = lower; self.samples = samples; self.days = days
+    }
+
+    public var main: Level { changes[0].level }
+    /// "blind down 78 → 62, day 100 → 95"
+    public var changeText: String {
+        changes.map { "\($0.level.name) \(Self.fmt($0.from)) → \(Self.fmt($0.to))" }.joined(separator: ", ")
+    }
+    /// The panel line: "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62?"
+    public func sentence(label: String) -> String {
+        "You \(lower ? "lower" : "raise") \(label) by about \(amount) \(main.situation). Set \(changeText)?"
+    }
+    /// "suggest: Monitor blind down 78 → 62 (12 changes on 4 days)"
+    public func logLine(label: String) -> String { "suggest: \(label) \(changeText) (\(samples) changes on \(days) days)" }
+
+    /// A whole number without decimals, otherwise one decimal (an input_number with step 0.5).
+    public static func fmt(_ v: Double) -> String {
+        v == v.rounded() ? String(Int(v)) : String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), v)
+    }
+}
+
+extension Suggest {
+    /// A proposed level must move at least this much after rounding.
+    public static let minMove = 5.0
+    /// ...and the proposed levels must lower the mean absolute error by at least this much.
+    public static let minGain = 3.0
+    /// "Not now" hides a monitor's suggestions this long (seconds).
+    public static let notNow: Double = 7 * 86400
+
+    /// The two level lists are the same (an input_number may hold decimals).
+    public static func sameLevels(_ a: [Double], _ b: [Double]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+    }
+
+    /// The real target (boost, clamp, rounding) for a sample's moment with other levels.
+    /// `light: x.s` gives target the same daylight fraction: s is never above daylightFraction(elev).
+    public static func rerun(_ x: Sample, levels l: [Double], tuning: Tuning) -> Int {
+        target(day: l[0], blindDown: l[1], night: l[2], elev: x.elev, pos: x.p * 100, lights: x.lights, tuning: tuning, light: x.s)
+    }
+
+    /// Mean of |target − chosen| over the samples, with `levels`.
+    public static func meanAbsError(_ samples: [Sample], levels: [Double], tuning: Tuning = Tuning()) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        let total = samples.reduce(0) { $0 + abs(rerun($1, levels: levels, tuning: tuning) - $1.chosen) }
+        return Double(total) / Double(samples.count)
+    }
+
+    /// The change to offer for one monitor, or nil.
+    /// - samples: all recorded samples (other monitors' and stale ones are ignored here)
+    /// - levels: the monitor's [day, blindDown, night] now
+    /// - steps: per level, what it can be stored as; nil = it comes from Home Assistant and is unavailable now
+    /// - dismissedUntil: "Not now" was clicked; nothing until this time
+    public static func suggestion(monitor: String, samples all: [Sample], levels: [Double], steps: [NumberStep?], now: Double,
+                                  dismissedUntil: Double?, tuning: Tuning = Tuning(),
+                                  dayOf: (Double) -> Int = { localDay($0) }) -> Suggestion? {
+        if let d = dismissedUntil, now < d { return nil }
+        guard levels.count == 3, steps.count == 3 else { return nil }
+        let mine = all.filter { $0.monitor == monitor && sameLevels($0.levels, levels) }
+        let cand = candidates(mine, dayOf: dayOf).filter { steps[$0.rawValue] != nil }
+        guard !cand.isEmpty else { return nil }
+        let fitted = fit(mine, levels: levels, candidates: cand)
+        var proposed = levels
+        var changes: [LevelChange] = []
+        for l in cand {
+            let v = roundToStep(fitted[l.rawValue], steps[l.rawValue]!)
+            if abs(v - levels[l.rawValue]) >= minMove - 1e-9 {
+                proposed[l.rawValue] = v
+                changes.append(LevelChange(level: l, from: levels[l.rawValue], to: v))
+            }
+        }
+        guard !changes.isEmpty else { return nil }
+        let gain = meanAbsError(mine, levels: levels, tuning: tuning) - meanAbsError(mine, levels: proposed, tuning: tuning)
+        guard gain >= minGain - 1e-9 else { return nil }
+        var main = changes[0]   // the one that moves most; the first of them on a tie
+        for c in changes where abs(c.to - c.from) > abs(main.to - main.from) { main = c }
+        let ordered = [main] + changes.filter { $0.level != main.level }
+        let dom = mine.filter { dominates($0, main.level) }
+        let mean = Double(dom.reduce(0) { $0 + $1.chosen - $1.auto }) / Double(max(dom.count, 1))
+        return Suggestion(monitor: monitor, changes: ordered, amount: Int(abs(mean).rounded()), lower: mean < 0,
+                          samples: mine.count, days: Set(mine.map { dayOf($0.at) }).count)
+    }
+}
