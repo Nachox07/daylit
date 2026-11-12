@@ -40,6 +40,13 @@ import DaylitCore
     var corrections: [Sample] = []
     /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
     var suggestDirty = true
+    /// Bumped by Apply (at its start and again where it clears the hand-set offset) and by Not now. The tick
+    /// copies a monitor's hold state, awaits the write, then stores the state back: if this changed meanwhile,
+    /// that copy is stale (it still has the offset Apply just cleared) and is not stored. updateSuggestion
+    /// drops its result when it changed during its Home Assistant reads, so a handled card does not return.
+    var suggestEpoch = 0
+    /// input_number min/max/step per entity, kept until the config reloads (a failed read is not kept).
+    var stepCache: [String: NumberStep] = [:]
     /// What the last suggestion was worked out from: each monitor's levels, and whether Home Assistant answered.
     var suggestLevels: [String: [Double]] = [:]
     var suggestFromHA: Bool?
@@ -106,7 +113,7 @@ import DaylitCore
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
-        suggestDirty = true
+        suggestDirty = true; stepCache = [:]
         let (src, srcErr) = c.resolvedSource()
         source = src
         configProblem = err ?? srcErr
@@ -623,6 +630,7 @@ import DaylitCore
             guard let c0 = cur[i] else { continue }
             let m = mons[i]
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
+            let epoch = suggestEpoch
             var want = ownTarget(m)
             let follower = base != nil && syncOffsets.isMember(m.uuid)
             if let b = base, follower {
@@ -650,6 +658,8 @@ import DaylitCore
                                  : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
                 }
                 mons[i].writeFailing = !ok
+                // Apply cleared this monitor's offset while the write was under way: our copy of its state is stale.
+                guard epoch == suggestEpoch else { continue }
             }
             let st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is

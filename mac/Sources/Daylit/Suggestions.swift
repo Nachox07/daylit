@@ -11,7 +11,11 @@ extension Daylit {
 
     /// The saved samples, without those older than 14 days.
     static func loadCorrections() -> [Sample] {
-        Suggest.dropOld(Suggest.decode(try? Data(contentsOf: correctionsURL)), now: Date().timeIntervalSince1970)
+        let d = try? Data(contentsOf: correctionsURL)
+        if let d, !d.isEmpty, (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["samples"] as? [Any] == nil {
+            Log.write("suggest: corrections.json unreadable, starting empty")
+        }
+        return Suggest.dropOld(Suggest.decode(d), now: Date().timeIntervalSince1970)
     }
 
     func saveCorrections() {
@@ -48,10 +52,14 @@ extension Daylit {
 
     /// What a level can be stored as now: a whole number for a local level, the input_number's own step,
     /// or nil when it comes from Home Assistant and is unavailable (Home Assistant down, or the helper reads below 0).
-    func step(for l: Level, of m: Mon, _ inp: Inputs) async -> NumberStep? {
-        guard let e = haEntity(l, of: m) else { return .whole }
-        guard inp.fromHA, let ha = config.homeAssistant, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return nil }
-        return await HAClient.numberStep(ha, e)
+    /// `retry` is true when the level is available this tick but its step could not be read: try again next tick.
+    func step(for l: Level, of m: Mon, _ inp: Inputs) async -> (step: NumberStep?, retry: Bool) {
+        guard let e = haEntity(l, of: m) else { return (.whole, false) }
+        guard inp.fromHA, let ha = config.homeAssistant, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return (nil, false) }
+        if let c = stepCache[e] { return (c, false) }
+        guard let s = await HAClient.numberStep(ha, e) else { return (nil, true) }
+        stepCache[e] = s
+        return (s, false)
     }
 }
 
@@ -72,13 +80,22 @@ extension Daylit {
         for m in mons where haLevelsUnavailable(of: m, inp) { known[m.uuid] = nil }
         let kept = Suggest.dropOld(Suggest.dropStale(corrections, current: known), now: now)
         if kept != corrections { corrections = kept; saveCorrections() }
-        let gen = generation
+        let gen = generation, epoch = suggestEpoch
         var found: Suggestion?
         for m in mons where kept.contains(where: { $0.monitor == m.uuid }) {
             guard let lv = current[m.uuid] else { continue }
+            // Steps are only needed for the levels the samples can tell apart (the others are never proposed).
+            let mine = Suggest.dropOld(kept, now: now).filter { $0.monitor == m.uuid && Suggest.sameLevels($0.levels, lv) }
+            let cand = Suggest.candidates(mine)
             var steps: [NumberStep?] = []
-            for l in Level.allCases { steps.append(await step(for: l, of: m, inp)) }
-            guard gen == generation else { suggestDirty = true; return }   // displays changed meanwhile
+            for l in Level.allCases {
+                if !cand.contains(l) { steps.append(.whole); continue }
+                let r = await step(for: l, of: m, inp)
+                if r.retry { suggestDirty = true }   // Home Assistant did not answer: work it out again next tick
+                steps.append(r.step)
+            }
+            // Displays changed, or Apply / Not now was clicked while waiting: this answer is stale.
+            guard gen == generation, epoch == suggestEpoch else { suggestDirty = true; return }
             if let s = Suggest.suggestion(monitor: m.uuid, samples: kept, levels: lv, steps: steps, now: now,
                                           dismissedUntil: suggestDismissed[m.uuid], tuning: config.tuned) {
                 found = s; break
@@ -94,7 +111,7 @@ extension Daylit {
     /// top of the new level. A failed write keeps the ones that worked and shows in the problem line.
     func applySuggestion() async {
         guard let sg = suggestion, let m = mons.first(where: { $0.uuid == sg.monitor }) else { return }
-        suggestion = nil; suggestError = nil
+        suggestion = nil; suggestError = nil; suggestEpoch += 1
         var local: [String: Int] = [:]
         var failed: [String] = []
         for c in sg.changes {
@@ -124,6 +141,7 @@ extension Daylit {
                 failed.append("config.json failed: \(error.localizedDescription)")
             }
         }
+        suggestEpoch += 1   // a tick in flight must not store back the offset cleared below
         if let i = mons.firstIndex(where: { $0.uuid == sg.monitor }) {
             let cleared = Suggest.afterApply(HoldState(lastSet: mons[i].lastSet, lastTarget: mons[i].lastTarget, offset: mons[i].offset,
                                                        offsetSun: mons[i].offsetSun, offsetAt: mons[i].offsetAt))
@@ -141,7 +159,10 @@ extension Daylit {
     /// Not now: no suggestion for this monitor for 7 days, remembered across restarts.
     func dismissSuggestion() {
         guard let sg = suggestion else { return }
-        suggestDismissed[sg.monitor] = Date().timeIntervalSince1970 + Suggest.notNow
+        let now = Date().timeIntervalSince1970
+        suggestDismissed[sg.monitor] = now + Suggest.notNow
+        suggestDismissed = suggestDismissed.filter { $0.value > now }   // expired entries go
+        suggestEpoch += 1
         UserDefaults.standard.set(suggestDismissed, forKey: "suggestDismissed")
         Log.write("suggest: \(mons.first { $0.uuid == sg.monitor }?.label ?? "a monitor") not now")
         suggestion = nil; suggestError = nil; suggestDirty = true

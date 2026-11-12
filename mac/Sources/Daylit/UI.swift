@@ -35,7 +35,7 @@ struct Panel: View {
                 suggestionCard(s, label: mon.label)
             }
 
-            if let p = m.problem ?? m.suggestError {
+            if let p = [m.problem, m.suggestError].compactMap({ $0 }).joined(separator: "\n") as String?, !p.isEmpty {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
