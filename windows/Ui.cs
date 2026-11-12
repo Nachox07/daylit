@@ -256,8 +256,9 @@ sealed class Flyout : Window {
     string KeysHint {
         get {
             string keys = Shortcut.Pair(Settings.Up, Settings.Down);
-            return app.HotkeysOk ? $"{keys}: the screen with the active window. Add Shift for fine steps."
-                                 : $"{keys} are taken by another app. Change them in the gear menu.";
+            string hint = app.HotkeysOk ? $"{keys}: the screen with the active window. Add Shift for fine steps."
+                                        : $"{keys} are taken by another app. Change them in the gear menu.";
+            return app.ThemeKeyOk ? hint : $"{hint} {Settings.ThemeKey} (light/dark) is taken by another app; change it in the gear menu.";
         }
     }
 
@@ -555,7 +556,8 @@ readonly record struct Shortcut(int Mods, int Vk) {
     public static string Pair(Shortcut up, Shortcut down) => up.Mods == down.Mods ? $"{up} / {down.KeyText}" : $"{up} / {down}";
 }
 
-/// Pick the brightness hotkeys: click a box, press the combination.
+/// Pick the hotkeys: click a box, press the combination. Brighter and Dimmer change the screen with the active
+/// window (Shift adds fine steps); the third row switches light and dark mode.
 static class ShortcutDialog {
     /// tryApply registers the shortcuts and returns null, or what another app owns ("brightness", "light/dark").
     public static void Edit(Shortcut up, Shortcut down, Shortcut theme, Func<Shortcut, Shortcut, Shortcut, string?> tryApply) {
@@ -563,7 +565,7 @@ static class ShortcutDialog {
         var error = new TextBlock { Foreground = Palette.Error, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
         void Fail(string? msg) { error.Text = msg ?? ""; error.Visibility = msg == null ? Visibility.Collapsed : Visibility.Visible; }
 
-        TextBox Capture(Func<Shortcut> get, Action<Shortcut> set) {
+        TextBox Capture(Func<Shortcut> get, Action<Shortcut> set, string shiftMsg = "Leave Shift out: it is added automatically for steps of 1.") {
             var box = new TextBox { Text = get().ToString(), IsReadOnly = true, IsReadOnlyCaretVisible = false, MinWidth = 220, Cursor = WI.Cursors.Hand };
             box.PreviewKeyDown += (_, e) => {
                 var k = e.Key == WI.Key.System ? e.SystemKey : e.Key;
@@ -572,7 +574,7 @@ static class ShortcutDialog {
                 e.Handled = true;
                 if (k is WI.Key.LeftCtrl or WI.Key.RightCtrl or WI.Key.LeftAlt or WI.Key.RightAlt or WI.Key.LeftShift or WI.Key.RightShift or WI.Key.LWin or WI.Key.RWin) return;
                 int mods = (km.HasFlag(WI.ModifierKeys.Control) ? Shortcut.Ctrl : 0) | (km.HasFlag(WI.ModifierKeys.Alt) ? Shortcut.Alt : 0) | (km.HasFlag(WI.ModifierKeys.Windows) ? Shortcut.Win : 0);
-                if (km.HasFlag(WI.ModifierKeys.Shift)) { Fail("Leave Shift out: it is added automatically for steps of 1."); return; }
+                if (km.HasFlag(WI.ModifierKeys.Shift)) { Fail(shiftMsg); return; }
                 if (mods == 0) { Fail("Use Ctrl, Alt or Win with the key, so it does not clash with typing."); return; }
                 var sc = new Shortcut(mods, WI.KeyInterop.VirtualKeyFromKey(k));
                 set(sc); box.Text = sc.ToString(); Fail(null);
@@ -582,7 +584,7 @@ static class ShortcutDialog {
         }
         var upBox = Capture(() => newUp, v => newUp = v);
         var downBox = Capture(() => newDown, v => newDown = v);
-        var themeBox = Capture(() => newTheme, v => newTheme = v);
+        var themeBox = Capture(() => newTheme, v => newTheme = v, "Leave Shift out: Brighter and Dimmer use it for steps of 1.");
 
         Grid Row(string label, TextBox box) {
             var g = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -610,7 +612,7 @@ static class ShortcutDialog {
                 Margin = new Thickness(24), MaxWidth = 460,
                 Children = {
                     new TextBlock { Text = "Click a box and press the new combination.", TextWrapping = TextWrapping.Wrap },
-                    new TextBlock { Text = "They change the screen with the active window. Hold Shift as well for steps of 1.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 8) },
+                    new TextBlock { Text = "Brighter and Dimmer change the screen with the active window; hold Shift as well for steps of 1. The third one switches light and dark mode.", TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 8) },
                     Row("Brighter", upBox), Row("Dimmer", downBox), Row("Light / dark mode", themeBox), error, buttons,
                 },
             },

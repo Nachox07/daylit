@@ -346,7 +346,10 @@ sealed partial class Controller {
     }
 
     public void SetLook(bool on) { Settings.AutoLook = on; lookDark = null; look.Reset(); _ = Tick("look"); }
-    public void ToggleDark() { Look.SetDark(!Theme.Dark); tray.Icon = Theme.SunIcon(); panel.ApplyTheme(); }
+    public void ToggleDark() {
+        try { Look.SetDark(!Theme.Dark); } catch (Exception e) { Log.Write("theme: " + e.Message); return; }
+        tray.Icon = Theme.SunIcon(); panel.ApplyTheme();
+    }
 
     // MARK: the decision
 
