@@ -15,7 +15,9 @@ Files for installing Daylit with a package manager. Release builds still come fr
   and writes the version, URLs, sha256 and date into all of the above. It pushes and submits nothing.
 
 - `publish.sh <version>`: runs `update.sh`, pushes the cask to the tap, opens the winget pull
-  request (only with `WINGET=1`) and a pull request here with the updated files.
+  request (only with `WINGET=1`) and a pull request here with the updated files. The release
+  workflow runs it from the release tag; the pull request here is built on a fresh clone of `main`.
+  git authenticates through `gh auth git-credential` with `GH_TOKEN`: the token is never in a URL.
   `DRY_RUN=1` does it all locally and pushes nothing.
 
 ## After tagging a release
