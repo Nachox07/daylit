@@ -210,3 +210,52 @@ public class NightLightsHomeAssistantTests {
     public void ABadHelperIdIsDroppedFromTheTemplate() =>
         Assert.DoesNotContain("input_number.x", HaTemplate.Build(new HaConfig { Url = "http://x" }, [new MonitorHa { NightLights = "input_number.x'}}" }]));
 }
+
+public class NightLightsSuggestTests {
+    static readonly double[] Four = [95, 62, 60, 80];
+    static Sample? Make(double elev, bool lights, double[] levels) =>
+        Suggest.MakeSample("m", 70, 75, elev, 40, lights, 1, levels, new Tuning(), 1000, new SampleContext());
+
+    [Theory]
+    [InlineData(-10.0)]
+    [InlineData(0.0)]
+    [InlineData(5.0)]
+    [InlineData(11.9)]
+    public void NoSampleWhileTheLightsAreOnAndTheSunIsNotFullyUp(double elev) => Assert.Null(Make(elev, true, Four));
+
+    [Fact]
+    public void SamplesWithTheLightsOffOrTheSunFullyUp() {
+        Assert.Equal(Four, Make(5, false, Four)!.Levels);
+        Assert.Equal(Four, Make(12, true, Four)!.Levels);
+    }
+
+    [Fact]
+    public void AMonitorWithoutNightLightsStillRecordsThoseTicks() =>
+        Assert.NotNull(Make(5, true, [95, 62, 60]));   // at 5° the boost no longer applies, so the three-level rule decides
+
+    [Fact]
+    public void ChangingNightLightsMakesOlderSamplesStale() {
+        var x = Make(30, false, Four)!;
+        Assert.Empty(Suggest.DropStale([x], new Dictionary<string, double[]> { ["m"] = [95, 62, 60, 85] }));
+        Assert.Empty(Suggest.DropStale([x], new Dictionary<string, double[]> { ["m"] = [95, 62, 60] }));
+        Assert.Single(Suggest.DropStale([x], new Dictionary<string, double[]> { ["m"] = Four }));
+        var r = new Recorder();
+        r.HandChanged("m", x);
+        Assert.Null(r.Settle("m", true, [95, 62, 60, 85], x.At + 400));
+    }
+
+    [Fact]
+    public void TheFitKeepsNightLightsAsItIs() {
+        var samples = Enumerable.Range(0, 6).Select(i => new Sample("m", 55, 62, 1, 0, 30, false, Four, i * 86400.0)).ToList();
+        var fitted = Suggest.Fit(samples, Four, [Level.BlindDown]);
+        Assert.Equal(4, fitted.Length);
+        Assert.Equal(80, fitted[3]);
+        Assert.Equal(56, fitted[1], 2);   // (6 · 55 + 62) / 7
+    }
+
+    [Fact]
+    public void FourLevelSamplesSurviveTheFile() {
+        var x = Make(30, false, Four)!;
+        Assert.Equal(new[] { x }, Suggest.Decode(Suggest.Encode([x])));
+    }
+}
