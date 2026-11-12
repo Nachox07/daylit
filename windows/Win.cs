@@ -146,6 +146,11 @@ static class Settings {
         get => new(GetInt("DownMods", Shortcut.DefaultDown.Mods), GetInt("DownKey", Shortcut.DefaultDown.Vk));
         set { SetInt("DownMods", value.Mods); SetInt("DownKey", value.Vk); }
     }
+    /// Light/dark mode hotkey (no Shift variant).
+    public static Shortcut ThemeKey {
+        get => new(GetInt("ThemeMods", Shortcut.DefaultTheme.Mods), GetInt("ThemeKey", Shortcut.DefaultTheme.Vk));
+        set { SetInt("ThemeMods", value.Mods); SetInt("ThemeKey", value.Vk); }
+    }
 }
 
 static class Theme {

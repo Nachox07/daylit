@@ -426,3 +426,14 @@ static class Layout {
         return r;
     }
 }
+
+/// Keyboard shortcuts that would fight over the same keys.
+static class ShortcutRule {
+    /// Indices of the first two combinations with the same modifiers and key, or null.
+    public static (int, int)? Clash(IReadOnlyList<(int Mods, int Vk)> combos) {
+        for (int i = 0; i < combos.Count; i++)
+            for (int j = i + 1; j < combos.Count; j++)
+                if (combos[i] == combos[j]) return (i, j);
+        return null;
+    }
+}

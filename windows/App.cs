@@ -56,6 +56,7 @@ sealed partial class Controller {
     public event Action? LiveChanged;
     void ClearLive() { if (Live == null) return; Live = null; LiveChanged?.Invoke(); }
     public bool HotkeysOk;
+    public bool ThemeKeyOk;
     public Source Source => Cfg.Effective;
     public bool PauseOnBattery => Settings.PauseOnBattery ?? Cfg.PauseOnBattery ?? true;
     /// On battery with the pause switch on: no automatic work at all (sliders and hotkeys still work).
@@ -110,7 +111,7 @@ sealed partial class Controller {
         tray = new WF.NotifyIcon { Icon = Theme.SunIcon(), Text = "Daylit", Visible = true, ContextMenuStrip = menu };
         tray.MouseClick += (_, e) => { if (e.Button == WF.MouseButtons.Left) TogglePanel(); };
 
-        keys = new HotkeyWindow(Hotkey);
+        keys = new HotkeyWindow(Hotkey, ToggleDark);
         RegisterShortcuts();
 
         timer.Tick += (_, _) => _ = Tick("timer");
@@ -253,18 +254,26 @@ sealed partial class Controller {
     }
 
     void RegisterShortcuts() {
+        // Registered apart, so a taken light/dark combination never stops the brightness ones.
         HotkeysOk = keys.Register(Settings.Up, Settings.Down);
+        ThemeKeyOk = keys.RegisterTheme(Settings.ThemeKey);
         Log.Write($"hotkeys: {Shortcut.Pair(Settings.Up, Settings.Down)}" + (HotkeysOk ? "" : " are taken by another app"));
+        if (!ThemeKeyOk) Log.Write($"hotkeys: {Settings.ThemeKey} (light/dark) is taken by another app");
     }
 
     /// The dialog tries each choice live; Cancel (or a failed try) puts the saved keys back.
     public void EditShortcuts() {
         panel.Hide();
         keys.Unregister();   // so pressing the current keys in the dialog records them instead of firing
-        ShortcutDialog.Edit(Settings.Up, Settings.Down, (up, down) => {
-            if (!keys.Register(up, down)) { keys.Unregister(); return false; }
-            Settings.Up = up; Settings.Down = down;
-            return true;
+        ShortcutDialog.Edit(Settings.Up, Settings.Down, Settings.ThemeKey, (up, down, theme) => {
+            bool brightnessOk = keys.Register(up, down);
+            bool themeOk = keys.RegisterTheme(theme);
+            if (!brightnessOk || !themeOk) {
+                keys.Unregister();
+                return !brightnessOk && !themeOk ? "brightness and light/dark" : !brightnessOk ? "brightness" : "light/dark";
+            }
+            Settings.Up = up; Settings.Down = down; Settings.ThemeKey = theme;
+            return null;
         });
         RegisterShortcuts();
     }
