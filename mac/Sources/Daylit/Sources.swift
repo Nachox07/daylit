@@ -79,6 +79,17 @@ enum HAClient {
         let path = "/api/history/period/" + iso.string(from: start).replacingOccurrences(of: "+", with: "%2B") + "?" + query
         return await call(ha, path, nil, timeout: 60)
     }
+    /// input_number/set_value: a level from an accepted suggestion (DaylitCore.Suggest).
+    static func setNumber(_ ha: HAConfig, _ entity: String, _ value: Double) async -> Result<Data, Failure> {
+        guard Config.isEntityId(entity) else { return .failure(.badAnswer) }
+        return await call(ha, "/api/services/input_number/set_value", ["entity_id": entity, "value": value])
+    }
+    /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; nil when
+    /// Home Assistant does not answer or the entity has none.
+    static func numberStep(_ ha: HAConfig, _ entity: String) async -> NumberStep? {
+        guard Config.isEntityId(entity), case .success(let d) = await call(ha, "/api/states/" + entity, nil) else { return nil }
+        return NumberStep.parse(d)
+    }
     static func describe(_ f: Failure, _ ha: HAConfig) -> String {
         switch f {
         case .noToken: return "No Home Assistant token in the keychain (\"\(ha.tokenName ?? "daylit-home-assistant")\", gear menu → Home Assistant Token…)"
