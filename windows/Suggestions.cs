@@ -87,7 +87,10 @@ partial class Controller {
     /// Home Assistant is down (the sun stands in), or a configured helper reads below 0. Samples recorded
     /// with Home Assistant's levels must not be judged stale against local ones then.
     bool HaLevelsUnavailable(Mon m, int i, Inputs s, bool haDown) =>
-        LevelText.All.Any(l => HaEntity(l, m) != null && !HaLevelAvailable(l, i, s, haDown));
+        LevelText.All.Any(l => HaEntity(l, m) != null && !HaLevelAvailable(l, i, s, haDown))
+        // The nightLights helper is part of the levels snapshot too (row index 3).
+        || (Source == Source.HomeAssistant && m.Spec?.HomeAssistant?.NightLights is { } nlEntity && Config.IsEntityId(nlEntity)
+            && !(!haDown && s.FromHa is { } nlRaw && i < nlRaw.Length && nlRaw[i].Length > 3 && nlRaw[i][3] >= 0));
 
     /// What a level can be stored as now: a whole number for a local level, the input_number's own step, or
     /// null when it comes from Home Assistant and is unavailable. Retry is true when the level is available

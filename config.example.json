@@ -23,14 +23,15 @@
         "day": "input_number.daylit_left_day",
         "blindDown": "input_number.daylit_left_blind_down",
         "night": "input_number.daylit_left_night",
-        "set": "input_number.daylit_left_set"
+        "set": "input_number.daylit_left_set",
+        "nightLights": "input_number.daylit_left_night_lights"
       }
     },
     {
       "match": "LG HDR 4K",
       "label": "Right monitor",
       "control": "native",
-      "day": 90, "blindDown": 60, "night": 30
+      "day": 90, "blindDown": 60, "night": 30, "nightLights": 40
     }
   ],
   "tuning": {

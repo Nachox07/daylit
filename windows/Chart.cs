@@ -26,11 +26,12 @@ sealed record Decision(int Level, IReadOnlyList<DecisionStep> Steps);
 /// Assistant's [day, blindDown, night] per monitor key (-1: no value there). Offsets: a hand-set distance
 /// in effect and how much of it applies now, per monitor key. Linked: linked monitors that follow another,
 /// and the level they land on; Leader: the monitor they follow. Applying: false when Automatic is off or
-/// this PC is idle, so nothing is being set.
+/// this PC is idle, so nothing is being set. LightsUsed: the room lights each monitor's target used, per monitor key.
 sealed record LiveInputs(double? Elev = null, double? Pos = null, bool Lights = false, double Light = 1,
                          IReadOnlyDictionary<string, double[]>? Levels = null,
                          IReadOnlyDictionary<string, (int Value, double Weight)>? Offsets = null,
-                         IReadOnlyDictionary<string, int>? Linked = null, string Leader = "", bool Applying = true);
+                         IReadOnlyDictionary<string, int>? Linked = null, string Leader = "", bool Applying = true,
+                         IReadOnlyDictionary<string, bool>? LightsUsed = null);
 
 static class Chart {
     static int R(double x) => (int)Math.Round(x, MidpointRounding.AwayFromZero);
@@ -80,11 +81,16 @@ static class Chart {
         return day ? Math.Max(v, other + 0.5) : Math.Min(v, other - 0.5);
     }
 
-    /// The three levels in effect: Home Assistant's value where it has one (>= 0), else the local number.
+    /// The levels in effect: [day, blindDown, night], plus a fourth, nightLights, when the monitor has one.
+    /// `local`: [day, blindDown, night], with nightLights as a fourth when the config sets it (below 0: none).
+    /// `fromHa`: a template row [day, blindDown, night, nightLights, set, setChanged] or its first four numbers.
+    /// Home Assistant's value wins where it has one (>= 0), else the local number.
     public static double[] EffectiveLevels(double[] local, double[]? fromHa) {
-        var lv = (double[])local.Clone();
+        var lv = local.Take(3).ToArray();
         if (fromHa != null) for (int k = 0; k < Math.Min(3, Math.Min(fromHa.Length, lv.Length)); k++) if (fromHa[k] >= 0) lv[k] = fromHa[k];
-        return lv;
+        double? fromRow = fromHa != null && fromHa.Length > 3 && fromHa[3] >= 0 ? (double?)fromHa[3] : null;
+        double? own = local.Length > 3 && local[3] >= 0 ? (double?)local[3] : null;
+        return (fromRow ?? own) is double nl ? lv.Append(nl).ToArray() : lv;
     }
 
     /// The level right now and how it got there: the blind picks the daytime level, the sun blends it with
@@ -93,12 +99,13 @@ static class Chart {
     /// another lands on (`leader`). `applying` false: Automatic is off or this PC is idle, so it is a target.
     public static Decision Explain(double day, double blindDown, double night, double elev, double? pos, bool lights,
                                    Tuning? tuning = null, double light = 1, int? offset = null, double offsetWeight = 1,
-                                   int? linked = null, string leader = "", bool applying = true) {
+                                   int? linked = null, string leader = "", bool applying = true, double? nightLights = null) {
         var t = tuning ?? new Tuning();
         double p = pos ?? 100;
         double sunShare = t.Fraction(elev);
         bool dusk = elev < t.LightsBoostSunBelow;
-        int @base = Rules.Target([day, blindDown, night], p, lights, sunShare, t, dusk, light);
+        int @base = Rules.Target(nightLights is double nlv ? new[] { day, blindDown, night, nlv } : new[] { day, blindDown, night },
+                                 p, lights, sunShare, t, dusk, light);
         double daytime = blindDown + (day - blindDown) * p / 100;
         double share = Math.Min(sunShare, light);
         double blended = night + (daytime - night) * share;
@@ -112,9 +119,16 @@ static class Chart {
         string sunTitle = sunShare >= 1 ? "Sun high" : sunShare <= 0 ? "Sun down" : "Sun low";
         steps.Add(new DecisionStep(sunTitle, sunShare <= 0 ? "night " + Lvl(night) : $"{Pct(sunShare)} → {Lvl(night + (daytime - night) * sunShare)}"));
         if (light < 1 && light < sunShare) steps.Add(new DecisionStep("Cloudy", $"daylight {Pct(light)} → {Lvl(blended)}"));
-        bool lifted = lights && dusk && @base > R(blended);
-        steps.Add(new DecisionStep("Lights", lifted ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
-                                           : lights ? "on, no effect now" : dusk ? "off" : "no effect by day"));
+        if (nightLights != null) {
+            // Its own lit-evening level: the lights count whenever the sun is not fully up, with no boost.
+            bool moved = lights && @base != R(Math.Clamp(blended, 0, 100));
+            steps.Add(new DecisionStep("Lights", moved ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
+                                               : lights ? "on, no effect now" : sunShare < 1 ? "off" : "no effect by day"));
+        } else {
+            bool lifted = lights && dusk && @base > R(blended);
+            steps.Add(new DecisionStep("Lights", lifted ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
+                                               : lights ? "on, no effect now" : dusk ? "off" : "no effect by day"));
+        }
         int level = @base;
         if (linked is int v) {
             // A linked monitor that follows another lands at the group's level, keeping its link distance.

@@ -42,10 +42,31 @@ the order the rules apply:
 1. **The blind** picks the daytime level, between *blind closed* and *day* (40% open: 40% of the way).
 2. **The sun** blends that with *night*: 100% above the orange handle, 0% below the purple one.
 3. **Clouds**, with a [daylight sensor](#clouds-a-daylight-sensor), can hold the sun's share down.
-4. **Room lights** only count around dusk: on, they keep the screen at least 5 above *night*.
+4. **Room lights** only count around dusk: on, they keep the screen at least 5 above *night*. A monitor with a *Lights on* level uses that instead ([below](#lights-on-level)).
 5. **Your hand**: a level you set keeps its distance from the result until dusk.
 
 The levels themselves are per monitor (Settings → *Displays*, or Home Assistant's helpers).
+
+### Lights on level
+
+By default the room lights do two things for every monitor: after sunset they keep it 5 above *night*
+(`tuning.brightness.lightsBoost`), and *night* is also where weak daylight (clouds, a low sun) blends to.
+When your lit evening is far above the level you want on a dim morning, give that monitor a **Lights on**
+level (Settings → Displays, shown when a lights entity is set; or `"nightLights"` in the config, or a
+Home Assistant helper). Then:
+
+- **Lights off:** the blend goes toward *night*, with no boost.
+- **Lights on:** the blend goes toward a point that slides from *night* (sun high) to *Lights on* (sun
+  down), so the lights start to count before sunset, as the sun goes down, not only below the old boost cutoff. In daylight the lamps change nothing; after sunset the monitor sits at *Lights on*; there is no
+  jump at dusk.
+
+Example, day 95, blind closed 62, night 60, lights on 80: a cloudy morning (daylight counted at half) with
+the blind 40% open gives 68, 58% open 71, the blind open with daylight at 55% gives 79, and a dark evening
+with the lights on gives 80. Without *Lights on* nothing changes. With Home Assistant down, a monitor with
+*Lights on* keeps the last lights state Home Assistant gave (others count the lights as off, as before).
+Suggestions do not learn from changes made while the lights are on and the sun is not fully up on such a
+monitor, and changing *Lights on* makes that monitor's older suggestion samples stale, so its evidence
+starts afresh.
 
 ### Suggested levels
 
@@ -99,7 +120,7 @@ in the same menu. On macOS Daylit also notices the change within a few seconds.
 |---|---|
 | `source` | `off`, `sun` or `homeAssistant`. Default: `homeAssistant` when a `homeAssistant.url` is set, else `sun` when a `location` is set, else `off`. |
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
-| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
+| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
@@ -140,11 +161,13 @@ into another computer right now) and which config entry matched which monitor.
   "day": "input_number.daylit_left_day",
   "blindDown": "input_number.daylit_left_blind_down",
   "night": "input_number.daylit_left_night",
-  "set": "input_number.daylit_left_set"
+  "set": "input_number.daylit_left_set",
+  "nightLights": "input_number.daylit_left_night_lights"
 }
 ```
 
 - The three levels can then be tuned from any Home Assistant dashboard.
+- `nightLights` is optional: a fourth `input_number` for the [Lights on level](#lights-on-level). Home Assistant's value wins when it is 0 or more.
 - `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`,
   `light` (how clear the sky is, 0–1, with a daylight sensor), `blind`, `lights`, `source` attributes), so you can graph it.
 - `set` is optional: changing that helper sets the monitor right away, even when the computer is
@@ -273,7 +296,7 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 |---|---|---|
 | `brightness.sunNight` | -3 | sun elevation (°) at or below which the night level applies |
 | `brightness.sunDay` | 12 | elevation from which the full daytime level applies |
-| `brightness.lightsBoost` | 5 | room lights on at dusk keep the monitor this many points above night |
+| `brightness.lightsBoost` | 5 | room lights on at dusk keep the monitor this many points above night (monitors without a `nightLights` level) |
 | `brightness.lightsBoostSunBelow` | 1.5 | …while the sun is below this elevation |
 | `brightness.cloudyDaylight` | 35 | with a daylight sensor: the most daylight counts (%) under a fully overcast sky |
 | `theme.lightSunAbove` / `darkSunBelow` | 4 / 1 | light mode above, dark below (in between, no change) |

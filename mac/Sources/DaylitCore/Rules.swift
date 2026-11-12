@@ -4,6 +4,7 @@ import Foundation
 /// Target level: the daytime value slides between "blind closed" and "blind open" with the blind
 /// position; the sun then blends it with the night value (0 below -3°, full daytime from 12°).
 /// Room lights on at night add a little.
+/// With nightLights (optional), the room lights move the night end of the blend instead of adding the boost.
 /// `light` (0…1, see lightCap) is the most daylight can count under a cloudy sky; 1 without a sensor.
 /// The blind position to use: a blind that drops off Home Assistant for a moment keeps its last
 /// known position instead of counting as fully open; with none seen yet it counts as open.
@@ -12,34 +13,62 @@ public func blindPosition(reported: Double, last: Double?) -> Double {
 }
 
 public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
-                   tuning t: Tuning = Tuning(), light: Double = 1) -> Int {
-    let sun = min(daylightFraction(elevation: elev, tuning: t), light)
+                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights: Double? = nil) -> Int {
+    let sunUp = daylightFraction(elevation: elev, tuning: t)
+    let sun = min(sunUp, light)
     let daytime = blindDown + (day - blindDown) * pos / 100
-    var v = night + (daytime - night) * sun
-    if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
+    var v: Double
+    if let nl = nightLights {
+        // A monitor with its own lit-evening level: weak daylight blends toward night with the lights off.
+        // With them on it blends toward a point that slides from night (sun high) to nightLights (sun down),
+        // so the lamps change nothing in daylight and there is no step at dusk. No boost.
+        let anchor = lights ? night * sunUp + nl * (1 - sunUp) : night
+        v = anchor + (daytime - anchor) * sun
+    } else {
+        v = night + (daytime - night) * sun
+        if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
+    }
     return Int(min(max(v, 0), 100).rounded())
 }
 
-/// The three levels in effect: Home Assistant's value where it has one (>= 0), else the local number.
+/// The levels in effect: [day, blindDown, night], plus a fourth, nightLights, when the monitor has one.
+/// `local`: [day, blindDown, night], with nightLights as a fourth when the config sets it (below 0: none).
+/// `fromHA`: a template row [day, blindDown, night, nightLights, set, setChanged] or what fallbackLevels kept.
+/// Home Assistant's value wins where it has one (>= 0), else the local number.
 public func effectiveLevels(local: [Double], fromHA: [Double]?) -> [Double] {
-    var lv = local
+    var lv = Array(local.prefix(3))
     if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = ov[k] } }
+    let fromRow = fromHA.flatMap { $0.count > 3 && $0[3] >= 0 ? $0[3] : nil }
+    let own = local.count > 3 && local[3] >= 0 ? local[3] : nil
+    if let nl = fromRow ?? own { lv.append(nl) }
     return lv
 }
 
-/// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night]. The "set" helper
-/// is dropped, so an old remote value is never replayed while Home Assistant is down.
-public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(3)) }
+/// The nightLights level in a monitor's levels in effect; nil when it has none.
+public func nightLightsLevel(_ levels: [Double]) -> Double? { levels.count > 3 && levels[3] >= 0 ? levels[3] : nil }
+
+/// The room lights for one monitor this tick. Home Assistant's answer while it gives one. In the sun fallback
+/// a monitor with a nightLights level keeps the last state seen (`last`; off when none was seen), as the blind
+/// keeps its last position, so a lit evening does not drop to night during an outage. Every other monitor
+/// counts the lights as off there, as before.
+public func roomLights(reported: Bool, fromHA: Bool, last: Bool?, hasNightLights: Bool) -> Bool {
+    if fromHA { return reported }
+    return hasNightLights ? last ?? false : false
+}
+
+/// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night, nightLights]. The "set"
+/// helper is dropped, so an old remote value is never replayed while Home Assistant is down.
+public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(4)) }
 
 /// A value of a monitor's Home Assistant "set" helper and when it last changed (Unix seconds).
 public struct RemoteSet: Equatable {
     public var value: Double
     public var changed: Double
     public init(value: Double, changed: Double) { self.value = value; self.changed = changed }
-    /// From the template's per-monitor row [day, blindDown, night, set, setChanged]; nil without a helper.
+    /// From the template's per-monitor row [day, blindDown, night, nightLights, set, setChanged]; nil without a helper.
     public init?(row: [Double]?) {
-        guard let r = row, r.count == 5, r[3] >= 0, r[4] > 0 else { return nil }
-        value = r[3]; changed = r[4]
+        guard let r = row, r.count == 6, r[4] >= 0, r[5] > 0 else { return nil }
+        value = r[4]; changed = r[5]
     }
 }
 
@@ -418,6 +447,13 @@ public enum ContrastRule {
         if t.isEmpty { return (true, nil) }
         guard let v = Double(t), v.isFinite, (0...100).contains(v) else { return (false, nil) }
         return (true, Int(v.rounded()))
+    }
+    /// The same box when the file may hold a decimal: text equal to what the window loaded (`original`) means
+    /// "not edited", so the file keeps its value (`keep`); only an edited box is parsed and rounded.
+    public static func parseField(_ text: String, unchangedFrom original: String) -> (ok: Bool, value: Int?, keep: Bool) {
+        if text == original { return (true, nil, true) }
+        let r = parseField(text)
+        return (r.ok, r.value, false)
     }
 }
 

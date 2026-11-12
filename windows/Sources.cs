@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace Daylit;
 
-/// Inputs of one automatic decision. Levels: per monitor [day, blindDown, night].
+/// Inputs of one automatic decision. Levels: per monitor [day, blindDown, night], plus nightLights when it has one.
 sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sat, double[][] Levels, bool? Auto, bool HasBlind) {
     /// Per monitor: the HA "set" helper's value and when it last changed (Unix s), or null without one.
     public (double Value, double Changed)?[] Remote { get; init; } = [];
@@ -17,7 +17,7 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
     public string? LightUnit { get; init; }
     /// How clear the sky is, 0…1, when the light sensor says.
     public double? LightRatio { get; init; }
-    /// Per monitor: Home Assistant's own [day, blindDown, night] (-1 where it has no value), for the Settings
+    /// Per monitor: Home Assistant's own [day, blindDown, night, nightLights] (-1 where it has no value), for the Settings
     /// chart; null when these inputs did not come from Home Assistant.
     public double[][]? FromHa { get; init; }
 }
@@ -61,14 +61,13 @@ static class HAClient {
         if (s == null) return null;
         try {
             var a = JsonSerializer.Deserialize<Answer>(s);
-            if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 5)) {
+            if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 6)) {
                 LastError = "Unexpected answer from Home Assistant"; Transient = false; return null;
             }
-            // Local numbers wherever HA has no value.
-            var levels = mons.Select((m, i) => new[] {
-                a.m[i][0] >= 0 ? a.m[i][0] : m.Day, a.m[i][1] >= 0 ? a.m[i][1] : m.BlindDown, a.m[i][2] >= 0 ? a.m[i][2] : m.Night }).ToArray();
-            var remote = a.m.Select(v => v[3] >= 0 && v[4] > 0 ? ((double, double)?)(v[3], v[4]) : null).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit, FromHa = a.m.Select(v => v[..3]).ToArray() };
+            // Local numbers wherever HA has no value; nightLights as a fourth when either has one.
+            var levels = mons.Select((m, i) => Chart.EffectiveLevels(m.LocalLevels, a.m[i])).ToArray();
+            var remote = a.m.Select(v => v[4] >= 0 && v[5] > 0 ? ((double, double)?)(v[4], v[5]) : null).ToArray();
+            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit, FromHa = a.m.Select(v => v[..4]).ToArray() };
         } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
     }
 

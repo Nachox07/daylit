@@ -132,6 +132,9 @@ struct MonitorDraft: Identifiable {
     let haLevels: Bool             // Home Assistant helpers set these levels
     let contrastApplies: Bool      // DDC monitor: the contrast box is shown
     var contrast = ""              // empty = not set
+    var contrastLoaded = ""        // what the box showed on load: unchanged text keeps the file's value, decimals included
+    var nightLights = ""           // "Lights on": empty = not set (night + the room-lights boost)
+    var nightLightsLoaded = ""
 }
 
 struct SettingsView: View {
@@ -235,6 +238,16 @@ struct SettingsView: View {
                     level("Day", "sun.max", $d.day)
                     level("Blind closed", "blinds.horizontal.closed", $d.blindDown)
                     level("Night", "moon", $d.night)
+                    if showsNightLights {
+                        LabeledContent {
+                            HStack(spacing: 6) {
+                                TextField("Lights on", text: $d.nightLights, prompt: Text("Not set"))
+                                    .labelsHidden().multilineTextAlignment(.trailing).frame(width: 64)
+                                    .help(Self.nightLightsHelp)
+                                Text("%").foregroundStyle(.secondary).frame(width: 16, alignment: .leading)
+                            }
+                        } label: { Row("Lights on", "lightbulb") }
+                    }
                     if d.contrastApplies {
                         LabeledContent {
                             HStack(spacing: 6) {
@@ -440,7 +453,8 @@ struct SettingsView: View {
         let snapshot = Self.fixedNow != nil
         return BrightnessChart(latitude: l.0, longitude: l.1, now: Self.now,
                                timeZone: snapshot ? TimeZone(identifier: "UTC")! : .current,   // snapshots: the same on every machine
-                               monitors: monitors.map { ChartMonitor(id: $0.id, label: $0.label.isEmpty ? $0.name : $0.label, day: $0.day, blindDown: $0.blindDown, night: $0.night) },
+                               monitors: monitors.map { ChartMonitor(id: $0.id, label: $0.label.isEmpty ? $0.name : $0.label, day: $0.day, blindDown: $0.blindDown, night: $0.night,
+                                                                    nightLights: nightLightsValue($0)) },
                                hasBlind: source == "homeAssistant" && !cover.trimmingCharacters(in: .whitespaces).isEmpty,
                                tuning: t, live: snapshot ? nil : m.live,
                                set: { id, v in tune[id] = Self.fmt(Self.keepOrder(id, v, value)) })
@@ -504,8 +518,20 @@ struct SettingsView: View {
                       light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1)   // with today's clouds; snapshots stay clear
     }
 
+    /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
+    var showsNightLights: Bool { source == "homeAssistant" && !lights.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// The typed "Lights on" level, while its row shows; nil when empty or not a level.
+    func nightLightsValue(_ d: MonitorDraft) -> Double? {
+        guard showsNightLights else { return nil }
+        // An untouched box keeps the file's value (a decimal stays a decimal), as save does.
+        if d.nightLights == d.nightLightsLoaded { return Double(d.nightLights.replacingOccurrences(of: ",", with: ".")) }
+        return ContrastRule.parseField(d.nightLights).value.map(Double.init)
+    }
+    static let nightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost."
+
     func caption(_ d: MonitorDraft) -> String {
         var s = coords == nil ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save."
+        if showsNightLights { s += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost." }
         if d.haLevels { s += " Home Assistant helpers set these levels; these apply only when it cannot be reached." }
         if d.contrastApplies { s += " Contrast is set when the monitor is detected; empty leaves it to the monitor." }
         return s
@@ -526,8 +552,11 @@ struct SettingsView: View {
             let ha = cfg?.homeAssistant
             return MonitorDraft(id: mon.uuid, name: mon.name, label: cfg?.label ?? mon.name,
                                 day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20,
-                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil,
-                                contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "")
+                                haLevels: ha?.day != nil || ha?.blindDown != nil || ha?.night != nil || ha?.nightLights != nil,
+                                contrastApplies: mon.control == .ddc, contrast: cfg?.contrast.map { Self.fmt($0) } ?? "",
+                                contrastLoaded: cfg?.contrast.map { Self.fmt($0) } ?? "",
+                                nightLights: cfg?.nightLights.map { Self.fmt($0) } ?? "",
+                                nightLightsLoaded: cfg?.nightLights.map { Self.fmt($0) } ?? "")
         }
         error = opened.blockedReason   // an evicted or unreadable file shows defaults here; save() refuses until it reads
         note = opened.data.map(ConfigText.hasComments) == true ? "Saving removes the comments in config.json." : nil
@@ -550,9 +579,15 @@ struct SettingsView: View {
             var me = SettingsEdit.Monitor(name: d.name, suggestedMatch: CLI.suggestMatch(d.name), label: d.label,
                                          day: Int(d.day.rounded()), blindDown: Int(d.blindDown.rounded()), night: Int(d.night.rounded()))
             if d.contrastApplies {
-                let (ok, v) = ContrastRule.parseField(d.contrast)
+                let (ok, v, keep) = ContrastRule.parseField(d.contrast, unchangedFrom: d.contrastLoaded)
                 if !ok { error = "Contrast for \(d.label) is 0 to 100, or empty to leave it unset."; return nil }
-                me.contrastEditable = true; me.contrast = v
+                me.contrastEditable = !keep; me.contrast = v
+            }
+            if showsNightLights {
+                // The same rule as contrast: 0 to 100, or empty for none.
+                let (ok, v, keep) = ContrastRule.parseField(d.nightLights, unchangedFrom: d.nightLightsLoaded)
+                if !ok { error = "Lights on for \(d.label) is 0 to 100, or empty to keep Night plus the room-lights boost."; return nil }
+                me.nightLightsEditable = !keep; me.nightLights = v
             }
             mons.append(me)
         }

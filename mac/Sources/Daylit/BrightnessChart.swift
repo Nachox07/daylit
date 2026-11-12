@@ -16,8 +16,9 @@ struct LiveInputs: Equatable {
     var linked: [String: Int] = [:]   // linked monitors that follow another: the level they land on
     var leader = ""                   // the monitor they follow
     var applying = true               // false: Automatic is off or this Mac is idle, so nothing is being set
+    var lightsUsed: [String: Bool] = [:]   // the room lights each monitor's target used (the sun fallback keeps them for nightLights)
     static func == (a: LiveInputs, b: LiveInputs) -> Bool {
-        a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
+        a.lightsUsed == b.lightsUsed && a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
             && a.offsets.mapValues { "\($0.value) \($0.weight)" } == b.offsets.mapValues { "\($0.value) \($0.weight)" }
     }
 }
@@ -26,6 +27,7 @@ struct ChartMonitor: Identifiable, Equatable {
     let id: String              // display uuid
     let label: String
     let day, blindDown, night: Double
+    var nightLights: Double? = nil   // the level after sunset with the room lights on, when set
 }
 
 struct BrightnessChart: View {
@@ -58,7 +60,7 @@ struct BrightnessChart: View {
 
     /// The monitor's levels in effect: Home Assistant's helpers where it has them.
     func levels(_ m: ChartMonitor) -> [Double] {
-        effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: live?.levels[m.id])
+        effectiveLevels(local: [m.day, m.blindDown, m.night] + (m.nightLights.map { [$0] } ?? []), fromHA: live?.levels[m.id])
     }
     /// The line's level for an elevation: target()'s rule without its rounding, so the slopes draw smooth.
     func level(_ m: ChartMonitor, elev: Double, pos: Double) -> Double {
@@ -166,8 +168,9 @@ struct BrightnessChart: View {
         let elev = live?.elev ?? solarElevation(latitude: latitude, longitude: longitude, at: now)
         let o = live?.offsets[m.id]
         return explain(day: l[0], blindDown: l[1], night: l[2], elev: elev, pos: hasBlind ? (live?.pos ?? 100) : nil,
-                       lights: live?.lights ?? false, tuning: tuning, light: live?.light ?? 1, offset: o?.value, offsetWeight: o?.weight ?? 1,
-                       linked: live?.linked[m.id], leader: live?.leader ?? "", applying: live?.applying ?? true)
+                       lights: live?.lightsUsed[m.id] ?? live?.lights ?? false, tuning: tuning, light: live?.light ?? 1, offset: o?.value,
+                       offsetWeight: o?.weight ?? 1, linked: live?.linked[m.id], leader: live?.leader ?? "", applying: live?.applying ?? true,
+                       nightLights: nightLightsLevel(l))
     }
     /// "Now 77%" while Daylit sets it; "Target 77%" when Automatic is off or this Mac is idle.
     var dotTitle: String { live?.applying == false ? "Target" : "Now" }

@@ -23,7 +23,7 @@ public struct Sample: Codable, Equatable {
     public var p: Double           // blind position / 100
     public var elev: Double        // sun elevation, so scoring can rerun target
     public var lights: Bool        // the room lights were on
-    public var levels: [Double]    // [day, blindDown, night] in effect then
+    public var levels: [Double]    // [day, blindDown, night] in effect then, plus nightLights when the monitor has one
     public var at: Double          // Unix seconds
     public init(monitor: String, chosen: Int, auto: Int, s: Double, p: Double, elev: Double, lights: Bool, levels: [Double], at: Double) {
         self.monitor = monitor; self.chosen = chosen; self.auto = auto; self.s = s; self.p = p
@@ -58,7 +58,7 @@ extension Suggest {
     /// Returns all three levels, each fitted one clamped to 0–100 (not rounded: see roundToStep).
     public static func fit(_ samples: [Sample], levels: [Double], candidates: [Level]) -> [Double] {
         let c = candidates.map(\.rawValue), n = c.count
-        guard n > 0, levels.count == 3 else { return levels }
+        guard n > 0, levels.count >= 3 else { return levels }   // a fourth level (nightLights) is kept as it is
         var a = [[Double]](repeating: [Double](repeating: 0, count: n), count: n)
         var b = [Double](repeating: 0, count: n)
         for x in samples {
@@ -185,7 +185,8 @@ extension Suggest {
     /// The real target (boost, clamp, rounding) for a sample's moment with other levels.
     /// `light: x.s` gives target the same daylight fraction: s is never above daylightFraction(elev).
     public static func rerun(_ x: Sample, levels l: [Double], tuning: Tuning) -> Int {
-        target(day: l[0], blindDown: l[1], night: l[2], elev: x.elev, pos: x.p * 100, lights: x.lights, tuning: tuning, light: x.s)
+        target(day: l[0], blindDown: l[1], night: l[2], elev: x.elev, pos: x.p * 100, lights: x.lights, tuning: tuning, light: x.s,
+               nightLights: nightLightsLevel(l))
     }
 
     /// Mean of |target − chosen| over the samples, with `levels`.
@@ -204,7 +205,7 @@ extension Suggest {
                                   dismissedUntil: Double?, tuning: Tuning = Tuning(),
                                   dayOf: (Double) -> Int = { localDay($0) }) -> Suggestion? {
         if let d = dismissedUntil, now < d { return nil }
-        guard levels.count == 3, steps.count == 3 else { return nil }
+        guard (3...4).contains(levels.count), steps.count == 3 else { return nil }
         let mine = dropOld(all, now: now).filter { $0.monitor == monitor && sameLevels($0.levels, levels) }
         let cand = candidates(mine, dayOf: dayOf).filter { steps[$0.rawValue] != nil }
         guard !cand.isEmpty else { return nil }
@@ -282,13 +283,15 @@ extension Suggest {
     }
 
     /// The sample for a tick where decide recorded a new hand-set level, or nil when it may not be recorded:
-    /// see SampleContext, the lights boost deciding the target, or `chosen` / `auto` at 0 or 100 (the clamp
+    /// see SampleContext, the lights boost deciding the target, a monitor with nightLights while its lights are on and the sun is not fully up, or `chosen` / `auto` at 0 or 100 (the clamp
     /// hides the true wish). `pos` is the blind position 0–100 (100 without a blind), `light` the cloud cap (1 without a sensor).
     public static func makeSample(monitor: String, chosen: Int, auto: Int, elev: Double, pos: Double, lights: Bool, light: Double,
                                   levels: [Double], tuning: Tuning, now: Double, context: SampleContext) -> Sample? {
         if context.follower || context.writeFailed || context.idle || context.paused || context.sunFallback { return nil }
-        guard levels.count == 3, levels.allSatisfy(\.isFinite), elev.isFinite, pos.isFinite, light.isFinite,
+        guard (3...4).contains(levels.count), levels.allSatisfy(\.isFinite), elev.isFinite, pos.isFinite, light.isFinite,
               (1...99).contains(chosen), (1...99).contains(auto) else { return nil }
+        // With nightLights, lights on and the sun not fully up, the four-level rule decides: the three-level fit would be wrong.
+        if nightLightsLevel(levels) != nil && lights && daylightFraction(elevation: elev, tuning: tuning) < 1 { return nil }
         if boostDecides(levels: levels, elev: elev, pos: pos, lights: lights, tuning: tuning, light: light) { return nil }
         return Sample(monitor: monitor, chosen: chosen, auto: auto, s: min(daylightFraction(elevation: elev, tuning: tuning), light),
                       p: min(max(pos, 0), 100) / 100, elev: elev, lights: lights, levels: levels, at: now)
@@ -326,10 +329,10 @@ extension Suggest {
         samples.filter { x in current[x.monitor].map { sameLevels($0, x.levels) } ?? true }
     }
 
-    /// The samples in corrections.json; none when it is missing or broken. Entries without three levels are skipped.
+    /// The samples in corrections.json; none when it is missing or broken. Entries without three or four levels are skipped.
     public static func decode(_ d: Data?) -> [Sample] {
         guard let d, let f = try? JSONDecoder().decode(CorrectionsFile.self, from: d) else { return [] }
-        return f.samples.filter { $0.levels.count == 3 }
+        return f.samples.filter { (3...4).contains($0.levels.count) }
     }
 
     /// corrections.json's content.

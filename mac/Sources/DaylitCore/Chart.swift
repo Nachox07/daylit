@@ -78,9 +78,10 @@ public struct Decision: Equatable {
 
 public func explain(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double?, lights: Bool,
                     tuning t: Tuning = Tuning(), light: Double = 1, offset: Int? = nil, offsetWeight w: Double = 1,
-                    linked: Int? = nil, leader: String = "", applying: Bool = true) -> Decision {
+                    linked: Int? = nil, leader: String = "", applying: Bool = true, nightLights: Double? = nil) -> Decision {
     let p = pos ?? 100
-    let base = target(day: day, blindDown: blindDown, night: night, elev: elev, pos: p, lights: lights, tuning: t, light: light)
+    let base = target(day: day, blindDown: blindDown, night: night, elev: elev, pos: p, lights: lights, tuning: t, light: light,
+                      nightLights: nightLights)
     let daytime = blindDown + (day - blindDown) * p / 100
     let sunShare = daylightFraction(elevation: elev, tuning: t)
     let share = min(sunShare, light)
@@ -96,8 +97,14 @@ public func explain(day: Double, blindDown: Double, night: Double, elev: Double,
     let sunTitle = sunShare >= 1 ? "Sun high" : sunShare <= 0 ? "Sun down" : "Sun low"
     steps.append(DecisionStep(sunTitle, sunShare <= 0 ? "night \(lvl(night))" : "\(pct(sunShare)) → \(lvl(night + (daytime - night) * sunShare))"))
     if light < 1 && light < sunShare { steps.append(DecisionStep("Cloudy", "daylight \(pct(light)) → \(lvl(blended))")) }
-    let lifted = lights && elev < t.lightsBoostSunBelow && Double(base) > blended.rounded()
-    steps.append(DecisionStep("Lights", lifted ? "on → \(base)" : lights ? "on, no effect now" : elev < t.lightsBoostSunBelow ? "off" : "no effect by day"))
+    if nightLights != nil {
+        // Its own lit-evening level: the lights count whenever the sun is not fully up, with no boost.
+        let moved = lights && base != Int(min(max(blended, 0), 100).rounded())
+        steps.append(DecisionStep("Lights", moved ? "on → \(base)" : lights ? "on, no effect now" : sunShare < 1 ? "off" : "no effect by day"))
+    } else {
+        let lifted = lights && elev < t.lightsBoostSunBelow && Double(base) > blended.rounded()
+        steps.append(DecisionStep("Lights", lifted ? "on → \(base)" : lights ? "on, no effect now" : elev < t.lightsBoostSunBelow ? "off" : "no effect by day"))
+    }
     var level = base
     if let v = linked {
         // A linked monitor that follows another lands at the group's level, keeping its link distance.

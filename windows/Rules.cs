@@ -67,7 +67,7 @@ record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offse
 record struct Step(Hold State, int Current, int? Write, int? Remote, int Applied, bool Manual);
 
 static class Rules {
-    /// v = [day, blindDown, night]. The daytime value slides between "blind down" and "blind up" with the
+    /// v = [day, blindDown, night], or with a fourth, nightLights (the level with the room lights on after sunset). The daytime value slides between "blind down" and "blind up" with the
     /// blind position; the sun then blends it with the night value; room lights at night add a little.
     /// `boost`: room lights may lift the night level now (the sun is below tuning's lightsBoostSunBelow);
     /// without it, the default rule (daylight under 30%).
@@ -78,10 +78,30 @@ static class Rules {
 
     public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
-        double x = v[2] + (daytime - v[2]) * Math.Min(sun, light);
-        if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
+        double share = Math.Min(sun, light);
+        double x;
+        if (NightLightsLevel(v) is double nl) {
+            // A monitor with its own lit-evening level: weak daylight blends toward night with the lights off.
+            // With them on it blends toward a point that slides from night (sun high) to nightLights (sun down),
+            // so the lamps change nothing in daylight and there is no step at dusk. No boost.
+            double anchor = lights ? v[2] * sun + nl * (1 - sun) : v[2];
+            x = anchor + (daytime - anchor) * share;
+        } else {
+            x = v[2] + (daytime - v[2]) * share;
+            if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
+        }
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
+
+    /// The nightLights level in a monitor's levels in effect (a fourth number, 0 or more); null when it has none.
+    public static double? NightLightsLevel(double[] v) => v.Length > 3 && v[3] >= 0 ? (double?)v[3] : null;
+
+    /// The room lights for one monitor this tick. Home Assistant's answer while it gives one. In the sun fallback
+    /// a monitor with a nightLights level keeps the last state seen (`last`; off when none was seen), as the blind
+    /// keeps its last position, so a lit evening does not drop to night during an outage. Every other monitor
+    /// counts the lights as off there, as before.
+    public static bool RoomLights(bool reported, bool fromHa, bool? last, bool hasNightLights) =>
+        fromHa ? reported : hasNightLights && (last ?? false);
 
     /// How much of a hand-set offset applies (0…1) for the sun now, or null once it is over.
     /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
@@ -216,13 +236,13 @@ static class HaTemplate {
         string.IsNullOrWhiteSpace(entity) ? fallback.ToString(CultureInfo.InvariantCulture)
                                           : $"{{{{ states('{entity}') | float({fallback.ToString(CultureInfo.InvariantCulture)}) }}}}";
 
-    /// One row per monitor, in order; -1 marks "use the local number" (no entity, or the entity is unknown).
+    /// One row per monitor, in order: [day, blindDown, night, nightLights, set, setChanged]; -1 marks "use the local number" (no entity, or the entity is unknown).
     public static string Build(HaConfig h0, IEnumerable<MonitorHa?> monitors0) {
         // Config.Validate already rejects bad ids; this second filter keeps any that slip through out of the Jinja.
         static string? Ok(string? e) => e != null && Config.IsEntityId(e) ? e : null;
         var h = new HaConfig { Url = h0.Url, TokenName = h0.TokenName, AutoSwitch = Ok(h0.AutoSwitch), Sun = Ok(h0.Sun), Cover = Ok(h0.Cover), Lights = Ok(h0.Lights), Light = Ok(h0.Light) };
         var monitors = monitors0.Select(m => m == null ? null : new MonitorHa {
-            Sensor = Ok(m.Sensor), Day = Ok(m.Day), BlindDown = Ok(m.BlindDown), Night = Ok(m.Night), Set = Ok(m.Set) });
+            Sensor = Ok(m.Sensor), Day = Ok(m.Day), BlindDown = Ok(m.BlindDown), Night = Ok(m.Night), Set = Ok(m.Set), NightLights = Ok(m.NightLights) });
         string pos = h.Cover is { Length: > 0 } cv ? $"state_attr('{cv}','current_position') | float(-1)" : "100";
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
@@ -231,7 +251,7 @@ static class HaTemplate {
         string mons_ = string.Join(", ", monitors.Select(e => {
             string set = e?.Set is { Length: > 0 } st
                 ? $"{Num(st, -1)}, {{{{ as_timestamp(states['{st}'].last_changed) if states['{st}'] else 0 }}}}" : "-1, 0";   // states['…']: None when missing; an object id may start with a digit
-            return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {set}]";
+            return $"[{Num(e?.Day, -1)}, {Num(e?.BlindDown, -1)}, {Num(e?.Night, -1)}, {Num(e?.NightLights, -1)}, {set}]";
         }));
         string lightAge = h.Light is { Length: > 0 } lt
             ? $"{{{{ (now() - states['{lt}'].last_updated).total_seconds() | round(0) if states['{lt}'] else -1 }}}}" : "-1";   // seconds since it last reported; states['…']: an object id may start with a digit
@@ -402,6 +422,13 @@ static class ContrastRule {
     }
     /// The Settings window's contrast box: empty = not set (null), else a whole number 0–100 (a decimal comma
     /// is fine, halves round up). `ok` is false for anything else, so the window can say what is wrong.
+    /// The same box when the file may hold a decimal: text equal to what the window loaded (`original`) means
+    /// "not edited", so the file keeps its value (`keep`); only an edited box is parsed and rounded.
+    public static (bool ok, int? value, bool keep) ParseField(string text, string original) {
+        if (text == original) return (true, null, true);
+        var (ok, value) = ParseField(text);
+        return (ok, value, false);
+    }
     public static (bool ok, int? value) ParseField(string text) {
         var t = text.Trim().Replace(',', '.');
         if (t == "") return (true, null);

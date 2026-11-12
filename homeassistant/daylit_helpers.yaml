@@ -37,6 +37,15 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: slider
+  # Optional: the level after sunset with the room lights on, for a monitor whose lit evenings sit
+  # well above its night level. Name it in the monitor's "nightLights" key. Without it the room
+  # lights add the same small boost to every monitor's night level, as before.
+  # daylit_left_night_lights:
+  #   name: Left monitor, night with the lights on
+  #   min: 0
+  #   max: 100
+  #   step: 1
+  #   unit_of_measurement: "%"
   daylit_right_day:
     name: Right monitor, daytime (blind open)
     min: 0

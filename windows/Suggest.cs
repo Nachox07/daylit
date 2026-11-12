@@ -23,7 +23,7 @@ static class LevelText {
 /// One deliberate correction by hand. Monitor: the monitor's key (the same key the hold state uses); Chosen: the
 /// level the user set; Auto: the automatic target then; S: the daylight fraction the target used,
 /// min(Fraction(elev), light); P: blind position / 100; Elev, Lights: so scoring can rerun the target;
-/// Levels: [day, blindDown, night] in effect then; At: Unix seconds.
+/// Levels: [day, blindDown, night] in effect then, plus nightLights when the monitor has one; At: Unix seconds.
 sealed record Sample(string Monitor, int Chosen, int Auto, double S, double P, double Elev, bool Lights, double[] Levels, double At) {
     // A record compares arrays by reference: compare the levels by value.
     public bool Equals(Sample? o) => o is not null && Monitor == o.Monitor && Chosen == o.Chosen && Auto == o.Auto && S == o.S && P == o.P &&
@@ -58,7 +58,7 @@ static partial class Suggest {
     public static double[] Fit(IReadOnlyList<Sample> samples, double[] levels, IReadOnlyList<Level> candidates) {
         int[] c = candidates.Select(l => (int)l).ToArray();
         int n = c.Length;
-        if (n == 0 || levels.Length != 3) return (double[])levels.Clone();
+        if (n == 0 || levels.Length < 3) return (double[])levels.Clone();   // a fourth level (nightLights) is kept as it is
         var a = new double[n, n];
         var b = new double[n];
         foreach (var x in samples) {
@@ -173,10 +173,10 @@ static partial class Suggest {
     public static bool SameLevels(double[]? a, double[]? b) =>
         a != null && b != null && a.Length == b.Length && a.Zip(b).All(p => Math.Abs(p.First - p.Second) < 1e-6);
 
-    /// The real target (boost, clamp, rounding) for a sample's moment with other levels. S holds the cloud cap and
-    /// caps the elevation's fraction as in the Mac app, so light is 1; the boost rule is the tick's: the sun below lightsBoostSunBelow.
+    /// The real target (boost, clamp, rounding) for a sample's moment with other levels. S holds the cloud cap, passed
+    /// as `light` beside the elevation's own fraction; the boost rule is the tick's: the sun below lightsBoostSunBelow.
     public static int Rerun(Sample x, double[] levels, Tuning t) =>
-        Rules.Target(levels, x.P * 100, x.Lights, Math.Min(t.Fraction(x.Elev), x.S), t, x.Elev < t.LightsBoostSunBelow, 1);
+        Rules.Target(levels, x.P * 100, x.Lights, t.Fraction(x.Elev), t, x.Elev < t.LightsBoostSunBelow, x.S);
 
     /// Mean of |target − chosen| over the samples, with `levels`.
     public static double MeanAbsError(IReadOnlyList<Sample> samples, double[] levels, Tuning? t = null) {
@@ -193,7 +193,7 @@ static partial class Suggest {
     public static Suggestion? SuggestionFor(string monitor, IReadOnlyList<Sample> all, double[] levels, NumberStep?[] steps, double now,
                                             double? dismissedUntil, Tuning? t = null, Func<double, int>? dayOf = null) {
         if (dismissedUntil is double d && now < d) return null;
-        if (levels.Length != 3 || steps.Length != 3) return null;
+        if (levels.Length is < 3 or > 4 || steps.Length != 3) return null;
         t ??= new Tuning();
         Func<double, int> day = dayOf ?? Rules.LocalDay;
         var mine = DropOld(all, now).Where(x => x.Monitor == monitor && SameLevels(x.Levels, levels)).ToList();
@@ -278,8 +278,10 @@ static partial class Suggest {
     public static Sample? MakeSample(string monitor, int chosen, int auto, double elev, double pos, bool lights, double light,
                                      double[] levels, Tuning t, double now, SampleContext context) {
         if (context.Follower || context.WriteFailed || context.Idle || context.Paused || context.SunFallback) return null;
-        if (levels.Length != 3 || !levels.All(double.IsFinite) || !double.IsFinite(elev) || !double.IsFinite(pos) || !double.IsFinite(light) ||
+        if (levels.Length is < 3 or > 4 || !levels.All(double.IsFinite) || !double.IsFinite(elev) || !double.IsFinite(pos) || !double.IsFinite(light) ||
             chosen < 1 || chosen > 99 || auto < 1 || auto > 99) return null;
+        // With nightLights, lights on and the sun not fully up, the four-level rule decides: the three-level fit would be wrong.
+        if (Rules.NightLightsLevel(levels) != null && lights && t.Fraction(elev) < 1) return null;
         if (BoostDecides(levels, elev, pos, lights, t, light)) return null;
         return new Sample(monitor, chosen, auto, Math.Min(t.Fraction(elev), light), Math.Clamp(pos, 0, 100) / 100, elev, lights, levels, now);
     }
@@ -314,12 +316,12 @@ static partial class Suggest {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true,
         RespectRequiredConstructorParameters = true };
 
-    /// The samples in corrections.json; none when it is missing or broken. Entries without three levels are skipped.
+    /// The samples in corrections.json; none when it is missing or broken. Entries without three or four levels are skipped.
     public static List<Sample> Decode(string? text) {
         if (string.IsNullOrWhiteSpace(text)) return new List<Sample>();
         try {
             var f = JsonSerializer.Deserialize<CorrectionsFile>(text, Json);
-            return f?.Samples?.Where(x => x is not null && x.Monitor is not null && x.Levels is { Length: 3 }).ToList() ?? new List<Sample>();
+            return f?.Samples?.Where(x => x is not null && x.Monitor is not null && x.Levels is { Length: 3 or 4 }).ToList() ?? new List<Sample>();
         } catch (JsonException) { return new List<Sample>(); }   // includes a sample missing a required key, as Swift rejects the file
     }
 
@@ -328,5 +330,5 @@ static partial class Suggest {
 
     /// A sample with a NaN or infinite number cannot be written as JSON: it is left out and the rest is kept.
     static bool Storable(Sample x) => double.IsFinite(x.S) && double.IsFinite(x.P) && double.IsFinite(x.Elev) && double.IsFinite(x.At) &&
-                                      x.Levels is { Length: 3 } && x.Levels.All(double.IsFinite);
+                                      x.Levels is { Length: 3 or 4 } && x.Levels.All(double.IsFinite);
 }

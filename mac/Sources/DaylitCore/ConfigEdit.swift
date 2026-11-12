@@ -57,6 +57,9 @@ public struct SettingsEdit: Equatable {
         /// The window shows a contrast box for this monitor (DDC only). When false, `contrast` in the file is kept as it is.
         public var contrastEditable = false
         public var contrast: Int? = nil       // nil = not set: the key is removed
+        /// The window shows the "Lights on" box for this monitor (a lights entity is set). When false, `nightLights` in the file is kept.
+        public var nightLightsEditable = false
+        public var nightLights: Int? = nil    // nil = not set: the key is removed
         public init(name: String, suggestedMatch: String, label: String, day: Int, blindDown: Int, night: Int) {
             self.name = name; self.suggestedMatch = suggestedMatch; self.label = label
             self.day = day; self.blindDown = blindDown; self.night = night
@@ -82,7 +85,7 @@ public enum ConfigEditError: Error, Equatable { case notAnObject, invalid(String
 
 public enum ConfigPatch {
     /// The file with the edit applied. Unknown keys, unplugged monitors and per-monitor settings the
-    /// window does not show (control, Home Assistant helpers, contrast where it has no box) are kept. Comments are not: the file is
+    /// window does not show (control, Home Assistant helpers, contrast and nightLights where they have no box) are kept. Comments are not: the file is
     /// written back as plain JSON. Throws when the result would not load.
     public static func apply(_ e: SettingsEdit, to original: Data?) throws -> Data {
         var root: [String: Any] = [:]
@@ -126,6 +129,9 @@ public enum ConfigPatch {
             entry["day"] = clamp(m.day); entry["blindDown"] = clamp(m.blindDown); entry["night"] = clamp(m.night)
             if m.contrastEditable {
                 if let c = m.contrast { entry["contrast"] = clamp(c) } else { entry["contrast"] = nil }
+            }
+            if m.nightLightsEditable {
+                if let v = m.nightLights { entry["nightLights"] = clamp(v) } else { entry["nightLights"] = nil }
             }
             if let i { list[i] = entry } else { list.append(entry) }
         }

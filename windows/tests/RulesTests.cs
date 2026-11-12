@@ -418,6 +418,8 @@ public class ConfigTests {
         Assert.NotNull(c.Location);
         Assert.Equal(60, c.Monitors![0].Contrast);
         Assert.Null(c.Monitors![1].Contrast);
+        Assert.Equal("input_number.daylit_left_night_lights", c.Monitors![0].HomeAssistant!.NightLights);
+        Assert.Equal(40, c.Monitors![1].NightLights);
     }
 
     [Fact]
@@ -528,7 +530,7 @@ public class TemplateTests {
         Assert.Contains("state_attr('light.room','brightness')", t);
         Assert.Contains("[{{ states('input_number.d') | float(-1) }}, -1, -1, ", t);
         Assert.Contains("states['input_number.s'].last_changed", t);
-        Assert.Contains("[-1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
+        Assert.Contains("[-1, -1, -1, -1, -1, 0]", t);   // a monitor without HA entities still gets its row
     }
 
     [Fact]

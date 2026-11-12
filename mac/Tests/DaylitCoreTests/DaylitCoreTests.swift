@@ -109,11 +109,11 @@ final class TargetTests: XCTestCase {
         XCTAssertEqual(target(day: -10, blindDown: -10, night: -10, elev: -20, pos: 0, lights: false), 0)
     }
     func testEffectiveLevelsPreferHomeAssistantValues() {
-        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: [90, -1, 10, -1, 0]), [90, 40, 10])
+        XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: [90, -1, 10, -1, -1, 0]), [90, 40, 10])
         XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: nil), [70, 40, 20])
     }
     func testSunFallbackKeepsHomeAssistantLevelsButNotTheSetHelper() {
-        let row: [Double] = [94, 60, 30, 55, 1_700_000_000]
+        let row: [Double] = [94, 60, 30, -1, 55, 1_700_000_000]
         let kept = fallbackLevels(row)
         XCTAssertEqual(effectiveLevels(local: [70, 40, 20], fromHA: kept), [94, 60, 30])
         XCTAssertNotNil(RemoteSet(row: row))
@@ -326,9 +326,9 @@ final class DecideTests: XCTestCase {
         XCTAssertNil(s.write)
     }
     func testRemoteRowParsing() {
-        XCTAssertEqual(RemoteSet(row: [70, 40, 20, 55, 1234]), RemoteSet(value: 55, changed: 1234))
-        XCTAssertNil(RemoteSet(row: [70, 40, 20, -1, 0]))      // no set helper
-        XCTAssertNil(RemoteSet(row: [70, 40, 20, 55, 0]))      // helper missing in HA
+        XCTAssertEqual(RemoteSet(row: [70, 40, 20, -1, 55, 1234]), RemoteSet(value: 55, changed: 1234))
+        XCTAssertNil(RemoteSet(row: [70, 40, 20, -1, -1, 0]))      // no set helper
+        XCTAssertNil(RemoteSet(row: [70, 40, 20, -1, 55, 0]))      // helper missing in HA
         XCTAssertNil(RemoteSet(row: [70, 40, 20]))
         XCTAssertNil(RemoteSet(row: nil))
     }
@@ -475,6 +475,8 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(c.location)
         XCTAssertEqual(c.monitors?.first?.contrast, 60)
         XCTAssertNil(c.monitors?.last?.contrast)
+        XCTAssertEqual(c.monitors?.first?.homeAssistant?.nightLights, "input_number.daylit_left_night_lights")
+        XCTAssertEqual(c.monitors?.last?.nightLights, 40)
     }
     func testSourceDefaults() {
         XCTAssertEqual(Config().resolvedSource().0, .off)
@@ -569,11 +571,11 @@ final class TemplateTests: XCTestCase {
         XCTAssertFalse(t.contains("states.input_number"))
     }
     func testParsesAnswerShape() {
-        let ok = #"{"elev": 10.5, "pos": 56, "lights": true, "auto": null, "bri": 200, "sat": 20, "m": {"U": [80, 40, 20, -1, 0]}}"#
+        let ok = #"{"elev": 10.5, "pos": 56, "lights": true, "auto": null, "bri": 200, "sat": 20, "m": {"U": [80, 40, 20, -1, -1, 0]}}"#
         let s = HAState.parse(Data(ok.utf8))
         XCTAssertNotNil(s)
         XCTAssertNil(s?.auto)
-        XCTAssertEqual(s?.m["U"]?.count, 5)
+        XCTAssertEqual(s?.m["U"]?.count, 6)
         let short = #"{"elev": 1, "pos": 1, "lights": false, "auto": true, "bri": 0, "sat": 0, "m": {"U": [80, 40, 20]}}"#
         XCTAssertNil(HAState.parse(Data(short.utf8)))
         XCTAssertNil(HAState.parse(Data("not json".utf8)))

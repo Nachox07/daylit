@@ -99,7 +99,10 @@ a target per monitor from three levels you choose: *day*, *blind closed* and *ni
 2. **The sun** blends it with *night*: night below −3° elevation, full daytime from 12°.
 3. **Clouds**, optional: a daylight sensor in Home Assistant (solar panel power, or an outdoor light
    sensor) holds the sun's share down on an overcast day ([details](docs/setup.md#clouds-a-daylight-sensor)).
-4. **Room lights** on around dusk keep it a little above *night*, so a lit room is not too dark.
+4. **Room lights** on around dusk keep it a little above *night*, so a lit room is not too dark. A monitor
+   can have its own level for that instead, *lights on* (optional): then *night* is the dark-room level
+   that clouds blend toward, and the lights slide it to *lights on* as the sun goes down
+   ([details](docs/setup.md#lights-on-level)).
 5. **Your hand.** A level you set keeps its distance from the target, so Daylit does not fight you:
    turn the screen 20 points down on a grey morning and it stays 20 below while the blind opens and the
    sun climbs. The distance fades out at sunset, so the next day starts clean; *Manual ✕* on the

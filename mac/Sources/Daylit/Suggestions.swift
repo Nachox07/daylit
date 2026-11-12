@@ -34,7 +34,7 @@ extension Daylit {
 
     /// A monitor's levels this tick: Home Assistant's where it gave one, else the local ones.
     func levels(of m: Mon, _ inp: Inputs) -> [Double] {
-        effectiveLevels(local: [m.day, m.blindDown, m.night], fromHA: inp.levels[m.uuid])
+        effectiveLevels(local: [m.day, m.blindDown, m.night] + (m.nightLights.map { [$0] } ?? []), fromHA: inp.levels[m.uuid])
     }
 
     /// The monitor's input_number for a level, when the source is Home Assistant and one is configured.
@@ -49,6 +49,10 @@ extension Daylit {
     func haLevelsUnavailable(of m: Mon, _ inp: Inputs) -> Bool {
         for l in Level.allCases where haEntity(l, of: m) != nil {
             guard inp.fromHA, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return true }
+        }
+        // The nightLights helper is part of the levels snapshot too (row index 3).
+        if source == .homeAssistant, let e = m.ha?.nightLights, Config.isEntityId(e) {
+            guard inp.fromHA, let row = inp.levels[m.uuid], row.count > 3, row[3] >= 0 else { return true }
         }
         return false
     }

@@ -149,10 +149,13 @@ sealed class Mon {
     public string Key => D.Key;
     public string Label => !string.IsNullOrWhiteSpace(Spec?.Label) ? Spec!.Label! : D.Friendly != "" ? D.Friendly : D.Gdi.Replace(@"\\.\", "");
     public bool On => Cur != null;
-    public double[]? HaLevels;                 // last [day, blindDown, night] from Home Assistant, for the sun fallback
+    public double[]? HaLevels;                 // Home Assistant's last raw row [day, blindDown, night, nightLights] (-1: none), merged with the local levels each tick in the sun fallback
     public double Day => Spec?.Day ?? Config.DefaultDay;
     public double BlindDown => Spec?.BlindDown ?? Config.DefaultBlindDown;
     public double Night => Spec?.Night ?? Config.DefaultNight;
+    public double? NightLights => Spec?.NightLights;
+    /// The local levels: [day, blindDown, night], with nightLights as a fourth when the config sets it.
+    public double[] LocalLevels => NightLights is double nl ? new[] { Day, BlindDown, Night, nl } : new[] { Day, BlindDown, Night };
 
     public int? Read() => D.Hdr ? Native.GetSdr(D) : Ddc.Get(D.Gdi);
     /// An automatic level; false when the monitor did not take it.

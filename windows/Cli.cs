@@ -74,15 +74,19 @@ static class Cli {
         var displays = Native.ActiveDisplays().Where(d => !d.Internal).ToList();
         var problems = new List<string>();
         if (error != null) problems.Add(error);
+        var lightsNotes = new List<string>();
         var monitors = (cfg.Monitors ?? []).Select(m => {
             var hit = displays.FirstOrDefault(d => Mon.Match(d, [m]) != null);
             var ha = m.HomeAssistant;
             if (ha != null && cfg.Effective != Source.HomeAssistant)
                 problems.Add($"monitor \"{m.Match}\" has homeAssistant entities but the source is {cfg.Effective}");
+            if ((m.NightLights != null || ha?.NightLights != null) && (cfg.Effective != Source.HomeAssistant || string.IsNullOrWhiteSpace(cfg.HomeAssistant?.Lights)))
+                lightsNotes.Add($"monitor \"{m.Match}\": nightLights needs homeAssistant.lights; without it the lights count as off");
             return new { match = m.Match, label = m.Label, connected = hit?.Friendly };
         }).ToList();
         bool tokenStored = cfg.Effective == Source.HomeAssistant && Cred.Read(cfg.TokenName) != null;   // presence only, never printed
         var notes = new List<string>();
+        notes.AddRange(lightsNotes);
         if (!exists) notes.Add("no config.json: Daylit runs with sliders and hotkeys only");
         foreach (var m in monitors.Where(m => m.connected == null)) notes.Add($"monitor \"{m.match}\" is not connected right now (fine if it is used elsewhere)");
         if (cfg.Effective == Source.HomeAssistant && !tokenStored)
