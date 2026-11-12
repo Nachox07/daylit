@@ -166,6 +166,18 @@ final class PushDecisionTests: XCTestCase {
     func testADaylightOnlyChangeWaitsUntilAMinuteAfterTheLastTick() {
         XCTAssertEqual(d(["sensor.solar"], lastTick: 1000, now: 1010), .after(50))
     }
+    func testTheDaylightLimitIsTheNormalPollIntervalWhenLongerThanAMinute() {
+        let mains = PushRule.daylightLimit(onBattery: false, tuning: Tuning())
+        let battery = PushRule.daylightLimit(onBattery: true, tuning: Tuning())
+        XCTAssertEqual(mains, 60)
+        XCTAssertEqual(battery, 120)
+        XCTAssertEqual(PushRule.decide(changed: ["sensor.solar"], subscribed: subscribed, daylight: "sensor.solar", lastTick: 1000, now: 1010, every: battery), .after(110))
+        XCTAssertEqual(PushRule.decide(changed: ["sensor.solar"], subscribed: subscribed, daylight: "sensor.solar", lastTick: 1000, now: 1120, every: battery), .now)
+    }
+    func testPingIsEveryTwoMinutesOnBatteryAndEveryMinuteOnMains() {
+        XCTAssertEqual(PushRule.pingInterval(onBattery: false), 60)
+        XCTAssertEqual(PushRule.pingInterval(onBattery: true), 120)
+    }
     func testADaylightOnlyChangeTicksWhenTheLastTickIsAMinuteOld() {
         XCTAssertEqual(d(["sensor.solar"], lastTick: 1000, now: 1060), .now)
         XCTAssertEqual(d(["sensor.solar"], lastTick: nil), .now)
@@ -186,13 +198,39 @@ final class PushDecisionTests: XCTestCase {
 }
 
 final class PushTimerTests: XCTestCase {
-    func testABurstRunsOneTick() {
+    func testABurstRunsOneTickAndEachChangeExtendsTheWindow() {
         var t = PushTimer()
         XCTAssertTrue(t.add(.now, now: 100))
         XCTAssertEqual(t.due, 101)
-        XCTAssertFalse(t.add(.now, now: 100.3))
-        XCTAssertFalse(t.add(.now, now: 100.9))
+        XCTAssertTrue(t.add(.now, now: 100.3))
+        XCTAssertEqual(t.due, 101.3)
+        XCTAssertTrue(t.add(.now, now: 100.9))
+        XCTAssertEqual(t.due!, 101.9, accuracy: 1e-9)
+    }
+    func testASingleChangeTicksAfterOneSecond() {
+        var t = PushTimer()
+        _ = t.add(.now, now: 100)
         XCTAssertEqual(t.due, 101)
+    }
+    func testTheWindowIsCappedAtThreeSecondsAfterTheFirstChange() {
+        var t = PushTimer()
+        _ = t.add(.now, now: 100)
+        _ = t.add(.now, now: 100.8); _ = t.add(.now, now: 101.6); _ = t.add(.now, now: 102.4)
+        XCTAssertEqual(t.due!, 103, accuracy: 1e-9)
+        XCTAssertFalse(t.add(.now, now: 102.9))   // already due at the cap
+        XCTAssertEqual(t.due!, 103, accuracy: 1e-9)
+    }
+    func testAStreamOverFiveSecondsTicksAtMostEveryThreeSeconds() {
+        var t = PushTimer(); var fired: [Double] = []
+        var now = 100.0
+        while now < 105 {
+            _ = t.add(.now, now: now)
+            if let d = t.due, d <= now + 0.5 { fired.append(d); t.clear() }
+            now += 0.5
+        }
+        XCTAssertEqual(fired.first!, 103, accuracy: 1e-9)
+        for (a, b) in zip(fired, fired.dropFirst()) { XCTAssertGreaterThanOrEqual(b - a, 1) }
+        XCTAssertLessThanOrEqual(fired.count, 2)
     }
     func testADaylightWaitDoesNotPushBackATickAlreadyDue() {
         var t = PushTimer()

@@ -90,7 +90,7 @@ struct TokenView: View {
         w.contentViewController = NSHostingController(rootView: TokenView(service: service) { saved in
             window?.close()
             if saved {
-                HAClient.tokenCache = [:]
+                HAClient.clearTokenCache()
                 Log.write("token: saved to the keychain")
                 model.push.tokenChanged()
                 model.refresh()

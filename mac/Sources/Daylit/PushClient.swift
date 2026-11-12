@@ -21,6 +21,7 @@ import DaylitCore
 
     private let tick: () -> Void
     private let lastTick: () -> Date
+    private let daylightLimit: () -> Double
     private var target: Target?
     private var task: URLSessionWebSocketTask?
     /// Bumped on every open and close, so callbacks from an older connection do nothing.
@@ -38,9 +39,10 @@ import DaylitCore
     private var path: NWPathMonitor?
     private var lastPath: String?
 
-    init(tick: @escaping () -> Void, lastTick: @escaping () -> Date) {
+    init(tick: @escaping () -> Void, lastTick: @escaping () -> Date, daylightLimit: @escaping () -> Double) {
         self.tick = tick
         self.lastTick = lastTick
+        self.daylightLimit = daylightLimit
     }
 
     /// Opens, keeps or closes the socket. `force` reconnects even when nothing changed (a config reload resubscribes).
@@ -53,6 +55,7 @@ import DaylitCore
         attempt = 0; lastReason = nil; loggedAt = nil
         guard t != nil else {
             if was != nil { Log.write(PushRule.offLine) }
+            path?.cancel(); path = nil; lastPath = nil   // no target: stop watching the network
             return
         }
         watchNetwork()
@@ -80,9 +83,14 @@ import DaylitCore
         conn += 1
         let c = conn, name = t.tokenName
         Task {
-            let token = await Task.detached { HAClient.token(name) }.value   // runs /usr/bin/security: off the main thread
+            // Runs /usr/bin/security: off the main thread. `stored` tells "no token" from a failed read.
+            let (token, stored) = await Task.detached { () -> (String?, Bool) in
+                if let t = HAClient.token(name) { return (t, true) }
+                return (nil, HAClient.tokenStored(name))
+            }.value
             guard c == self.conn else { return }
             guard let token else {
+                if stored { self.lost("keychain read failed", c); return }   // a failed read retries on the normal backoff
                 // The REST tick already shows "No Home Assistant token"; the token window calls tokenChanged().
                 self.close(); self.stopped = true
                 Log.write("push: no token stored, waiting for one")
@@ -97,7 +105,7 @@ import DaylitCore
 
     private func receive(_ ws: URLSessionWebSocketTask, _ c: Int, _ token: String, _ t: Target) {
         Task {
-            var token: String? = token   // sent once, then dropped
+            var token: String? = token   // sent once per connection; the next connection reads it again (HAClient caches it)
             while c == self.conn {
                 let message: URLSessionWebSocketTask.Message
                 do { message = try await ws.receive() } catch {
@@ -146,7 +154,7 @@ import DaylitCore
         pingTask?.cancel()
         pingTask = Task {
             while c == self.conn {
-                try? await Task.sleep(nanoseconds: UInt64(PushRule.pingEvery * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(PushRule.pingInterval(onBattery: Power.onBattery) * 1_000_000_000))
                 guard c == self.conn, !Task.isCancelled else { return }
                 self.awaitingPong = true
                 let id = self.nextId; self.nextId += 1
@@ -162,7 +170,8 @@ import DaylitCore
     private func request(_ ids: Set<String>, _ t: Target) {
         let now = Date().timeIntervalSince1970
         let d = PushRule.decide(changed: ids, subscribed: Set(t.entities), daylight: t.daylight,
-                                lastTick: lastTick().timeIntervalSince1970, now: now)
+                                lastTick: lastTick().timeIntervalSince1970, now: now,
+                                every: daylightLimit())
         guard timer.add(d, now: now), let due = timer.due else { return }
         log("push: \(ids.sorted().joined(separator: ", ")) changed, tick in \(Int((due - now).rounded())) s")
         tickTask?.cancel()

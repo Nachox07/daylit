@@ -103,27 +103,37 @@ public enum PushTick: Equatable {
 extension PushRule {
     /// A burst of changes within this many seconds runs one tick.
     public static let debounce: Double = 1
-    /// The daylight sensor alone ticks at most this often (it can report every few seconds).
+    /// The daylight sensor alone ticks at most this often (it can report every few seconds); see `daylightLimit`.
     public static let daylightEvery: Double = 60
     /// While the socket is connected and subscribed, polling is only the safety net.
     public static let healthyPollSeconds: Double = 300
     /// An application ping this often; no pong within `pongTimeout` means the connection is gone.
     public static let pingEvery: Double = 60
+    /// Home Assistant's own protocol ping (every 55 s) is answered by the system and cannot be seen by the app, so it does
+    /// not tell Daylit the link is dead; our ping does. On battery it runs half as often, to wake the Mac less.
+    public static func pingInterval(onBattery: Bool) -> Double { onBattery ? 2 * pingEvery : pingEvery }
     public static let pongTimeout: Double = 10
     /// Waits before each reconnect attempt; the last one repeats.
     public static let backoff: [Double] = [2, 5, 15, 60]
 
     /// Whether these changes need a tick. `daylight` is homeAssistant.light; `lastTick` is when the last tick
     /// ran (Unix seconds; any tick reads the daylight sensor too).
-    public static func decide(changed: Set<String>, subscribed: Set<String>, daylight: String?, lastTick: Double?, now: Double) -> PushTick {
+    public static func decide(changed: Set<String>, subscribed: Set<String>, daylight: String?, lastTick: Double?, now: Double,
+                              every: Double = daylightEvery) -> PushTick {
         let relevant = changed.intersection(subscribed)
         if relevant.isEmpty { return .ignore }
         if let d = daylight, relevant == [d] {
             guard let last = lastTick else { return .now }
-            let wait = daylightEvery - (now - last)
+            let wait = every - (now - last)
             return wait <= 0 ? .now : .after(wait)
         }
         return .now
+    }
+
+    /// How often the daylight sensor alone may tick: a minute, or the normal poll interval when that is longer
+    /// (battery: batteryPollSeconds), so push never ticks more than polling would on battery.
+    public static func daylightLimit(onBattery: Bool, tuning: Tuning) -> Double {
+        max(daylightEvery, onBattery ? tuning.batteryPollSeconds : tuning.pollSeconds)
     }
 
     /// The wait before reconnect attempt `attempt` (0 = the first after a drop).
@@ -142,23 +152,34 @@ extension PushRule {
     }
 }
 
-/// The one pending push tick. A change asks for a tick in 1 s; more changes before it fires join it,
-/// so a burst runs one tick. A daylight-only change waits for its limit, unless a tick is already due.
+/// The one pending push tick. A change asks for a tick in 1 s; each further change before it fires pushes it back
+/// to 1 s after that change (a real debounce), but never later than 3 s after the first change, so a steady stream
+/// still ticks every 3 s. A daylight-only change waits for its limit, unless a tick is already due.
 public struct PushTimer: Equatable {
     public private(set) var due: Double?
+    private var first = 0.0
+    private var immediate = false   // the pending tick is a debounce window, not a daylight wait
+    public static let maxWait: Double = 3
     public init() {}
     /// Adds a request; true when `due` moved, so the caller reschedules its timer.
     public mutating func add(_ t: PushTick, now: Double) -> Bool {
-        let at: Double
         switch t {
         case .ignore: return false
-        case .now: at = now + PushRule.debounce
-        case .after(let s): at = now + max(s, PushRule.debounce)
+        case .now:
+            if immediate, let d = due {
+                let at = min(now + PushRule.debounce, first + PushTimer.maxWait)
+                if at <= d { return false }
+                due = at; return true
+            }
+            first = now; immediate = true; due = now + PushRule.debounce
+            return true
+        case .after(let s):
+            let at = now + max(s, PushRule.debounce)
+            if let d = due, d <= at { return false }
+            if due == nil { first = now; immediate = false }
+            due = at; return true
         }
-        if let d = due, d <= at { return false }
-        due = at
-        return true
     }
     /// The timer fired (or the socket closed): nothing pending.
-    public mutating func clear() { due = nil }
+    public mutating func clear() { due = nil; immediate = false }
 }

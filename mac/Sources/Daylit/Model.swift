@@ -81,7 +81,8 @@ import DaylitCore
     var timer: Timer?
     var screenDebounce: DispatchWorkItem?
     /// Push updates from Home Assistant (experimental): says when to tick. Created on first use, so previews have none.
-    lazy var push = PushClient(tick: { [weak self] in self?.refresh() }, lastTick: { [weak self] in self?.lastTick ?? .distantPast })
+    lazy var push = PushClient(tick: { [weak self] in self?.refresh() }, lastTick: { [weak self] in self?.lastTick ?? .distantPast },
+                                 daylightLimit: { [weak self] in PushRule.daylightLimit(onBattery: Power.onBattery, tuning: self?.config.tuned ?? Tuning()) })
 
     /// A model with fixed state and no side effects (no displays, keys, timers or network): snapshots.
     init(preview: Void) {}
@@ -128,7 +129,7 @@ import DaylitCore
         configProblem = err ?? srcErr
         problem = configProblem
         DDC.tool = c.ddcTool ?? DDC.defaultTool
-        HAClient.tokenCache = [:]
+        HAClient.clearTokenCache()
         log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
             log(String(format: "sun elevation now %.2f° at %.3f, %.3f", solarElevation(latitude: l.latitude, longitude: l.longitude), l.latitude, l.longitude))
@@ -245,7 +246,7 @@ import DaylitCore
             onBattery = battery
             if hasBattery && pauseOnBattery && source != .off {
                 Log.write(battery ? "battery: paused" : "power: resumed")
-                if !battery { refresh(); return }
+                if !battery { syncPush(); refresh(); return }   // open the socket at once, not at the next check
                 detail = "Paused on battery"
             }
         }

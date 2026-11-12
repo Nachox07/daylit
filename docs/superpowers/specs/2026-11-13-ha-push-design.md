@@ -28,8 +28,10 @@ battery* off). Battery use must be no worse than polling.
    - The token is never logged, and it never appears in a URL.
 2. **Events.** Each `event` message carries added (`a`), changed (`c`) or removed (`r`) entities.
    - **A relevant change** to anything except the daylight sensor asks for a tick at once: a refresh,
-     with a debounce of 1 s so a burst of changes runs one tick.
-   - **Daylight sensor changes** ask for a tick at most once every 60 s.
+     with a debounce: each further change moves the tick to 1 s after it, but never later than 3 s after
+     the first change, so a burst runs one tick and a steady stream ticks at most every 3 s.
+   - **Daylight sensor changes** ask for a tick at most once every 60 s, or every normal poll interval when
+     that is longer (on battery, `batteryPollSeconds`).
    - The tick is the same tick as today. It still reads the full state through the REST template, so
      the brightness rules and the HA row stay exactly as they are. The socket only says *when* to tick.
 3. **Polling stays as the safety net.**
@@ -42,7 +44,8 @@ battery* off). Battery use must be no worse than polling.
      today's token errors.
 5. **When it is closed.** The socket is closed while the source is not `homeAssistant`, while `push` is
    off, while paused on battery, and while Automatic is off. Each change of these opens or closes it.
-   A config reload rebuilds the entity list and resubscribes.
+   A config reload rebuilds the entity list and resubscribes. With Automatic off the socket is closed, so
+   turning Automatic on (also from Home Assistant) is picked up by the normal poll, which reopens it.
 6. **Logging,** with the existing once-then-every-10-minutes rule for repeated errors:
    - `push: connected (N entities)`
    - `push: lost (<reason>), retrying in Ns`
