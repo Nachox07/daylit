@@ -38,7 +38,7 @@ static class Program {
 }
 
 /// Owns the state and the decisions; the windows only show it.
-sealed class Controller {
+sealed partial class Controller {
     readonly Application app;
     readonly Dispatcher ui;
     public Config Cfg = new();
@@ -91,6 +91,7 @@ sealed class Controller {
         this.app = app;
         ui = app.Dispatcher;
         Load();
+        LoadCorrections();
         panel = new Flyout(this);
         panel.IsVisibleChanged += (_, _) => { if (!panel.IsVisible) panelHidden = DateTime.UtcNow; };
 
@@ -137,6 +138,7 @@ sealed class Controller {
         HAClient.LastError = null;
         AutoOn = Settings.Auto;
         lookDark = null; look.Reset();
+        suggestDirty = true; stepCache.Clear();
         foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; m.ContrastSet = null; }
         Log.Write($"config: source {Source}" + (ConfigError != null ? $" — {ConfigError}" : ""));
     }
@@ -224,6 +226,7 @@ sealed class Controller {
     /// Back to the automatic level now (the "manual" note in the panel).
     public void Resume(Mon m) {
         m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; m.Manual = false;
+        recorder.Drop(m.Key);   // a change waiting to become a suggestion sample ends here too
         Log.Write($"resume: {m.Label} back to automatic");
         _ = Tick("resume");
     }
@@ -320,7 +323,7 @@ sealed class Controller {
             AutoOn = on;
             if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);
             else Settings.Auto = on;
-            if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; }
+            if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; recorder.Drop(m.Key); }
             await Tick("automatic " + (on ? "on" : "off"));
         } catch (Exception e) { Log.Write("set auto: " + e); }
     }
@@ -609,7 +612,9 @@ sealed class Controller {
                 hold = hold with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
             }
             bool dragging = m.Dragging;   // the slider is in the user's hand
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, Now);
+            double tickNow = Now;         // the same time for Decide and for the suggestion samples below
+            int clearedAt = offsetCleared.GetValueOrDefault(m.Key);   // see ApplySuggestion
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, tickNow);
             if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
             if (!dragging) m.Touched = false;
             bool remote = step.Remote != null;
@@ -625,12 +630,30 @@ sealed class Controller {
                 m.WriteFailing = !ok;
             }
             var st = Rules.AfterWrite(step.State, ok, hold);   // a refused write is retried next tick
+            // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
+            bool appliedMeanwhile = offsetCleared.GetValueOrDefault(m.Key) != clearedAt;
+            if (appliedMeanwhile) { st = Suggest.AfterApply(st); recorder.Drop(m.Key); }
             if (i == li) groupBase = syncOffsets.Base(m.Key, ok ? step.Applied : c);   // followers go where the leader really is
             if (st.Offset != m.Offset && st.Offset is int o)
                 Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
             (m.RemoteSeen, m.RemoteValue, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt) = (st.RemoteSeen, st.RemoteValue, st.LastSet, st.LastTarget, st.Offset, st.OffsetSun, st.OffsetAt);
+            // Suggestions (Suggest.cs): a new hand-set level becomes a sample once it has held 5 minutes.
+            if (step.Remote != null) {
+                // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
+                recorder.Drop(m.Key);
+            } else if (Suggest.IsHandChange(hold, step.State, step.Remote, tickNow)) {
+                var sampleContext = new SampleContext(Follower: follower, WriteFailed: !ok, Idle: !here, Paused: Paused,
+                                                      SunFallback: Source == Source.HomeAssistant && haDown);
+                // An offset back at 0 (st.Offset == null) passes null, which ends the pending change.
+                recorder.HandChanged(m.Key, st.Offset is int handOffset
+                    ? Suggest.MakeSample(m.Key, target + handOffset, target, s.Elev, s.Pos, s.Lights, light, s.Levels[i], Cfg.Tuned, tickNow, sampleContext)
+                    : null);
+            }
+            if (recorder.Settle(m.Key, AutoOn && st.Offset != null, s.Levels[i], tickNow) is Sample settled) {
+                corrections.Add(settled); SaveCorrections(); suggestDirty = true;
+            }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
-            m.Cur = ok ? step.Current : c; m.Manual = step.Manual;
+            m.Cur = ok ? step.Current : c; m.Manual = step.Manual && !appliedMeanwhile;
             int applied = ok ? step.Applied : c;
             if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
@@ -665,6 +688,7 @@ sealed class Controller {
                  : Source == Source.Sun ? "Sun · " + where
                  : $"Home Assistant · daylight {(int)Math.Round(sun * 100)}%" + (s.HasBlind ? $" · blind {(int)s.Pos}%" : "") + Rules.LightsNote(s.Lights, s.Bri, s.Sat, Cfg.Tuned)
                    + (s.LightRatio is double lr ? $" · light {Pct(lr)}%" : "");
+        await UpdateSuggestion(s, mons, haDown);
     }
 
     // Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
