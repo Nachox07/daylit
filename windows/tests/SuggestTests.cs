@@ -452,3 +452,45 @@ public class SuggestFixtureTests {
         }
     }
 }
+
+public class SuggestConfigTests {
+    [Fact]
+    public void ApplyWritesOneLocalLevelAndKeepsEverythingElse() {
+        const string file = """
+            { "source": "sun", "location": { "latitude": 51.48, "longitude": 0.00 }, "custom": true,
+              "monitors": [ { "match": "Monitor", "label": "Desk", "day": 100, "blindDown": 78, "night": 75, "contrast": 60 },
+                            { "match": "Other", "day": 50 } ] }
+            """;
+        string text = ConfigPatch.SetLevels(new Dictionary<string, int> { ["blindDown"] = 61 }, "Generic Monitor", "Monitor", file);
+        var root = JsonNode.Parse(text)!.AsObject();
+        var mons = root["monitors"]!.AsArray();
+        Assert.Equal(2, mons.Count);
+        Assert.Equal(61, mons[0]!["blindDown"]!.GetValue<int>());
+        Assert.Equal(100, mons[0]!["day"]!.GetValue<int>());
+        Assert.Equal(75, mons[0]!["night"]!.GetValue<int>());
+        Assert.Equal("Desk", mons[0]!["label"]!.GetValue<string>());
+        Assert.Equal(60, mons[0]!["contrast"]!.GetValue<int>());
+        Assert.Equal(50, mons[1]!["day"]!.GetValue<int>());
+        Assert.True(root["custom"]!.GetValue<bool>());
+        Assert.Contains("51.48", text);
+        Assert.DoesNotContain("51.479", text);
+    }
+
+    [Fact]
+    public void ApplyAddsAnEntryForAMonitorWithoutOne() {
+        string text = ConfigPatch.SetLevels(new Dictionary<string, int> { ["blindDown"] = 30, ["day"] = 65 }, "Generic Monitor", "Monitor",
+                                            """{ "source": "sun", "location": { "latitude": 51.48, "longitude": 0 } }""");
+        var mons = JsonNode.Parse(text)!["monitors"]!.AsArray();
+        Assert.Single(mons);
+        Assert.Equal("Monitor", mons[0]!["match"]!.GetValue<string>());
+        Assert.Equal(30, mons[0]!["blindDown"]!.GetValue<int>());
+        Assert.Equal(65, mons[0]!["day"]!.GetValue<int>());
+        Assert.Null(mons[0]!["night"]);
+    }
+
+    [Fact]
+    public void ApplyRefusesAFileThatIsNotAnObject() {
+        Assert.Throws<InvalidDataException>(() => ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 60 }, "Monitor", "Monitor", "[1]"));
+        Assert.Throws<InvalidDataException>(() => ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 60 }, "Monitor", "Monitor", """{ "monitors": 3 }"""));
+    }
+}
