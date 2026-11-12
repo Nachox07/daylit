@@ -220,3 +220,69 @@ static partial class Suggest {
                               mine.Count, mine.Select(x => day(x.At)).Distinct().Count());
     }
 }
+
+/// Why a tick's hand change is not a sample (each of these hides what the user really wanted).
+/// Follower: a linked follower, its level comes from the leader; WriteFailed: this tick's write to the monitor
+/// failed; Idle: this PC is idle; Paused: paused on battery; SunFallback: the source is Home Assistant but it is
+/// down, the sun is standing in.
+readonly record struct SampleContext(bool Follower = false, bool WriteFailed = false, bool Idle = false, bool Paused = false, bool SunFallback = false);
+
+/// Hand changes waiting to settle, one per monitor. A change becomes a sample after Suggest.SettleSeconds with
+/// no further hand change on that monitor, while its offset is still held.
+sealed class Recorder {
+    readonly Dictionary<string, Sample> pending = new();
+    public IReadOnlyDictionary<string, Sample> Pending => pending;
+
+    /// A hand change on `monitor` this tick. `sample` is null when the tick may not be recorded (see
+    /// Suggest.MakeSample) or the user put it back to automatic: either way it ends the gesture before it.
+    public void HandChanged(string monitor, Sample? sample) {
+        if (sample == null) pending.Remove(monitor); else pending[monitor] = sample;
+    }
+
+    /// Every tick, per monitor. Returns the sample that became final now, if any.
+    /// held: the hand-set offset is still set and automatic mode is on (false drops the pending change);
+    /// levels: the monitor's levels now (a change drops it too).
+    public Sample? Settle(string monitor, bool held, double[] levels, double now) {
+        if (!pending.TryGetValue(monitor, out var p)) return null;
+        if (!held || !Suggest.SameLevels(p.Levels, levels)) { pending.Remove(monitor); return null; }
+        if (now - p.At < Suggest.SettleSeconds) return null;
+        pending.Remove(monitor);
+        return p;
+    }
+
+    /// Forget a monitor's pending change.
+    public void Drop(string monitor) => pending.Remove(monitor);
+}
+
+static partial class Suggest {
+    /// A hand change becomes a sample after this long with no further one (seconds).
+    public const double SettleSeconds = 300;
+
+    /// The room lights' boost decided the target (it lifted the level above the blend).
+    public static bool BoostDecides(double[] l, double elev, double pos, bool lights, Tuning t, double light) {
+        if (!lights || elev >= t.LightsBoostSunBelow || l.Length != 3) return false;
+        double s = Math.Min(t.Fraction(elev), light);
+        double daytime = l[1] + (l[0] - l[1]) * pos / 100;
+        return l[2] + t.LightsBoost > l[2] + (daytime - l[2]) * s;
+    }
+
+    /// The sample for a tick where Decide recorded a new hand-set level, or null when it may not be recorded:
+    /// see SampleContext, the lights boost deciding the target, or chosen / auto at 0 or 100 (the clamp hides
+    /// the true wish). pos is the blind position 0–100 (100 without a blind), light the cloud cap (1 without a sensor).
+    public static Sample? MakeSample(string monitor, int chosen, int auto, double elev, double pos, bool lights, double light,
+                                     double[] levels, Tuning t, double now, SampleContext context) {
+        if (context.Follower || context.WriteFailed || context.Idle || context.Paused || context.SunFallback) return null;
+        if (levels.Length != 3 || chosen < 1 || chosen > 99 || auto < 1 || auto > 99) return null;
+        if (BoostDecides(levels, elev, pos, lights, t, light)) return null;
+        return new Sample(monitor, chosen, auto, Math.Min(t.Fraction(elev), light), Math.Clamp(pos, 0, 100) / 100, elev, lights, levels, now);
+    }
+
+    /// Whether this tick's Decide took a new hand-set level (moved by hand): it stamps OffsetAt with now.
+    /// A level from the Home Assistant "set" helper (`remote`) stamps it too, but is not a hand change.
+    public static bool IsHandChange(Hold before, Hold after, int? remote, double now) =>
+        remote == null && now > 0 && after.OffsetAt == now && before.OffsetAt != now;
+
+    /// The hold state after Apply: the hand-set offset is cleared, or it would be applied again on top of the
+    /// new level (target 85, set 70, new level gives 70: the monitor would go to 55).
+    public static Hold AfterApply(Hold h) => h with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
+}

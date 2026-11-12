@@ -204,3 +204,99 @@ public class SuggestTriggerTests {
         Assert.Equal("You raise Monitor by about 8 in the evening. Set night 20 → 30?", up.Sentence("Monitor"));
     }
 }
+
+public class SuggestRecorderTests {
+    static readonly double[] Levels = [100, 78, 75];
+
+    [Fact]
+    public void AChangeSettlesAfterFiveMinutes() {
+        var r = new Recorder();
+        var x = SuggestData.Make(0, 9, 30, 0.35, 70, Levels);
+        r.HandChanged("m", x);
+        Assert.Null(r.Settle("m", true, Levels, x.At + 299));
+        Assert.Equal(x, r.Settle("m", true, Levels, x.At + 300));
+        Assert.Null(r.Settle("m", true, Levels, x.At + 330));   // once
+    }
+
+    [Fact]
+    public void ASecondChangeWithinFiveMinutesReplacesTheFirst() {
+        var r = new Recorder();
+        var first = SuggestData.Make(0, 9, 30, 0.35, 70, Levels);
+        var second = first with { Chosen = 66, At = first.At + 120 };
+        r.HandChanged("m", first);
+        Assert.Null(r.Settle("m", true, Levels, first.At + 60));
+        r.HandChanged("m", second);
+        Assert.Null(r.Settle("m", true, Levels, first.At + 300));   // 3 minutes after the second
+        Assert.Equal(66, r.Settle("m", true, Levels, second.At + 300)?.Chosen);
+    }
+
+    [Fact]
+    public void AClearedOffsetDropsThePendingChange() {
+        var r = new Recorder();
+        var x = SuggestData.Make(0, 9, 30, 0.35, 70, Levels);
+        r.HandChanged("m", x);
+        Assert.Null(r.Settle("m", false, Levels, x.At + 60));
+        Assert.Null(r.Settle("m", true, Levels, x.At + 400));
+        // A level change drops it too.
+        r.HandChanged("m", x);
+        Assert.Null(r.Settle("m", true, [100, 62, 75], x.At + 400));
+        Assert.Empty(r.Pending);
+        // And so does an excluded change (or one put back) right after it.
+        r.HandChanged("m", x);
+        r.HandChanged("m", null);
+        Assert.Null(r.Settle("m", true, Levels, x.At + 400));
+    }
+
+    static Sample? Make(int chosen = 70, int auto = 86, double elev = 30, bool lights = false, double[]? levels = null, SampleContext context = default) =>
+        Suggest.MakeSample("m", chosen, auto, elev, 35, lights, 1, levels ?? Levels, new Tuning(), 1000, context);
+
+    [Fact]
+    public void AnOrdinaryHandChangeIsASample() {
+        var x = Suggest.MakeSample("m", 70, 86, 30, 35, false, 0.8, Levels, new Tuning(), 1000, new SampleContext());
+        Assert.Equal(new Sample("m", 70, 86, 0.8, 0.35, 30, false, Levels, 1000), x);
+    }
+
+    [Fact]
+    public void EachExclusionIsNotRecorded() {
+        Assert.NotNull(Make());
+        Assert.Null(Make(context: new SampleContext(Follower: true)));
+        Assert.Null(Make(context: new SampleContext(WriteFailed: true)));
+        Assert.Null(Make(context: new SampleContext(Idle: true)));
+        Assert.Null(Make(context: new SampleContext(Paused: true)));
+        Assert.Null(Make(context: new SampleContext(SunFallback: true)));
+        Assert.Null(Make(0)); Assert.Null(Make(100));
+        Assert.Null(Make(auto: 0)); Assert.Null(Make(auto: 100));
+        // The lights boost decided the target: sun 0°, lights on, night 30 + 5 above the blend.
+        Assert.Null(Make(40, auto: 35, elev: 0, lights: true, levels: [32, 32, 30]));
+        Assert.NotNull(Make(40, auto: 35, elev: 0, lights: false, levels: [32, 32, 30]));
+    }
+
+    [Fact]
+    public void AHomeAssistantSetIsNotAHandChange() {
+        var before = new Hold(null, 80, 80);
+        var after = new Hold(null, 50, 80, -30, 1, 1000);
+        Assert.True(Suggest.IsHandChange(before, after, null, 1000));
+        Assert.False(Suggest.IsHandChange(before, after, 50, 1000));
+        Assert.False(Suggest.IsHandChange(after, after, null, 1030));   // held from an earlier tick
+    }
+
+    [Fact]
+    public void DecideMarksAHandChangeWithItsTime() {
+        var before = new Hold(null, 86, 86);
+        var step = Rules.Decide(70, 86, null, before, true, true, 1, touched: true, now: 1000, dayOf: _ => 0);
+        Assert.Equal(-16, step.State.Offset);
+        Assert.True(Suggest.IsHandChange(before, step.State, step.Remote, 1000));
+    }
+
+    [Fact]
+    public void ApplyClearsTheOffsetSoTheCorrectionIsNotDoubled() {
+        // Target 85, the user set 70 (offset −15). The new levels give 70.
+        var held = new Hold(null, 70, 85, -15, 1, 1000);
+        var kept = Rules.Decide(70, 70, null, held, true, true, 1, touched: false, now: 1060, dayOf: _ => 0);
+        Assert.Equal(55, kept.Applied);   // what would happen without clearing
+        var cleared = Rules.Decide(70, 70, null, Suggest.AfterApply(held), true, true, 1, touched: false, now: 1060, dayOf: _ => 0);
+        Assert.Equal(70, cleared.Applied);
+        Assert.Null(cleared.Write);
+        Assert.Null(cleared.State.Offset);
+    }
+}
