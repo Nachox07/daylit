@@ -133,3 +133,90 @@ static partial class Suggest {
         return Math.Round((st.Min + n * st.Step) * 1e6, MidpointRounding.AwayFromZero) / 1e6;   // no 61.500000001 from the multiplication
     }
 }
+
+/// One level to change: from its current value to the proposed one.
+readonly record struct LevelChange(Level Level, double From, double To);
+
+/// What the panel offers for one monitor. Monitor: its key; Changes: the main level (the one that moves most)
+/// first; Amount: how far the user moves it, the mean of chosen − auto where the main level dominates, rounded,
+/// no sign; Lower: the user lowers it (true) or raises it; Samples, Days: the hand changes behind it.
+sealed record Suggestion(string Monitor, IReadOnlyList<LevelChange> Changes, int Amount, bool Lower, int Samples, int Days) {
+    // A record compares lists by reference: compare the changes by value.
+    public bool Equals(Suggestion? o) => o is not null && Monitor == o.Monitor && Amount == o.Amount && Lower == o.Lower &&
+                                         Samples == o.Samples && Days == o.Days && Changes.SequenceEqual(o.Changes);
+    public override int GetHashCode() => HashCode.Combine(Monitor, Amount, Lower, Samples, Days);
+
+    public Level Main => Changes[0].Level;
+    /// "blind down 78 → 62, day 100 → 95"
+    public string ChangeText => string.Join(", ", Changes.Select(ch => $"{ch.Level.Name()} {Fmt(ch.From)} → {Fmt(ch.To)}"));
+    /// The panel line: "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62?"
+    public string Sentence(string label) => $"You {(Lower ? "lower" : "raise")} {label} by about {Amount} {Main.Situation()}. Set {ChangeText}?";
+    /// "suggest: Monitor blind down 78 → 62 (12 changes on 4 days)"
+    public string LogLine(string label) => $"suggest: {label} {ChangeText} ({Samples} changes on {Days} days)";
+
+    /// A whole number without decimals, otherwise one decimal (an input_number with step 0.5).
+    public static string Fmt(double v) => v == Math.Round(v) ? ((long)v).ToString(CultureInfo.InvariantCulture) : v.ToString("0.0", CultureInfo.InvariantCulture);
+}
+
+static partial class Suggest {
+    /// A proposed level must move at least this much after rounding...
+    public const double MinMove = 5;
+    /// ...and the proposed levels must lower the mean absolute error by at least this much.
+    public const double MinGain = 3;
+    /// "Not now" hides a monitor's suggestions this long (seconds).
+    public const double NotNow = 7 * 86400;
+
+    /// The two level lists are the same (an input_number may hold decimals).
+    public static bool SameLevels(double[]? a, double[]? b) =>
+        a != null && b != null && a.Length == b.Length && a.Zip(b).All(p => Math.Abs(p.First - p.Second) < 1e-6);
+
+    /// The real target (boost, clamp, rounding) for a sample's moment with other levels. S already holds the
+    /// cloud cap, so light is 1; the boost rule is the tick's: the sun below lightsBoostSunBelow.
+    public static int Rerun(Sample x, double[] levels, Tuning t) =>
+        Rules.Target(levels, x.P * 100, x.Lights, x.S, t, x.Elev < t.LightsBoostSunBelow, 1);
+
+    /// Mean of |target − chosen| over the samples, with `levels`.
+    public static double MeanAbsError(IReadOnlyList<Sample> samples, double[] levels, Tuning? t = null) {
+        if (samples.Count == 0) return 0;
+        t ??= new Tuning();
+        var tuning = t;
+        return samples.Sum(x => (double)Math.Abs(Rerun(x, levels, tuning) - x.Chosen)) / samples.Count;
+    }
+
+    /// The change to offer for one monitor, or null.
+    /// all: every recorded sample (other monitors' and stale ones are ignored here); levels: the monitor's
+    /// [day, blindDown, night] now; steps: per level, what it can be stored as, null = it comes from Home
+    /// Assistant and is unavailable now; dismissedUntil: "Not now" was clicked, nothing until this time.
+    public static Suggestion? SuggestionFor(string monitor, IReadOnlyList<Sample> all, double[] levels, NumberStep?[] steps, double now,
+                                            double? dismissedUntil, Tuning? t = null, Func<double, int>? dayOf = null) {
+        if (dismissedUntil is double d && now < d) return null;
+        if (levels.Length != 3 || steps.Length != 3) return null;
+        t ??= new Tuning();
+        Func<double, int> day = dayOf ?? Rules.LocalDay;
+        var mine = all.Where(x => x.Monitor == monitor && SameLevels(x.Levels, levels)).ToList();
+        var cand = Candidates(mine, day).Where(l => steps[(int)l] != null).ToList();
+        if (cand.Count == 0) return null;
+        var fitted = Fit(mine, levels, cand);
+        var proposed = (double[])levels.Clone();
+        var changes = new List<LevelChange>();
+        foreach (var l in cand) {
+            double v = RoundToStep(fitted[(int)l], steps[(int)l]!.Value);
+            if (Math.Abs(v - levels[(int)l]) >= MinMove - 1e-9) {
+                proposed[(int)l] = v;
+                changes.Add(new LevelChange(l, levels[(int)l], v));
+            }
+        }
+        if (changes.Count == 0) return null;
+        double gain = MeanAbsError(mine, levels, t) - MeanAbsError(mine, proposed, t);
+        if (gain < MinGain - 1e-9) return null;
+        var main = changes[0];   // the one that moves most; the first of them on a tie
+        foreach (var ch in changes) if (Math.Abs(ch.To - ch.From) > Math.Abs(main.To - main.From)) main = ch;
+        var mainLevel = main.Level;
+        var ordered = new List<LevelChange> { main };
+        ordered.AddRange(changes.Where(ch => ch.Level != mainLevel));
+        var dom = mine.Where(x => Dominates(x, mainLevel)).ToList();
+        double mean = dom.Sum(x => (double)(x.Chosen - x.Auto)) / Math.Max(dom.Count, 1);
+        return new Suggestion(monitor, ordered, (int)Math.Round(Math.Abs(mean), MidpointRounding.AwayFromZero), mean < 0,
+                              mine.Count, mine.Select(x => day(x.At)).Distinct().Count());
+    }
+}
