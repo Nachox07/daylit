@@ -104,6 +104,23 @@ static class HAClient {
                 ["light"] = s.LightRatio is double lr ? Math.Round(lr * 100, MidpointRounding.AwayFromZero) / 100 : null,   // how clear the sky is
                 ["sun_elevation"] = s.Elev, ["blind"] = s.Pos, ["lights"] = s.Lights, ["source"] = "Windows" } });
 
+    /// input_number/set_value: a level from an accepted suggestion (Suggest.cs). null when it failed (see LastError).
+    public static Task<string?> SetNumber(Config c, string entity, double value) =>
+        !Config.IsEntityId(entity) ? Task.FromResult<string?>(null) :
+        Call(c, "/api/services/input_number/set_value", new { entity_id = entity, value });
+
+    /// An input_number's min, max and step, so a suggestion rounds to a value it accepts; null when Home Assistant
+    /// does not answer or the entity has none. Leaves LastError and Transient alone, like History.
+    public static async Task<NumberStep?> GetNumberStep(Config c, string entity) {
+        if (c.HomeAssistant?.Url is not { } url || Token == null || !Config.IsEntityId(entity)) return null;
+        try {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + "/api/states/" + entity);
+            req.Headers.Authorization = new("Bearer", Token);
+            using var r = await http.SendAsync(req);
+            return r.IsSuccessStatusCode ? NumberStep.Parse(await r.Content.ReadAsStringAsync()) : null;
+        } catch { return null; }
+    }
+
     public static Task<string?> SetSwitch(Config c, bool on) =>
         Call(c, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), new { entity_id = c.HomeAssistant!.AutoSwitch });
 }

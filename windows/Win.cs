@@ -120,6 +120,18 @@ static class Settings {
         set { if (value != null) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("LightUnit", System.Text.Json.JsonSerializer.Serialize(value)); } }
     }
 
+    /// "Not now" on a suggestion: per monitor key, no suggestion until then (Unix seconds; JSON).
+    public static Dictionary<string, double> SuggestDismissed {
+        get {
+            try {
+                return Registry.CurrentUser.OpenSubKey(Key)?.GetValue("SuggestDismissed") is string j
+                    ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, double>>(j) ?? new Dictionary<string, double>()
+                    : new Dictionary<string, double>();
+            } catch { return new Dictionary<string, double>(); }
+        }
+        set { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("SuggestDismissed", System.Text.Json.JsonSerializer.Serialize(value)); }
+    }
+
     static int GetInt(string name, int dflt) => Registry.CurrentUser.OpenSubKey(Key)?.GetValue(name) is int i ? i : dflt;
     static void SetInt(string name, int v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v, RegistryValueKind.DWord); }
     /// Brightness hotkeys, set from the panel (Keyboard shortcuts…). Shift is added for fine steps.
