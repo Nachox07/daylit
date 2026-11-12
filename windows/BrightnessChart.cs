@@ -13,7 +13,7 @@ using System.Windows.Media;
 namespace Daylit;
 
 /// A monitor the chart can show: its key and the levels typed in the window.
-sealed record ChartMonitor(string Id, string Label, double Day, double BlindDown, double Night);
+sealed record ChartMonitor(string Id, string Label, double Day, double BlindDown, double Night, double? NightLights = null);
 
 sealed class BrightnessChart : StackPanel {
     public static readonly Color DayColor = Color.FromRgb(0xF7, 0x8C, 0x1E), NightColor = Color.FromRgb(0x6E, 0x5B, 0xD6);
@@ -91,7 +91,8 @@ sealed class BrightnessChart : StackPanel {
 
     /// The monitor's levels in effect: Home Assistant's helpers where it has them.
     double[] Levels(ChartMonitor m) =>
-        Chart.EffectiveLevels([m.Day, m.BlindDown, m.Night], live()?.Levels is { } lv && lv.TryGetValue(m.Id, out var ha) ? ha : null);
+        Chart.EffectiveLevels(m.NightLights is double nl ? new[] { m.Day, m.BlindDown, m.Night, nl } : new[] { m.Day, m.BlindDown, m.Night },
+                              live()?.Levels is { } lv && lv.TryGetValue(m.Id, out var ha) ? ha : null);
 
     /// The line's level for an elevation: Rules.Target's rule without its rounding, so the slopes draw smooth.
     static double Level(double[] l, double elev, double pos, Tuning t) {
@@ -114,9 +115,10 @@ sealed class BrightnessChart : StackPanel {
         var li = live();
         (int Value, double Weight)? o = li?.Offsets is { } offs && offs.TryGetValue(m.Id, out var ov) ? ov : null;
         int? linked = li?.Linked is { } lk && lk.TryGetValue(m.Id, out var lv) ? lv : null;
+        bool lightsNow = li?.LightsUsed is { } used && used.TryGetValue(m.Id, out var usedLit) ? usedLit : li?.Lights ?? false;
         return Chart.Explain(l[0], l[1], l[2], li?.Elev ?? Sun.Elevation(now, lat, lon), hasBlind ? li?.Pos ?? 100 : (double?)null,
-                             li?.Lights ?? false, tuning(), li?.Light ?? 1, o?.Value, o?.Weight ?? 1,
-                             linked, li?.Leader ?? "", li?.Applying ?? true);
+                             lightsNow, tuning(), li?.Light ?? 1, o?.Value, o?.Weight ?? 1,
+                             linked, li?.Leader ?? "", li?.Applying ?? true, Rules.NightLightsLevel(l));
     }
 
     /// "Now 77%" while Daylit sets it; "Target 77%" when Automatic is off or this PC is idle.

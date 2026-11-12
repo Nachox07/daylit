@@ -259,3 +259,27 @@ public class NightLightsSuggestTests {
         Assert.Equal(new[] { x }, Suggest.Decode(Suggest.Encode([x])));
     }
 }
+
+public class NightLightsExplainTests {
+    [Fact]
+    public void TheLightsStepShowsTheLightsOnLevel() {
+        var d = Chart.Explain(95, 62, 60, -10, 100, true, nightLights: 80);
+        Assert.Equal(80, d.Level);
+        Assert.Equal("on → 80", d.Steps.First(s => s.Title == "Lights").Value);
+    }
+
+    [Fact]
+    public void LightsOffShowOffUntilTheSunIsFullyUp() {
+        Assert.Equal("off", Chart.Explain(95, 62, 60, 5, 100, false, nightLights: 80).Steps.First(s => s.Title == "Lights").Value);
+        Assert.Equal("no effect by day", Chart.Explain(95, 62, 60, 30, 100, false, nightLights: 80).Steps.First(s => s.Title == "Lights").Value);
+    }
+
+    [Fact]
+    public void TheLevelEqualsTheTarget() {
+        var t = new Tuning();
+        for (double e = -8; e <= 20; e += 0.5)
+            foreach (var lights in new[] { false, true })
+                Assert.Equal(Rules.Target([95, 62, 60, 80], 40, lights, t.Fraction(e), t, e < t.LightsBoostSunBelow, 0.7),
+                             Chart.Explain(95, 62, 60, e, 40, lights, light: 0.7, nightLights: 80).Level);
+    }
+}

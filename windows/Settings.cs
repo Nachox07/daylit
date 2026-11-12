@@ -252,7 +252,7 @@ sealed class SettingsWindow : Window {
             [new("theme.lightSunAbove", "Light", orange, false), new("theme.darkSunBelow", "Dark", purple, true)], TuneValue, Set);
         if (rows.Count == 0) { dayCurve.Content = Hint("Connect an external monitor to see its brightness through today."); return; }
         var mons = rows.Select(r => new ChartMonitor(r.mon.Key, string.IsNullOrWhiteSpace(r.label.Text) ? r.mon.D.Friendly : r.label.Text.Trim(),
-                                                     r.day.Value, r.blind.Value, r.night.Value)).ToList();
+                                                     r.day.Value, r.blind.Value, r.night.Value, NightLightsValue(r.nightLights))).ToList();
         bool snapshot = FixedNow != null;
         dayCurve.Content = new BrightnessChart(la, lo, when, tz, mons, SourceTag == "homeAssistant" && cover.Text.Trim() != "",
             ChartTuning, () => snapshot ? null : app.Live, Set, chartPick, id => chartPick = id);
@@ -393,6 +393,8 @@ sealed class SettingsWindow : Window {
     const string NightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost.";
     /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
     bool ShowsNightLights => SourceTag == "homeAssistant" && lights.Text.Trim() != "";
+    /// The typed "Lights on" level, while its row shows; null when empty or not a level.
+    double? NightLightsValue(TextBox box) => ShowsNightLights && ContrastRule.ParseField(box.Text).value is int v ? (double?)v : null;
 
     FrameworkElement Level(string title, Slider s) {
         var pct = new TextBlock { MinWidth = 44, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75 };
@@ -453,6 +455,7 @@ sealed class SettingsWindow : Window {
             // Contrast goes over DDC/CI only: no box for a monitor in HDR (SDR white level).
             TextBox? contrast = m.D.Hdr ? null : new TextBox { Text = spec?.Contrast is double ct ? Fmt(ct) : "" };
             var nightLights = new TextBox { Text = spec?.NightLights is double nlv ? Fmt(nlv) : "" };
+            nightLights.TextChanged += (_, _) => RebuildCurves();   // "How Daylit decides" uses it
             var nightLightsRow = OptionalNumber("Lights on", nightLights, NightLightsHelp);
             rows.Add((m, label, day, blind, night, now, caption, haLevels, contrast, nightLights, nightLightsRow));
             var card = new List<UIElement> { Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), nightLightsRow };

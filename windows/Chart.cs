@@ -99,12 +99,13 @@ static class Chart {
     /// another lands on (`leader`). `applying` false: Automatic is off or this PC is idle, so it is a target.
     public static Decision Explain(double day, double blindDown, double night, double elev, double? pos, bool lights,
                                    Tuning? tuning = null, double light = 1, int? offset = null, double offsetWeight = 1,
-                                   int? linked = null, string leader = "", bool applying = true) {
+                                   int? linked = null, string leader = "", bool applying = true, double? nightLights = null) {
         var t = tuning ?? new Tuning();
         double p = pos ?? 100;
         double sunShare = t.Fraction(elev);
         bool dusk = elev < t.LightsBoostSunBelow;
-        int @base = Rules.Target([day, blindDown, night], p, lights, sunShare, t, dusk, light);
+        int @base = Rules.Target(nightLights is double nlv ? new[] { day, blindDown, night, nlv } : new[] { day, blindDown, night },
+                                 p, lights, sunShare, t, dusk, light);
         double daytime = blindDown + (day - blindDown) * p / 100;
         double share = Math.Min(sunShare, light);
         double blended = night + (daytime - night) * share;
@@ -118,9 +119,16 @@ static class Chart {
         string sunTitle = sunShare >= 1 ? "Sun high" : sunShare <= 0 ? "Sun down" : "Sun low";
         steps.Add(new DecisionStep(sunTitle, sunShare <= 0 ? "night " + Lvl(night) : $"{Pct(sunShare)} → {Lvl(night + (daytime - night) * sunShare)}"));
         if (light < 1 && light < sunShare) steps.Add(new DecisionStep("Cloudy", $"daylight {Pct(light)} → {Lvl(blended)}"));
-        bool lifted = lights && dusk && @base > R(blended);
-        steps.Add(new DecisionStep("Lights", lifted ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
-                                           : lights ? "on, no effect now" : dusk ? "off" : "no effect by day"));
+        if (nightLights != null) {
+            // Its own lit-evening level: the lights count whenever the sun is not fully up, with no boost.
+            bool moved = lights && @base != R(Math.Clamp(blended, 0, 100));
+            steps.Add(new DecisionStep("Lights", moved ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
+                                               : lights ? "on, no effect now" : sunShare < 1 ? "off" : "no effect by day"));
+        } else {
+            bool lifted = lights && dusk && @base > R(blended);
+            steps.Add(new DecisionStep("Lights", lifted ? string.Create(CultureInfo.InvariantCulture, $"on → {@base}")
+                                               : lights ? "on, no effect now" : dusk ? "off" : "no effect by day"));
+        }
         int level = @base;
         if (linked is int v) {
             // A linked monitor that follows another lands at the group's level, keeping its link distance.
