@@ -334,3 +334,121 @@ public class SuggestStoreTests {
         Assert.Empty(Suggest.Decode("""{"samples": [{"monitor": "m", "chosen": 70, "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78], "at": 0}]}"""));
     }
 }
+
+/// Anonymised from one real week: every morning the user lowered the monitor 6–15 points with the blind
+/// 30–40% open, with the levels day 100 / blind down 78 / night 75.
+public class SuggestFixtureTests {
+    static readonly double[] Week = [100, 78, 75];
+    static List<Sample> WeekSamples() {
+        var l = Week;
+        return [
+            // Mornings, full daylight, the blind 30–40% open: about 15 lower than the automatic level.
+            SuggestData.Make(0, 8.5, 20, 0.30, 70, l), SuggestData.Make(0, 9.5, 24, 0.35, 72, l),
+            SuggestData.Make(1, 8.5, 20, 0.35, 70, l), SuggestData.Make(1, 9.0, 22, 0.40, 74, l),
+            SuggestData.Make(2, 8.5, 20, 0.30, 71, l), SuggestData.Make(2, 9.5, 24, 0.35, 70, l),
+            SuggestData.Make(3, 8.5, 20, 0.35, 72, l), SuggestData.Make(3, 9.0, 22, 0.30, 73, l),
+            SuggestData.Make(4, 8.5, 20, 0.40, 75, l), SuggestData.Make(4, 9.5, 24, 0.35, 70, l),
+            // Midday with the blind 60% open: a small lowering.
+            SuggestData.Make(1, 13, 30, 0.60, 88, l), SuggestData.Make(3, 13, 30, 0.60, 89, l),
+            // Late afternoon, blind open, sun low: raised a little.
+            SuggestData.Make(1, 16, 9, 1, 98, l),
+        ];
+    }
+
+    [Fact]
+    public void TheWeekHasTheAutomaticLevelsTheUserSaw() =>
+        Assert.Equal(new[] { 85, 86, 86, 87, 85, 86, 86, 85, 87, 86, 91, 91, 95 }, WeekSamples().Select(x => x.Auto));
+
+    [Fact]
+    public void TheWeekProposesALowerBlindDownOnly() {
+        var samples = WeekSamples();
+        Assert.Equal(new[] { Level.BlindDown }, Suggest.Candidates(samples, SuggestData.UtcDay));
+        Assert.Equal(61.42, Suggest.Fit(samples, Week, [Level.BlindDown])[1], 0.01);
+        Assert.Equal(11.54, Suggest.MeanAbsError(samples, Week), 0.01);
+        Assert.Equal(3.31, Suggest.MeanAbsError(samples, [100, 61, 75]), 0.01);
+        var s = Suggest.SuggestionFor("m", samples, Week, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                      SuggestData.T0 + 5 * 86400, null, dayOf: SuggestData.UtcDay);
+        Assert.NotNull(s);
+        Assert.Equal(new[] { Level.BlindDown }, s!.Changes.Select(c => c.Level));   // night not proposed, day not raised
+        double to = s.Changes[0].To;
+        Assert.True(to <= 78 - 5);
+        Assert.InRange(to, 45, 65);
+        Assert.Equal(61, to);
+        Assert.Equal(14, s.Amount);
+        Assert.Equal("You lower Monitor by about 14 with the blind partly or fully down. Set blind down 78 → 61?", s.Sentence("Monitor"));
+        Assert.Equal("suggest: Monitor blind down 78 → 61 (13 changes on 5 days)", s.LogLine("Monitor"));
+    }
+
+    [Fact]
+    public void TheDayAfterRecordsTwoChangesAndFitsBlindDownLower() {
+        // Levels day 95 / blind down 62 / night 75. Two changes held, a third was put back within 3 minutes.
+        double[] l = [95, 62, 75];
+        var first = SuggestData.Make(5, 8.5, 20, 0.40, 63, l);     // 75 → 63
+        var putBack = SuggestData.Make(5, 11, 22, 0.40, 69, l);    // 75 → 69, then back
+        var second = SuggestData.Make(5, 15, 4.5, 0.58, 72, l);    // 78 → 72, low afternoon sun
+        Assert.Equal(new[] { 75, 75, 78 }, new[] { first.Auto, putBack.Auto, second.Auto });
+        var r = new Recorder();
+        var finals = new List<Sample>();
+        void Ticks(double start, double seconds, bool held) {
+            for (double t = start + 30; t <= start + seconds; t += 30)
+                if (r.Settle("m", held, l, t) is Sample f) finals.Add(f);
+        }
+        r.HandChanged("m", first); Ticks(first.At, 600, true);
+        r.HandChanged("m", putBack); Ticks(putBack.At, 150, true);
+        r.HandChanged("m", null);      // put back to automatic at +3 min: Decide clears the offset
+        Ticks(putBack.At + 180, 600, false);
+        r.HandChanged("m", second); Ticks(second.At, 600, true);
+        Assert.Equal(new[] { 63, 72 }, finals.Select(x => x.Chosen));
+        // One day is not enough to suggest...
+        Assert.Empty(Suggest.Candidates(finals, SuggestData.UtcDay));
+        Assert.Null(Suggest.SuggestionFor("m", finals, l, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                          second.At + 600, null, dayOf: SuggestData.UtcDay));
+        // ...but the fit points the right way: blind down lower.
+        double bd = Suggest.Fit(finals, l, [Level.BlindDown])[1];
+        Assert.Equal(55.88, bd, 0.01);
+        Assert.InRange(bd, 35, 57);
+    }
+
+    /// The three situations a proposal must leave alone unless the samples cover them: a sunny day with the
+    /// blind fully down, a sunny day with it open, an evening with the lights on.
+    static readonly (Level Level, double Elev, double Pos, bool Lights)[] References = [
+        (Level.BlindDown, 30, 0, false), (Level.Day, 30, 100, false), (Level.Night, -6, 100, true),
+    ];
+    static int ReferenceTarget(double[] l, (Level Level, double Elev, double Pos, bool Lights) r) {
+        var t = new Tuning();
+        return Rules.Target(l, r.Pos, r.Lights, t.Fraction(r.Elev), t, r.Elev < t.LightsBoostSunBelow);
+    }
+
+    [Fact]
+    public void CloudyMorningsMakeNoSuggestion() {
+        // The day after's two held changes, replayed on three days with thin daylight (0.5–0.7) at levels 95 / 62 / 75.
+        // At blind 40% day and blind down mix to 75.2, the same as night: no level explains the change.
+        double[] l = [95, 62, 75];
+        var elevs = new[] { (Morning: 4.5, Afternoon: 7.5), (Morning: 6.0, Afternoon: 6.0), (Morning: 7.5, Afternoon: 4.5) };
+        var samples = elevs.SelectMany((e, d) => new[] {
+            SuggestData.Make(6 + d, 9, e.Morning, 0.40, 63, l), SuggestData.Make(6 + d, 15, e.Afternoon, 0.58, 72, l) }).ToList();
+        Assert.Equal(new[] { 75, 79, 75, 79, 75, 78 }, samples.Select(x => x.Auto));
+        Assert.Empty(Suggest.Candidates(samples, SuggestData.UtcDay));   // no level reaches 0.55 of the weight
+        Assert.Null(Suggest.SuggestionFor("m", samples, l, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                          SuggestData.T0 + 10 * 86400, null, dayOf: SuggestData.UtcDay));
+    }
+
+    [Fact]
+    public void ReferencesStayPut() {
+        // Every fixture that suggests: the evening with the lights on, and the situation of each level not
+        // proposed, keep their target within 3 points.
+        var clear = Enumerable.Range(0, 4).Select(d => SuggestData.Make(d, 9, 30, 0.35, 70, Week)).ToList();
+        foreach (var samples in new[] { WeekSamples(), clear }) {
+            var s = Suggest.SuggestionFor("m", samples, Week, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
+                                          SuggestData.T0 + 5 * 86400, null, dayOf: SuggestData.UtcDay);
+            Assert.NotNull(s);   // the fixture should suggest
+            var after = (double[])Week.Clone();
+            foreach (var ch in s!.Changes) after[(int)ch.Level] = ch.To;
+            var proposed = s.Changes.Select(ch => ch.Level).ToHashSet();
+            foreach (var r in References.Where(x => x.Level == Level.Night || !proposed.Contains(x.Level)))
+                Assert.InRange(Math.Abs(ReferenceTarget(after, r) - ReferenceTarget(Week, r)), 0, 3);
+            Assert.Equal(80, ReferenceTarget(after, References[2]));    // evening: night 75 + the lights' 5
+            Assert.Equal(100, ReferenceTarget(after, References[1]));   // sunny, blind open: day 100
+        }
+    }
+}
