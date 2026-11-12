@@ -125,3 +125,55 @@ final class NightLightsFallbackTests: XCTestCase {
         XCTAssertEqual(target(day: 95, blindDown: 62, night: 60, elev: -10, pos: 100, lights: lit, nightLights: 80), 80)
     }
 }
+
+final class NightLightsConfigTests: XCTestCase {
+    func testLoadsTheLocalLevelAndTheHelper() {
+        let text = #"{"monitors": [{"match": "Dell", "night": 60, "nightLights": 80, "homeAssistant": {"nightLights": "input_number.lit"}}]}"#
+        let (c, err) = Config.parse(Data(text.utf8))
+        XCTAssertNil(err)
+        XCTAssertEqual(c?.monitors?.first?.nightLights, 80)
+        XCTAssertEqual(c?.monitors?.first?.homeAssistant?.nightLights, "input_number.lit")
+    }
+    func testWithoutTheKeyThereIsNoLevel() {
+        let (c, _) = Config.parse(Data(#"{"monitors": [{"match": "Dell", "night": 60}]}"#.utf8))
+        XCTAssertNil(c?.monitors?.first?.nightLights)
+    }
+    func testALevelOutsideZeroToHundredIsAProblem() {
+        for v in ["-1", "101"] {
+            let (_, err) = Config.parse(Data(#"{"monitors": [{"match": "Dell", "nightLights": \#(v)}]}"#.utf8))
+            XCTAssertEqual(err, #"config.json: monitor "Dell" nightLights is 0 to 100"#)
+        }
+        XCTAssertNil(Config.parse(Data(#"{"monitors": [{"match": "Dell", "nightLights": 0}]}"#.utf8)).1)
+        XCTAssertNil(Config.parse(Data(#"{"monitors": [{"match": "Dell", "nightLights": 100}]}"#.utf8)).1)
+    }
+    func testAHelperThatIsNotAnEntityIdIsAProblem() {
+        let (_, err) = Config.parse(Data(#"{"monitors": [{"match": "Dell", "homeAssistant": {"nightLights": "lit"}}]}"#.utf8))
+        XCTAssertEqual(err, #"config.json: monitor "Dell" homeAssistant.nightLights is not an entity id like light.office"#)
+    }
+
+    func json(_ d: Data) -> [String: Any] { try! JSONSerialization.jsonObject(with: d) as! [String: Any] }
+    let original = #"{"monitors": [{"match": "Dell", "night": 60, "nightLights": 80, "control": "ddc", "homeAssistant": {"nightLights": "input_number.lit"}}]}"#
+    func edit(editable: Bool, value: Int?) -> SettingsEdit {
+        var m = SettingsEdit.Monitor(name: "Dell U2723QE", suggestedMatch: "U2723QE", label: "Dell U2723QE", day: 95, blindDown: 62, night: 60)
+        m.nightLightsEditable = editable; m.nightLights = value
+        return SettingsEdit(source: "off", monitors: [m])
+    }
+    func testSettingsSavesTheLevelAndKeepsEveryOtherKey() throws {
+        let m = (json(try ConfigPatch.apply(edit(editable: true, value: 85), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["nightLights"] as? Int, 85)
+        XCTAssertEqual(m["control"] as? String, "ddc")
+        XCTAssertEqual((m["homeAssistant"] as? [String: Any])?["nightLights"] as? String, "input_number.lit")
+    }
+    func testAnEmptyBoxRemovesTheKey() throws {
+        let m = (json(try ConfigPatch.apply(edit(editable: true, value: nil), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertNil(m["nightLights"])
+    }
+    func testWithoutTheBoxTheFileKeepsItsLevel() throws {
+        let m = (json(try ConfigPatch.apply(edit(editable: false, value: nil), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["nightLights"] as? Int, 80)
+    }
+    func testAValueOutOfRangeIsClamped() throws {
+        let m = (json(try ConfigPatch.apply(edit(editable: true, value: 140), to: Data(original.utf8)))["monitors"] as! [[String: Any]])[0]
+        XCTAssertEqual(m["nightLights"] as? Int, 100)
+    }
+}

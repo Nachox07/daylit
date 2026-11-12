@@ -91,6 +91,9 @@ import DaylitCore
             if let c = m.control, !["native", "ddc", "auto"].contains(c) {
                 problems.append("monitor \"\(m.match)\": control must be native, ddc or auto")
             }
+            if (m.nightLights != nil || m.homeAssistant?.nightLights != nil) && (src != .homeAssistant || (cfg.homeAssistant?.lights ?? "").isEmpty) {
+                notes.append("monitor \"\(m.match)\": nightLights needs homeAssistant.lights; without it the lights count as off")
+            }
             if hit == nil { notes.append("monitor \"\(m.match)\" is not connected right now (fine if it is used elsewhere)") }
             monitors.append(["match": m.match, "label": (m.label ?? NSNull()) as Any, "connected": (hit ?? NSNull()) as Any])
         }

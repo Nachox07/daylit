@@ -23,8 +23,11 @@ public struct MonitorHA: Decodable {
     public var blindDown: String?
     public var night: String?
     public var set: String?             // input_number: changing it in HA sets this monitor now, even when the Mac is idle
-    public init(sensor: String? = nil, day: String? = nil, blindDown: String? = nil, night: String? = nil, set: String? = nil) {
+    public var nightLights: String?     // optional input_number: the level after sunset with the room lights on
+    public init(sensor: String? = nil, day: String? = nil, blindDown: String? = nil, night: String? = nil, set: String? = nil,
+                nightLights: String? = nil) {
         self.sensor = sensor; self.day = day; self.blindDown = blindDown; self.night = night; self.set = set
+        self.nightLights = nightLights
     }
 }
 
@@ -35,6 +38,7 @@ public struct MonitorConfig: Decodable {
     public var day: Double?             // daytime level, blind open (default 70)
     public var blindDown: Double?       // daytime level, blind closed (default 40)
     public var night: Double?           // night level (default 20)
+    public var nightLights: Double?     // optional: after sunset with the room lights on (none: night + the lights boost)
     public var contrast: Double?        // fixed contrast 0–100 over DDC (VCP 0x12), set at start and after a display change
     public var homeAssistant: MonitorHA?
 }
@@ -127,7 +131,12 @@ public struct Config: Decodable {
             guard let h = m.homeAssistant else { continue }
             let at = "monitor \"\(m.match)\" homeAssistant."
             ids += [(at + "sensor", h.sensor), (at + "day", h.day), (at + "blindDown", h.blindDown),
-                    (at + "night", h.night), (at + "set", h.set)]
+                    (at + "night", h.night), (at + "set", h.set), (at + "nightLights", h.nightLights)]
+        }
+        for m in monitors ?? [] {
+            if let v = m.nightLights, !(v.isFinite && (0...100).contains(v)) {
+                return "config.json: monitor \"\(m.match)\" nightLights is 0 to 100"
+            }
         }
         for (key, v) in ids { if let v, !Self.isEntityId(v) { return "config.json: \(key) is not an entity id like light.office" } }
         return nil
