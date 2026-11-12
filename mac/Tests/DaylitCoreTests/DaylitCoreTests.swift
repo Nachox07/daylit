@@ -475,6 +475,8 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(c.location)
         XCTAssertEqual(c.monitors?.first?.contrast, 60)
         XCTAssertNil(c.monitors?.last?.contrast)
+        XCTAssertEqual(c.monitors?.first?.homeAssistant?.nightLights, "input_number.daylit_left_night_lights")
+        XCTAssertEqual(c.monitors?.last?.nightLights, 40)
     }
     func testSourceDefaults() {
         XCTAssertEqual(Config().resolvedSource().0, .off)
