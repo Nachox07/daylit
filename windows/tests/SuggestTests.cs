@@ -101,3 +101,33 @@ public class SuggestFitTests {
         Assert.True(Suggest.Fit(high, levels, [Level.Day])[0] <= 100);
     }
 }
+
+public class SuggestRoundingTests {
+    [Fact]
+    public void ALocalLevelRoundsToAWholeNumber() {
+        Assert.Equal(61, Suggest.RoundToStep(61.42, NumberStep.Whole));
+        Assert.Equal(62, Suggest.RoundToStep(61.5, NumberStep.Whole));
+        Assert.Equal(0, Suggest.RoundToStep(-3, NumberStep.Whole));
+        Assert.Equal(100, Suggest.RoundToStep(104, NumberStep.Whole));
+    }
+
+    [Fact]
+    public void AHomeAssistantLevelRoundsToItsStepInsideItsRange() {
+        var st = new NumberStep(10, 90, 5);
+        Assert.Equal(60, Suggest.RoundToStep(62.4, st));
+        Assert.Equal(65, Suggest.RoundToStep(63, st));
+        Assert.Equal(10, Suggest.RoundToStep(3, st));
+        Assert.Equal(90, Suggest.RoundToStep(97, st));
+        Assert.Equal(61.5, Suggest.RoundToStep(61.3, new NumberStep(0, 100, 0.5)));
+        Assert.Equal(100, Suggest.RoundToStep(120, new NumberStep(0, 255, 1)));   // never above 100
+    }
+
+    [Fact]
+    public void TheStepIsReadFromTheEntityAttributes() {
+        Assert.Equal((NumberStep?)new NumberStep(10, 90, 5),
+            NumberStep.Parse("""{"entity_id": "input_number.x", "state": "62.0", "attributes": {"min": 10, "max": 90, "step": 5, "mode": "slider"}}"""));
+        Assert.Null(NumberStep.Parse("""{"state": "62.0", "attributes": {"min": 0}}"""));
+        Assert.Null(NumberStep.Parse("""{"state": "62.0", "attributes": {"min": 0, "max": 100, "step": 0}}"""));
+        Assert.Null(NumberStep.Parse("not json"));
+    }
+}

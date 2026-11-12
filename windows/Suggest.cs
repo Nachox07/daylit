@@ -100,3 +100,36 @@ static partial class Suggest {
         return x;
     }
 }
+
+/// The values a level can be stored as. A Home Assistant input_number has its own min, max and step;
+/// a local level is a whole number 0–100.
+readonly record struct NumberStep(double Min, double Max, double Step) {
+    public static readonly NumberStep Whole = new(0, 100, 1);
+
+    /// From the answer to GET /api/states/<input_number>: its min, max and step attributes. null when one is missing.
+    public static NumberStep? Parse(string? json) {
+        try {
+            using var d = JsonDocument.Parse(json ?? "");
+            if (d.RootElement.ValueKind != JsonValueKind.Object || !d.RootElement.TryGetProperty("attributes", out var a)
+                || a.ValueKind != JsonValueKind.Object) return null;
+            if (!Num(a, "min", out double lo) || !Num(a, "max", out double hi) || !Num(a, "step", out double st) || st <= 0 || hi < lo) return null;
+            return new NumberStep(lo, hi, st);
+        } catch (JsonException) { return null; }
+    }
+
+    static bool Num(JsonElement o, string key, out double v) {
+        v = 0;
+        return o.TryGetProperty(key, out var e) && e.ValueKind == JsonValueKind.Number && e.TryGetDouble(out v);
+    }
+}
+
+static partial class Suggest {
+    /// The nearest value `st` accepts, inside both its range and 0–100. Halves round up.
+    public static double RoundToStep(double v, NumberStep st) {
+        double lo = Math.Max(st.Min, 0), hi = Math.Min(st.Max, 100);
+        double first = Math.Ceiling((lo - st.Min) / st.Step - 1e-9), last = Math.Floor((hi - st.Min) / st.Step + 1e-9);
+        if (last < first) return Math.Min(Math.Max(v, lo), hi);   // a step coarser than the range: just clamp
+        double n = Math.Min(Math.Max(Math.Round((v - st.Min) / st.Step, MidpointRounding.AwayFromZero), first), last);
+        return Math.Round((st.Min + n * st.Step) * 1e6, MidpointRounding.AwayFromZero) / 1e6;   // no 61.500000001 from the multiplication
+    }
+}
