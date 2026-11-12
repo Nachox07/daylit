@@ -48,6 +48,7 @@ jobs:
             security set-keychain-settings -lut 3600 "$KEYCHAIN"
             security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
             security import "$P12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+            rm -f "$P12"
             unset MAC_CERT_P12 MAC_CERT_PASSWORD   # not needed any more: keep them out of the build's environment
             security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
             security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')

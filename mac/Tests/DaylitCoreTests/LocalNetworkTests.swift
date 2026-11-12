@@ -35,6 +35,14 @@ final class LocalNetworkTests: XCTestCase {
         }
     }
 
+    func testLoopbackIsNotLocalNetwork() {
+        for h in ["localhost", "LOCALHOST", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "::ffff:127.0.0.1"] {
+            XCTAssertFalse(LocalHost.isLocal(h), h)
+        }
+        XCTAssertFalse(LocalHost.isLocal(url: "http://localhost:8123"))
+        XCTAssertFalse(LocalHost.isLocal(url: "http://127.0.0.1:8123"))
+    }
+
     func testDeniedProbeAlwaysBlocks() {
         XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: nil, generalPathSatisfied: false, hostIsLocal: false, probe: .denied))
         XCTAssertTrue(LocalNetworkBlock.isBlocked(errorCode: -1001, generalPathSatisfied: true, hostIsLocal: true, probe: .denied))

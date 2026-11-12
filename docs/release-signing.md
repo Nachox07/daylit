@@ -56,7 +56,7 @@ themselves are never printed.
 
 - The first signed release costs each user **one more permission prompt** (Local Network, and
   Accessibility or Automation if they were granted): the signature differs from the ad-hoc one.
-- From then on every update keeps the permissions.
+- From then on every update keeps Accessibility and Automation; Local Network is expected to (see the test above).
 - A self-signed certificate does not remove the "Open Anyway" step on first open. Only an Apple
   Developer ID with notarization does.
 

@@ -29,7 +29,7 @@ public enum LocalHost {
             guard o.count == 4, o.allSatisfy({ $0 <= 255 }) else { return false }
             return o[0] == 10 || (o[0] == 172 && (16...31).contains(o[1])) || (o[0] == 192 && o[1] == 168) || (o[0] == 169 && o[1] == 254)
         }
-        if h.isEmpty { return false }
+        if h.isEmpty || h == "localhost" { return false }   // loopback is not covered by the permission
         for suffix in [".local", ".lan", ".home.arpa"] where h.count > suffix.count && h.hasSuffix(suffix) { return true }
         // A name with no dot ("homeassistant") only resolves through the local network's own DNS or mDNS.
         return !h.contains(".") && !h.allSatisfy(\.isNumber) && h != "lan" && h != "local"
