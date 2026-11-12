@@ -300,3 +300,37 @@ public class SuggestRecorderTests {
         Assert.Null(cleared.State.Offset);
     }
 }
+
+public class SuggestStoreTests {
+    [Fact]
+    public void StaleSamplesAreDroppedWhenTheLevelsChange() {
+        var old = SuggestData.Make(0, 9, 30, 0.35, 70, [100, 78, 75]);
+        var fresh = SuggestData.Make(1, 9, 30, 0.35, 70, [100, 62, 75]);
+        var unplugged = SuggestData.Make(0, 9, 30, 0.35, 70, [90, 50, 30], monitor: "other");
+        var kept = Suggest.DropStale([old, fresh, unplugged], new Dictionary<string, double[]> { ["m"] = [100, 62, 75] });
+        Assert.Equal(new[] { fresh, unplugged }, kept);
+        // A suggestion only counts samples taken with the levels in effect now.
+        Assert.True(Suggest.SameLevels([100, 62.0000001, 75], [100, 62, 75]));
+        Assert.False(Suggest.SameLevels([100, 62.5, 75], [100, 62, 75]));
+    }
+
+    [Fact]
+    public void SamplesOlderThanFourteenDaysAreDropped() {
+        double now = SuggestData.T0 + 20 * 86400;
+        var a = SuggestData.Make(5, 9, 30, 0.35, 70, [100, 78, 75]);   // 15 days old
+        var b = SuggestData.Make(7, 9, 30, 0.35, 70, [100, 78, 75]);   // 13 days old
+        Assert.Equal(new[] { b }, Suggest.DropOld([a, b], now));
+    }
+
+    [Fact]
+    public void SamplesSurviveTheFile() {
+        var x = SuggestData.Make(0, 9, 30, 0.35, 70, [100, 78, 75]);
+        Assert.Equal(new[] { x }, Suggest.Decode(Suggest.Encode([x])));
+        string text = Suggest.Encode([x]);
+        foreach (var key in new[] { "\"monitor\"", "\"chosen\"", "\"auto\"", "\"s\"", "\"p\"", "\"elev\"", "\"lights\"", "\"levels\"", "\"at\"" })
+            Assert.Contains(key, text);
+        Assert.Empty(Suggest.Decode(null));
+        Assert.Empty(Suggest.Decode("broken"));
+        Assert.Empty(Suggest.Decode("""{"samples": [{"monitor": "m", "chosen": 70, "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78], "at": 0}]}"""));
+    }
+}

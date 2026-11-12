@@ -286,3 +286,35 @@ static partial class Suggest {
     /// new level (target 85, set 70, new level gives 70: the monitor would go to 55).
     public static Hold AfterApply(Hold h) => h with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
 }
+
+/// corrections.json: {"samples": [...]}.
+sealed record CorrectionsFile(List<Sample>? Samples);
+
+static partial class Suggest {
+    /// Samples older than this are dropped on load and on save (seconds).
+    public const double MaxAge = 14 * 86400;
+
+    /// Without the samples older than MaxAge.
+    public static List<Sample> DropOld(IEnumerable<Sample> samples, double now) => samples.Where(x => now - x.At <= MaxAge).ToList();
+
+    /// Without the samples whose levels differ from their monitor's levels now (`current`, by monitor key):
+    /// after Apply, a change in Settings or of a Home Assistant helper, a level starts from fresh evidence.
+    /// Monitors not in `current` (unplugged) keep theirs.
+    public static List<Sample> DropStale(IEnumerable<Sample> samples, IReadOnlyDictionary<string, double[]> current) =>
+        samples.Where(x => !current.TryGetValue(x.Monitor, out var lv) || SameLevels(lv, x.Levels)).ToList();
+
+    static readonly JsonSerializerOptions Json = new() {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true };
+
+    /// The samples in corrections.json; none when it is missing or broken. Entries without three levels are skipped.
+    public static List<Sample> Decode(string? text) {
+        if (string.IsNullOrWhiteSpace(text)) return new List<Sample>();
+        try {
+            var f = JsonSerializer.Deserialize<CorrectionsFile>(text, Json);
+            return f?.Samples?.Where(x => x is not null && x.Monitor is not null && x.Levels is { Length: 3 }).ToList() ?? new List<Sample>();
+        } catch (JsonException) { return new List<Sample>(); }
+    }
+
+    /// corrections.json's content.
+    public static string Encode(IEnumerable<Sample> samples) => JsonSerializer.Serialize(new CorrectionsFile(samples.ToList()), Json);
+}
