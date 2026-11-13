@@ -6,11 +6,11 @@ final class FakeKeychain: TokenKeychain {
     struct Item { var account: String; var ours: Bool; var token: String }
     var store: [Item] = []
     var steps: [String] = []
-    var failAdd = false, failDeleteLegacy = false, failRename = false, failLegacyRead = false
+    var failAdd = false, failDeleteLegacy = false, failRename = false, failLegacyRead = false, failOwnRead = false
 
     func items(service: String) -> [TokenItem] { store.map { TokenItem(account: $0.account, ours: $0.ours) } }
     func readOwn(service: String, account: String) -> String? {
-        steps.append("readOwn \(account)"); return store.first { $0.ours && $0.account == account }?.token
+        steps.append("readOwn \(account)"); if failOwnRead { return nil }; return store.first { $0.ours && $0.account == account }?.token
     }
     func readLegacy(service: String, account: String) -> String? {
         steps.append("readLegacy \(account)")
@@ -86,6 +86,14 @@ final class TokenKeychainTests: XCTestCase {
         XCTAssertEqual(r.read(service: s, in: k) { _ in }, "T")
         XCTAssertEqual(k.store.count, 1); XCTAssertTrue(k.store[0].ours)
         XCTAssertFalse(k.steps.contains { $0.hasPrefix("readLegacy") })
+    }
+
+    func testAnOldItemBesideAnUnreadableOneOfOursIsKeptAndStillGivesTheToken() {
+        let k = FakeKeychain(); k.failOwnRead = true
+        k.store = [.init(account: "homeassistant", ours: false, token: "T"), .init(account: "homeassistant.daylit", ours: true, token: "X")]
+        var r = TokenReads()
+        XCTAssertEqual(r.read(service: s, in: k) { _ in }, "T")
+        XCTAssertTrue(k.store.contains { !$0.ours && $0.token == "T" })
     }
 
     func testAMovedTokenIsReadInProcessAfterwards() {

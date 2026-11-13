@@ -73,14 +73,20 @@ public struct TokenReads: Sendable {
     public mutating func read(service: String, in kc: TokenKeychain, log: (String) -> Void) -> String? {
         if let t = session[service] { return t }
         let all = kc.items(service: service)
-        guard let item = TokenItems.pick(all) else { return nil }
+        guard var item = TokenItems.pick(all) else { return nil }
         if item.ours {
-            // An old item left beside ours (a move cut short): it still trusts /usr/bin/security, so remove it, once.
-            if all.contains(where: { !$0.ours }), !cleaned.contains(service) {
-                cleaned.insert(service)
-                for old in all where !old.ours { _ = kc.deleteLegacy(service: service, account: old.account) }
+            if let token = kc.readOwn(service: service, account: item.account) {
+                // An old item left beside ours (a move cut short): it still trusts /usr/bin/security, so remove
+                // it, once, but only after ours gave the token back, so the old one is never the last copy lost.
+                if all.contains(where: { !$0.ours }), !cleaned.contains(service) {
+                    cleaned.insert(service)
+                    for old in all where !old.ours { _ = kc.deleteLegacy(service: service, account: old.account) }
+                }
+                return token
             }
-            return kc.readOwn(service: service, account: item.account)
+            // Ours can't be read: fall back to an old item beside it, if there is one.
+            guard let old = all.first(where: { !$0.ours }) else { return nil }
+            item = old
         }
         guard !tried.contains(service) else { return nil }   // this launch already tried and could not read it
         tried.insert(service)
