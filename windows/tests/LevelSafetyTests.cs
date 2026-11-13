@@ -81,14 +81,14 @@ public class HaMissingEntityTests {
         var h = new HaConfig { Url = "http://x", AutoSwitch = "input_boolean.auto", Sun = "sun.home" };
         var ids = HaTemplate.Missing(h, elevMissing: true, autoMissing: true);
         Assert.Equal(new[] { "input_boolean.auto", "sun.home" }, ids);
-        Assert.Equal("Home Assistant has no entity input_boolean.auto, sun.home", HaTemplate.MissingNote(ids));
+        Assert.Equal("Home Assistant gives no value for input_boolean.auto, sun.home (missing or unavailable)", HaTemplate.NoValueNote(ids));
     }
 
     [Fact]
     public void NullAutoIsNormalWithoutAnAutoSwitch() {
         Assert.Equal(new[] { "sun.sun" }, HaTemplate.Missing(new HaConfig { Url = "http://x" }, elevMissing: true, autoMissing: true));
         Assert.Empty(HaTemplate.Missing(new HaConfig { Url = "http://x", AutoSwitch = "input_boolean.auto" }, false, false));
-        Assert.Null(HaTemplate.MissingNote(Array.Empty<string>()));
+        Assert.Null(HaTemplate.NoValueNote(Array.Empty<string>()));
     }
 }
 
@@ -124,7 +124,7 @@ public class ProblemLineTests {
     [Fact]
     public void AConfigProblemComesBeforeAMissingEntity() {
         Assert.Equal("config.json: bad", HaTemplate.ProblemLine("config.json: bad", ["x.y"]));
-        Assert.Equal("Home Assistant has no entity x.y", HaTemplate.ProblemLine(null, ["x.y"]));
+        Assert.Equal("Home Assistant gives no value for x.y (missing or unavailable)", HaTemplate.ProblemLine(null, ["x.y"]));
         Assert.Null(HaTemplate.ProblemLine(null, []));
     }
 }

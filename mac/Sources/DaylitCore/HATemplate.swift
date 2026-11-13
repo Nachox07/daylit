@@ -25,12 +25,12 @@ public struct HAState: Decodable {
     }
 
     /// The problem line for those entities, or nil when none is missing.
-    public static func missingNote(_ ids: [String]) -> String? {
-        ids.isEmpty ? nil : "Home Assistant has no entity " + ids.joined(separator: ", ")
+    public static func noValueNote(_ ids: [String]) -> String? {
+        ids.isEmpty ? nil : "Home Assistant gives no value for " + ids.joined(separator: ", ") + " (missing or unavailable)"
     }
 
     /// The problem line: a config problem first (the user fixes the file), else the missing entities.
-    public static func problemLine(config: String?, missing: [String]) -> String? { config ?? missingNote(missing) }
+    public static func problemLine(config: String?, missing: [String]) -> String? { config ?? noValueNote(missing) }
 
     /// nil when the answer is not what the template produces (e.g. a wrong entity id broke the JSON).
     public static func parse(_ d: Data) -> HAState? {

@@ -593,7 +593,7 @@ sealed partial class Controller {
             lastHaPos = s.HasBlind ? s.Pos : null;
             lastHaLights = s.Lights;
             if (s.Auto is bool seenAuto && Settings.LastHaAuto(Cfg.HomeAssistant?.AutoSwitch) != seenAuto) Settings.SetLastHaAuto(seenAuto, Cfg.HomeAssistant?.AutoSwitch);   // kept across restarts for the sun fallback
-            if (HaTemplate.MissingNote(s.Missing) is { } gone) {
+            if (HaTemplate.NoValueNote(s.Missing) is { } gone) {
                 Error = HaTemplate.ProblemLine(ConfigError, s.Missing);
                 if (HaErrorRule.ShouldLog(gone, missingNoteShown, missingNoteLoggedAt is { } mt ? (double?)(mt - DateTime.UnixEpoch).TotalSeconds : null, (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds)) {
                     Log.Write("home assistant: " + gone); missingNoteLoggedAt = DateTime.UtcNow;

@@ -279,10 +279,10 @@ static class HaTemplate {
     }
 
     /// The problem line for those entities, or null when none is missing.
-    public static string? MissingNote(IReadOnlyList<string> ids) => ids.Count == 0 ? null : "Home Assistant has no entity " + string.Join(", ", ids);
+    public static string? NoValueNote(IReadOnlyList<string> ids) => ids.Count == 0 ? null : "Home Assistant gives no value for " + string.Join(", ", ids) + " (missing or unavailable)";
 
     /// The problem line: a config problem first (the user fixes the file), else the missing entities.
-    public static string? ProblemLine(string? config, IReadOnlyList<string> missing) => config ?? MissingNote(missing);
+    public static string? ProblemLine(string? config, IReadOnlyList<string> missing) => config ?? NoValueNote(missing);
 
     static string Num(string? entity, double fallback) =>
         string.IsNullOrWhiteSpace(entity) ? fallback.ToString(CultureInfo.InvariantCulture)

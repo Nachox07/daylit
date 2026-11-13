@@ -808,7 +808,7 @@ import DaylitCore
             switch result {
             case .success(let s):
                 let missing = s.missingEntities(ha)
-                let note = HAState.missingNote(missing)
+                let note = HAState.noValueNote(missing)
                 problem = HAState.problemLine(config: configProblem, missing: missing)
                 if let note {
                     if HAErrorRule.shouldLog(message: note, lastMessage: missingNoteShown, lastLogged: missingNoteLoggedAt?.timeIntervalSince1970,

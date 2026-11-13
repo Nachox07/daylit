@@ -77,11 +77,11 @@ final class HAMissingEntityTests: XCTestCase {
         let a = #"{"elev": 12.5, "pos": 100, "lights": false, "auto": false, "bri": 0, "sat": 100, "m": {}}"#
         let s = HAState.parse(Data(a.utf8))!
         XCTAssertEqual(s.missingEntities(HAConfig(url: "http://x", autoSwitch: "input_boolean.auto")), [])
-        XCTAssertNil(HAState.missingNote([]))
+        XCTAssertNil(HAState.noValueNote([]))
     }
 
     func testProblemLineNamesTheEntity() {
-        XCTAssertEqual(HAState.missingNote(["input_boolean.nope"]), "Home Assistant has no entity input_boolean.nope")
+        XCTAssertEqual(HAState.noValueNote(["input_boolean.nope"]), "Home Assistant gives no value for input_boolean.nope (missing or unavailable)")
     }
 }
 
@@ -122,7 +122,7 @@ final class StoredAutomaticTests: XCTestCase {
 final class ProblemLineTests: XCTestCase {
     func testAConfigProblemComesBeforeAMissingEntity() {
         XCTAssertEqual(HAState.problemLine(config: "config.json: bad", missing: ["x.y"]), "config.json: bad")
-        XCTAssertEqual(HAState.problemLine(config: nil, missing: ["x.y"]), "Home Assistant has no entity x.y")
+        XCTAssertEqual(HAState.problemLine(config: nil, missing: ["x.y"]), "Home Assistant gives no value for x.y (missing or unavailable)")
         XCTAssertNil(HAState.problemLine(config: nil, missing: []))
     }
 }
