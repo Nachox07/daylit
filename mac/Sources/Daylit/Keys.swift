@@ -2,6 +2,7 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import DaylitCore
 
 enum Focus {
     /// The managed external display holding the focused window, or nil (built-in screen or an
@@ -33,12 +34,21 @@ final class Keys {
     weak var model: Daylit?
     var tap: CFMachPort?
 
+    private var asked = false
+
+    /// Asks for Accessibility once per launch (macOS shows its dialog), then checks quietly every 5 s
+    /// until it is granted. Until then the panel shows a hint instead of the dialog coming back.
     @MainActor func start(_ m: Daylit) {
         model = m
-        // Needs Accessibility permission; macOS shows the prompt the first time.
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        if !AXIsProcessTrustedWithOptions(opts) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.start(m) }   // retry until granted
+        if AccessibilityPrompt.shouldPrompt(alreadyAsked: asked) {
+            asked = true
+            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(opts)
+        }
+        let trusted = AXIsProcessTrusted()
+        m.accessibilityNeeded = !trusted
+        if !trusted {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.start(m) }   // retry silently until granted
             return
         }
         guard tap == nil else { return }

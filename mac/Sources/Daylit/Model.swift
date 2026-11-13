@@ -17,6 +17,7 @@ import DaylitCore
         didSet { if problem != LocalNetworkBlock.message { localNetworkBlocked = false } }   // Open Settings only under its own message
     }
     @Published var localNetworkBlocked = false   // the problem is macOS's Local Network permission: the panel offers Open Settings
+    @Published var accessibilityNeeded = false   // brightness keys wait for Accessibility permission: the panel offers Open Settings
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
     @Published var hasBattery = Power.hasBattery
