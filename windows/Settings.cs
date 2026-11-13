@@ -356,9 +356,7 @@ sealed class SettingsWindow : Window {
             // The example shows in grey while the box is empty, so it does not read as a value.
             var hint = new HiddenText { Text = example ? "e.g. " + placeholder : placeholder, Opacity = 0.45, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center,
                                         TextTrimming = TextTrimming.CharacterEllipsis };
-            // Line the grey text up with what the user types (the box's padding and border, from the theme).
-            void Align() => hint.Margin = new Thickness(t.Padding.Left + t.BorderThickness.Left, 0, t.Padding.Right, 0);
-            Align(); t.Loaded += (_, _) => Align();
+            hint.Margin = new Thickness(13, 0, 6, 0);   // where the Fluent box starts its text (padding and border)
             t.TextChanged += (_, _) => hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             cell = new Grid { Children = { t, hint } };
