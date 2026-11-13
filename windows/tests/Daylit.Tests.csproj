@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Runs on any OS: it compiles only the parts of the app with no WPF, WinForms or Win32
-       (Rules.cs, Chart.cs, Config.cs, Light.cs), so `dotnet test windows/tests` works on macOS and Linux too. -->
+       (Rules.cs, Chart.cs, Config.cs, Light.cs, Suggest.cs, Push.cs, Update.cs), so `dotnet test windows/tests` works on macOS and Linux too. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -15,6 +15,7 @@
     <Compile Include="../Light.cs" Link="App/Light.cs" />
     <Compile Include="../Suggest.cs" Link="App/Suggest.cs" />
     <Compile Include="../Push.cs" Link="App/Push.cs" />
+    <Compile Include="../Update.cs" Link="App/Update.cs" />
     <None Include="../../config.example.json" Link="config.example.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

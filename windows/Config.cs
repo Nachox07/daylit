@@ -50,6 +50,7 @@ sealed class Config {
     public string? Source { get; set; }
     public Location? Location { get; set; }
     public bool? PauseOnBattery { get; set; }   // default for the panel switch (true when missing)
+    public bool? CheckUpdates { get; set; }     // ask GitHub once a day whether a newer release exists (default true; UpdateCheck)
     public HaConfig? HomeAssistant { get; set; }
     public MonitorConfig[]? Monitors { get; set; }
     public Tuning? Tuning { get; set; }
@@ -83,7 +84,7 @@ sealed class Config {
         }
         err = Validate(c);
         if (err != null) {   // keep what is safe: monitors and local settings; drop the source settings
-            var safe = new Config { PauseOnBattery = c.PauseOnBattery, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
+            var safe = new Config { PauseOnBattery = c.PauseOnBattery, CheckUpdates = c.CheckUpdates, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
             return (Resolve(safe, out _), err);
         }
         return (Resolve(c, out err), err);
@@ -194,6 +195,10 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
     /// `Push` null removes the key (off is the default); false is written as false.
     public bool PushEditable { get; init; }
     public bool? Push { get; init; }
+    /// `CheckUpdatesEditable`: the window shows the Automatically check for updates switch; otherwise checkUpdates in
+    /// the file is kept. `CheckUpdates` null or true removes the key (on is the default); false is written as false.
+    public bool CheckUpdatesEditable { get; init; }
+    public bool? CheckUpdates { get; init; }
 }
 
 /// Which config entry a connected monitor belongs to: the longest `Match` (trimmed, case-insensitive, contained
@@ -252,6 +257,7 @@ static class ConfigPatch {
         if (e.PushEditable) { if (e.Push is bool pv) ha["push"] = pv; else ha.Remove("push"); }
         root.Remove("homeAssistant");
         if (ha.Count > 0) root["homeAssistant"] = ha;
+        if (e.CheckUpdatesEditable) { if (e.CheckUpdates == false) root["checkUpdates"] = false; else root.Remove("checkUpdates"); }
 
         if (root["monitors"] is { } raw && (raw is not JsonArray arr || arr.Any(x => x is not JsonObject)))
             throw new InvalidDataException("monitors must be a list of objects; fix it with Open config file");
