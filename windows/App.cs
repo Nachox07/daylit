@@ -72,6 +72,8 @@ sealed partial class Controller {
     bool? lookDark;
     readonly LookRule look = new();   // light/dark decision with hysteresis (Rules.cs)
     string? lastHaError;
+    string? missingNoteShown;       // the missing-entity note last shown, and when it was logged (once, then every 10 minutes)
+    DateTime? missingNoteLoggedAt;
     // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
@@ -334,7 +336,7 @@ sealed partial class Controller {
     public async void SetAuto(bool on) {
         try {
             AutoOn = on;
-            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) { Settings.LastHaAuto = on; await HAClient.SetSwitch(Cfg, on); }
+            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);   // LastHaAuto is saved when Home Assistant's own answer confirms it
             else Settings.Auto = on;
             if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; recorder.Drop(m.Key); }
             await Tick("automatic " + (on ? "on" : "off"));
@@ -406,7 +408,7 @@ sealed partial class Controller {
         bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
                           mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(),
-                          keep ? Rules.AutomaticFallback(!string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch), Settings.LastHaAuto, Settings.Auto) : null,   // an outage keeps the last Automatic state
+                          keep ? Rules.AutomaticFallback(!string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch), Settings.LastHaAuto(Cfg.HomeAssistant?.AutoSwitch), Settings.Auto) : null,   // an outage keeps the last Automatic state
                           keep && lastHaPos != null);
     }
     double? lastHaPos;
@@ -592,14 +594,22 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.FromHa is { } haRow && i < haRow.Length ? haRow[i] : s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
             lastHaLights = s.Lights;
-            if (s.Auto is bool seenAuto && Settings.LastHaAuto != seenAuto) Settings.LastHaAuto = seenAuto;   // kept across restarts for the sun fallback
-            if (HaTemplate.MissingNote(s.Missing) is { } gone) Error ??= gone;
+            if (s.Auto is bool seenAuto && Settings.LastHaAuto(Cfg.HomeAssistant?.AutoSwitch) != seenAuto) Settings.SetLastHaAuto(seenAuto, Cfg.HomeAssistant?.AutoSwitch);   // kept across restarts for the sun fallback
+            if (HaTemplate.NoValueNote(s.Missing) is { } gone) {
+                Error = HaTemplate.ProblemLine(ConfigError, s.Missing);
+                if (HaErrorRule.ShouldLog(gone, missingNoteShown, missingNoteLoggedAt is { } mt ? (double?)(mt - DateTime.UnixEpoch).TotalSeconds : null, (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds)) {
+                    Log.Write("home assistant: " + gone); missingNoteLoggedAt = DateTime.UtcNow;
+                }
+                missingNoteShown = gone;
+            } else { missingNoteShown = null; missingNoteLoggedAt = null; }
         }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         s = ApplyLight(s, !haDown && Source == Source.HomeAssistant, out double light);
-        AutoOn = s.Auto ?? Settings.Auto;
+        // A switch Home Assistant has no value for leaves Automatic as it was, as in an outage.
+        var autoEntity = Source == Source.HomeAssistant ? Cfg.HomeAssistant?.AutoSwitch : null;
+        AutoOn = Rules.AutomaticNow(!string.IsNullOrWhiteSpace(autoEntity), s.Auto, Settings.LastHaAuto(autoEntity), Settings.Auto);
         double sun = Cfg.Tuned.Fraction(s.Elev);
         bool boost = s.Elev < Cfg.Tuned.LightsBoostSunBelow;
         // The Mac and this PC may share these monitors through input switching. Only the machine in

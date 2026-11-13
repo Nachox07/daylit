@@ -74,6 +74,19 @@ public func automaticFallback(hasSwitch: Bool, lastFromHA: Bool?, local: Bool) -
     hasSwitch ? lastFromHA ?? local : local
 }
 
+/// Automatic mode on a tick Home Assistant answered. Its switch decides when it gave a value; a switch it did not
+/// give one for (a missing entity, `unavailable`) leaves Automatic as it was, the same as during an outage.
+public func automaticNow(hasSwitch: Bool, fromHA: Bool?, lastFromHA: Bool?, local: Bool) -> Bool {
+    fromHA ?? automaticFallback(hasSwitch: hasSwitch, lastFromHA: lastFromHA, local: local)
+}
+
+/// The Automatic state saved from Home Assistant counts only for the autoSwitch it was seen on: a different
+/// entity in the config (or an older save with none recorded) starts again from the local setting.
+public func storedAutomatic(value: Bool?, entity: String?, configured: String?) -> Bool? {
+    guard let configured, !configured.isEmpty, entity == configured else { return nil }
+    return value
+}
+
 /// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night, nightLights]. The "set"
 /// helper is dropped, so an old remote value is never replayed while Home Assistant is down.
 public func fallbackLevels(_ row: [Double]) -> [Double] { Array(row.prefix(4)) }
