@@ -254,6 +254,46 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
     return step
 }
 
+/// Which brightness a tick should trust after it waited (the Home Assistant read, a write to another
+/// monitor). `atRead` is the level the model held when the monitor was read, `now` what it holds after
+/// the wait. A level that moved in between came from the user's hand (slider, keys); it is newer than
+/// the reading, so it wins and the tick decides on it. `held`: the slider is in the user's hand.
+public func userLevelWins(atRead: Int?, now: Int?, held: Bool) -> Bool {
+    guard now != nil else { return false }
+    return held || atRead != now
+}
+
+/// The level a tick decides on for one monitor: the model's level when the user set one after the
+/// reading (see userLevelWins), else the reading.
+public func levelToDecideOn(read: Int, atRead: Int?, model: Int?, held: Bool) -> Int {
+    userLevelWins(atRead: atRead, now: model, held: held) ? model ?? read : read
+}
+
+/// The slider value after a write of `new`: nil keeps the current one. A refused write changes nothing,
+/// and a level the user set while Daylit was writing (or a held slider) is newer than the write.
+public func levelAfterWrite(new: Int?, ok: Bool, atStart: Int?, now: Int?, held: Bool) -> Int? {
+    guard ok, let new, !userLevelWins(atRead: atStart, now: now, held: held) else { return nil }
+    return new
+}
+
+/// What a finished write leaves on its monitor.
+public struct WriteCommit: Equatable {
+    public var state: HoldState
+    public var level: Int?
+}
+
+/// The result of one write, for the monitor as it is now. Used when the monitor list was rebuilt under
+/// the write: the new list's monitor takes the written state, or the next tick reads the new level
+/// against the old lastSet and invents an offset. nil when the monitor's control changed in that
+/// rebuild (the old level is on another scale). `clearedMeanwhile`: Apply cleared its offset meanwhile.
+public func writeCommit(step: Step, before: HoldState, ok: Bool, clearedMeanwhile: Bool, controlChanged: Bool,
+                        levelAtStart: Int?, levelNow: Int?, held: Bool) -> WriteCommit? {
+    guard !controlChanged else { return nil }
+    var st = step.state.afterWrite(ok: ok, before: before)
+    if clearedMeanwhile { st = Suggest.afterApply(st) }
+    return WriteCommit(state: st, level: levelAfterWrite(new: step.level, ok: ok, atStart: levelAtStart, now: levelNow, held: held))
+}
+
 /// Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
 /// dark otherwise. Each condition has a gap between its on and off thresholds so it does not flip
 /// back and forth; in the gap the previous answer stays.

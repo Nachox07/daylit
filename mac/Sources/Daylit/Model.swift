@@ -606,6 +606,7 @@ import DaylitCore
         let snapshot = mons
 
         // Current brightness: detects values set by hand (keys, the monitor's own buttons).
+        let beforeRead: [Int?] = snapshot.map { Int($0.level) }   // a level set by hand during the read is newer than it
         var cur: [Int?] = []
         for m in snapshot {
             switch m.control {
@@ -622,8 +623,15 @@ import DaylitCore
                 cur[i] = mons[i].readState.current(reading: cur[i], slider: Int(mons[i].level))
             }
             mons[i].available = cur[i] != nil
-            if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
+            if let v = cur[i] {
+                let held = dragging.contains(mons[i].id)
+                cur[i] = levelToDecideOn(read: v, atRead: beforeRead[i], model: Int(mons[i].level), held: held)
+                if !held { mons[i].level = Double(cur[i]!) }
+            }
         }
+
+        // What the model held right after the read: a level that differs after the Home Assistant wait was set by hand.
+        let atRead: [Int?] = mons.map { Int($0.level) }
 
         guard source != .off else { detail = ""; problem = configProblem; if live != nil { live = nil }; return }
         // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
@@ -651,8 +659,11 @@ import DaylitCore
         var linkedNow: [String: Int] = [:]   // linked followers: the level they land on (for the Settings chart)
         let now = Date().timeIntervalSince1970
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
-            guard let c0 = cur[i] else { continue }
+            guard let read = cur[i] else { continue }
             let m = mons[i]
+            // A slider or key change during the Home Assistant wait is newer than the reading: decide on that level.
+            // This decision uses it, so `touched` is cleared below like any other (a dragged slider keeps it).
+            let c0 = levelToDecideOn(read: read, atRead: atRead[i], model: Int(m.level), held: dragging.contains(m.id))
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
             let clearedAt = offsetCleared[m.uuid]
             var want = ownTarget(m)
@@ -671,45 +682,70 @@ import DaylitCore
             if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
             if !dragging.contains(m.id) { mons[i].touched = false }
             if let v = step.remote, !m.writeFailing { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
+            /// Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
+            func noteHand(_ st: HoldState, ok: Bool) {
+                if step.remote != nil {
+                    // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
+                    recorder.drop(m.uuid)
+                } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
+                    let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
+                                            sunFallback: source == .homeAssistant && !inp.fromHA)
+                    // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
+                    recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
+                        Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
+                                           light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
+                    })
+                }
+            }
+            /// Logged once when a failure starts and once when it ends, not every tick while it lasts.
+            func noteWrite(_ j: Int, ok: Bool, level v: Int) {
+                if ok == mons[j].writeFailing {
+                    Log.write(ok ? "display: \(m.label) takes brightness changes again"
+                                 : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
+                }
+                mons[j].writeFailing = !ok
+            }
             var ok = true
             if let v = step.write {
                 if step.remote == nil && !m.writeFailing { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
                 ok = await write(m, v)
-                guard gen == generation else { return }
-                // Logged once when it starts and once when it ends, not every tick while it lasts.
-                if ok == mons[i].writeFailing {
-                    Log.write(ok ? "display: \(m.label) takes brightness changes again"
-                                 : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
+                guard gen == generation else {
+                    // Displays changed during the write: record what was written on the live monitor, or the next
+                    // tick reads the new level against the old lastSet and invents an offset.
+                    if let j = mons.firstIndex(where: { $0.uuid == m.uuid }), let c = writeCommit(
+                        step: step, before: state, ok: ok, clearedMeanwhile: offsetCleared[m.uuid] != clearedAt, controlChanged: mons[j].control != m.control,
+                        levelAtStart: Int(m.level), levelNow: Int(mons[j].level), held: dragging.contains(mons[j].id)) {
+                        if offsetCleared[m.uuid] != clearedAt { recorder.drop(m.uuid) }
+                        noteWrite(j, ok: ok, level: v)
+                        mons[j].lastSet = c.state.lastSet; mons[j].lastTarget = c.state.lastTarget
+                        mons[j].remoteSeen = c.state.remoteSeen; mons[j].remoteValue = c.state.remoteValue
+                        mons[j].offset = c.state.offset; mons[j].offsetSun = c.state.offsetSun; mons[j].offsetAt = c.state.offsetAt
+                        if let l = c.level { mons[j].level = Double(l) }
+                        noteHand(c.state, ok: ok)
+                        saveHolds()
+                    }
+                    return
                 }
-                mons[i].writeFailing = !ok
+                noteWrite(i, ok: ok, level: v)
             }
-            var st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
             // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
             let appliedMeanwhile = offsetCleared[m.uuid] != clearedAt
-            if appliedMeanwhile { st = Suggest.afterApply(st); recorder.drop(m.uuid) }
+            // A refused write is retried next tick.
+            let commit = writeCommit(step: step, before: state, ok: ok, clearedMeanwhile: appliedMeanwhile, controlChanged: false,
+                                     levelAtStart: Int(m.level), levelNow: Int(mons[i].level), held: dragging.contains(m.id))!
+            let st = commit.state
+            if appliedMeanwhile { recorder.drop(m.uuid) }
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
             mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen; mons[i].remoteValue = st.remoteValue
             if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }
             mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
-            // Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
-            if step.remote != nil {
-                // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
-                recorder.drop(m.uuid)
-            } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
-                let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
-                                        sunFallback: source == .homeAssistant && !inp.fromHA)
-                // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
-                recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
-                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
-                                       light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
-                })
-            }
+            noteHand(st, ok: ok)
             if let done = recorder.settle(monitor: m.uuid, held: auto && st.offset != nil, levels: levels(of: m, inp), now: now) {
                 corrections.append(done); saveCorrections(); suggestDirty = true
             }
-            if ok, let v = step.level { mons[i].level = Double(v) }
+            if let v = commit.level { mons[i].level = Double(v) }   // not over a level set by hand during our own write
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = ok ? step.applied : c0, manual = step.manual && !appliedMeanwhile
             if follower { linkedNow[m.uuid] = applied }
