@@ -12,8 +12,17 @@ public func blindPosition(reported: Double, last: Double?) -> Double {
     reported >= 0 ? min(reported, 100) : last ?? 100
 }
 
-public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
-                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights: Double? = nil) -> Int {
+/// A brightness level as a finite 0–100: out of range is clamped, infinity counts as the nearest end,
+/// and NaN as 0 (a level that is not a number must never reach the formula).
+public func clampLevel(_ v: Double) -> Double {
+    v.isNaN ? 0 : min(max(v, 0), 100)
+}
+
+public func target(day day0: Double, blindDown blindDown0: Double, night night0: Double, elev: Double, pos pos0: Double, lights: Bool,
+                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights nightLights0: Double? = nil) -> Int {
+    let day = clampLevel(day0), blindDown = clampLevel(blindDown0), night = clampLevel(night0)
+    let nightLights = nightLights0.map(clampLevel)
+    let pos = clampLevel(pos0)
     let sunUp = daylightFraction(elevation: elev, tuning: t)
     let sun = min(sunUp, light)
     let daytime = blindDown + (day - blindDown) * pos / 100
@@ -28,6 +37,8 @@ public func target(day: Double, blindDown: Double, night: Double, elev: Double, 
         v = night + (daytime - night) * sun
         if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
     }
+    // Last guard: a NaN from elev or light would stop the app at Int(); fall back to the night level.
+    guard v.isFinite else { return Int(night.rounded()) }
     return Int(min(max(v, 0), 100).rounded())
 }
 
@@ -36,11 +47,11 @@ public func target(day: Double, blindDown: Double, night: Double, elev: Double, 
 /// `fromHA`: a template row [day, blindDown, night, nightLights, set, setChanged] or what fallbackLevels kept.
 /// Home Assistant's value wins where it has one (>= 0), else the local number.
 public func effectiveLevels(local: [Double], fromHA: [Double]?) -> [Double] {
-    var lv = Array(local.prefix(3))
-    if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = ov[k] } }
+    var lv = local.prefix(3).map(clampLevel)
+    if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = clampLevel(ov[k]) } }
     let fromRow = fromHA.flatMap { $0.count > 3 && $0[3] >= 0 ? $0[3] : nil }
     let own = local.count > 3 && local[3] >= 0 ? local[3] : nil
-    if let nl = fromRow ?? own { lv.append(nl) }
+    if let nl = fromRow ?? own { lv.append(clampLevel(nl)) }
     return lv
 }
 
@@ -54,6 +65,13 @@ public func nightLightsLevel(_ levels: [Double]) -> Double? { levels.count > 3 &
 public func roomLights(reported: Bool, fromHA: Bool, last: Bool?, hasNightLights: Bool) -> Bool {
     if fromHA { return reported }
     return hasNightLights ? last ?? false : false
+}
+
+/// Automatic mode while Home Assistant does not answer (the sun fallback). With an autoSwitch it keeps the
+/// last state Home Assistant gave, so an outage never turns Automatic on or off; without a switch, or before
+/// one was ever seen, the local setting decides.
+public func automaticFallback(hasSwitch: Bool, lastFromHA: Bool?, local: Bool) -> Bool {
+    hasSwitch ? lastFromHA ?? local : local
 }
 
 /// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night, nightLights]. The "set"

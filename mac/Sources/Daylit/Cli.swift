@@ -49,7 +49,7 @@ import DaylitCore
 
     static func listMonitors() -> [String: Any] {
         let (cfg, _) = Config.load()
-        DDC.tool = cfg.ddcTool ?? DDC.defaultTool
+        DDC.configure(cfg.ddcTool)
         var out: [[String: Any]] = []
         for s in NSScreen.screens {
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { continue }
@@ -81,6 +81,7 @@ import DaylitCore
         var problems: [String] = [], notes: [String] = []
         if let err { problems.append(err) }
         if let srcErr { problems.append(srcErr) }
+        if let note = DDC.configure(cfg.ddcTool) { notes.append(note) }
         let names = externalScreens().map(\.name)
         var monitors: [[String: Any]] = []
         for m in cfg.monitors ?? [] {
