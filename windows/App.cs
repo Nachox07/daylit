@@ -549,8 +549,7 @@ sealed partial class Controller {
                 r = mons[i].Reads.Current(r, mons[i].Cur ?? 50);   // write-only: the slider is the record of its level
             }
             // A slider drag or key press during the read (or just before it, while the monitor may still show the old level) is newer than the reading.
-            if (Rules.UserLevelWins(beforeRead[i], mons[i].Cur, mons[i].Dragging || (DateTime.UtcNow - mons[i].UserTouched).TotalSeconds < 1.5)) continue;
-            mons[i].Cur = r;
+            mons[i].Cur = Rules.LevelToDecideOn(r, beforeRead[i], mons[i].Cur, mons[i].Dragging || (DateTime.UtcNow - mons[i].UserTouched).TotalSeconds < 1.5);
         }
         Error = ConfigError;
 
@@ -684,7 +683,7 @@ sealed partial class Controller {
             }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
             // Not while the slider is held, or when a hand change landed during the write: that level is newer.
-            if (!Rules.UserLevelWins(c, m.Cur, m.Dragging)) m.Cur = ok ? step.Current : c;
+            if (Rules.LevelAfterWrite(step.Current, ok, c, m.Cur, m.Dragging) is int written) m.Cur = written;
             m.Manual = step.Manual && !appliedMeanwhile;
             int applied = ok ? step.Applied : c;
             if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead

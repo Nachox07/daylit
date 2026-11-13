@@ -137,10 +137,58 @@ final class UserLevelWinsTests: XCTestCase {
     }
     func testAHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
         let st = HoldState(lastSet: 40, lastTarget: 40)
-        let c = userLevelWins(atRead: 40, now: 52, held: false) ? 52 : 40
+        let c = levelToDecideOn(read: 40, atRead: 40, model: 52, held: false)
+        XCTAssertEqual(c, 52)
         let s = decide(current: c, want: 40, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1, touched: true)
         XCTAssertEqual(s.state.offset, 12)
         XCTAssertNil(s.write)
+    }
+    func testTheReadingStandsWhenNothingMovedTheLevel() {
+        XCTAssertEqual(levelToDecideOn(read: 41, atRead: 40, model: 40, held: false), 41)   // the monitor's own buttons
+    }
+    func testADraggedSliderHoldsItsLevelAndMakesNoAutomaticWrite() {
+        let st = HoldState(lastSet: 40, lastTarget: 40)
+        let c = levelToDecideOn(read: 40, atRead: 40, model: 63, held: true)
+        XCTAssertEqual(c, 63)
+        let s = decide(current: c, want: 40, remote: nil, state: st, here: true, auto: true, dragging: true, sun: 1, touched: true)
+        XCTAssertNil(s.write); XCTAssertNil(s.state.offset)
+    }
+    func testAWriteOverwritesTheSliderOnlyWhenItWasUntouchedMeanwhile() {
+        XCTAssertEqual(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 40, held: false), 70)
+        XCTAssertNil(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 55, held: false))   // moved by hand during the write
+        XCTAssertNil(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 40, held: true))    // slider held
+        XCTAssertNil(levelAfterWrite(new: 70, ok: false, atStart: 40, now: 40, held: false))  // refused
+    }
+    func testACommittedWriteLeavesTheSliderAtWhatWasWrittenSoAWriteOnlyMonitorGetsNoOffset() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertEqual(step.write, 70)
+        let c = writeCommit(step: step, before: before, ok: true, clearedMeanwhile: false, controlChanged: false,
+                            levelAtStart: 40, levelNow: 40, held: false)!
+        XCTAssertEqual(c.state.lastSet, 70)
+        XCTAssertEqual(c.level, 70)   // slider == lastSet, so the next tick's slider-based reading is no hand change
+        let next = decide(current: c.level!, want: 70, remote: nil, state: c.state, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertNil(next.state.offset); XCTAssertNil(next.write)
+    }
+    func testAFailedCommitForgetsLastSetAndMovesNoSlider() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        let c = writeCommit(step: step, before: before, ok: false, clearedMeanwhile: false, controlChanged: false,
+                            levelAtStart: 40, levelNow: 40, held: false)!
+        XCTAssertNil(c.state.lastSet); XCTAssertNil(c.level)
+    }
+    func testNothingIsCommittedWhenTheControlChangedInTheRebuild() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertNil(writeCommit(step: step, before: before, ok: true, clearedMeanwhile: false, controlChanged: true,
+                                 levelAtStart: 40, levelNow: 40, held: false))
+    }
+    func testAnOffsetClearedByApplyDuringTheWriteStaysCleared() {
+        let before = HoldState(lastSet: 40, lastTarget: 40, offset: 5, offsetSun: 1, offsetAt: 1)
+        let step = decide(current: 45, want: 40, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false, now: 2)
+        let c = writeCommit(step: step, before: before, ok: true, clearedMeanwhile: true, controlChanged: false,
+                            levelAtStart: 45, levelNow: 45, held: false)!
+        XCTAssertNil(c.state.offset); XCTAssertNil(c.state.lastSet)
     }
 }
 

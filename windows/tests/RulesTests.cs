@@ -34,10 +34,26 @@ public class UserLevelWinsTests {
     [Fact] public void NothingToTrustWithoutALevel() => Assert.False(Rules.UserLevelWins(null, null, true));
     [Fact] public void AHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
         var hold = new Hold(null, 40, 40, null, null, null, null);
-        int c = Rules.UserLevelWins(40, 52, false) ? 52 : 40;
+        int c = Rules.LevelToDecideOn(40, 40, 52, false)!.Value;
+        Assert.Equal(52, c);
         var step = Rules.Decide(c, 40, null, hold, auto: true, here: true, sun: 1, touched: true);
         Assert.Equal(12, step.State.Offset);
         Assert.Null(step.Write);
+    }
+    [Fact] public void TheReadingStandsWhenNothingMovedTheLevel() => Assert.Equal(41, Rules.LevelToDecideOn(41, 40, 40, false));
+    [Fact] public void ADraggedSliderHoldsItsLevelAndMakesNoAutomaticWrite() {
+        var hold = new Hold(null, 40, 40, null, null, null, null);
+        int c = Rules.LevelToDecideOn(40, 40, 63, true)!.Value;
+        Assert.Equal(63, c);
+        var step = Rules.Decide(c, 40, null, hold, auto: true, here: true, sun: 1, touched: true, dragging: true);
+        Assert.Null(step.Write);
+        Assert.Null(step.State.Offset);
+    }
+    [Fact] public void AWriteOverwritesTheLevelOnlyWhenItWasUntouchedMeanwhile() {
+        Assert.Equal(70, Rules.LevelAfterWrite(70, true, 40, 40, false));
+        Assert.Null(Rules.LevelAfterWrite(70, true, 40, 55, false));    // moved by hand during the write
+        Assert.Null(Rules.LevelAfterWrite(70, true, 40, 40, true));     // slider held
+        Assert.Null(Rules.LevelAfterWrite(70, false, 40, 40, false));   // refused
     }
 }
 

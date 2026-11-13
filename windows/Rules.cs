@@ -164,6 +164,15 @@ static class Rules {
     /// wins. `held`: the slider is in the user's hand, or was just now (the panel's 1.5 s grace).
     public static bool UserLevelWins(int? atRead, int? now, bool held) => now != null && (held || atRead != now);
 
+    /// The level a tick decides on for one monitor: the model's level when the user set one after the
+    /// reading (see UserLevelWins), else the reading.
+    public static int? LevelToDecideOn(int? read, int? atRead, int? model, bool held) => UserLevelWins(atRead, model, held) ? model : read;
+
+    /// The level to store after a write of `newLevel`; null keeps the current one. A refused write changes
+    /// nothing, and a level the user set while Daylit was writing (or a held slider) is newer than the write.
+    public static int? LevelAfterWrite(int? newLevel, bool ok, int? atStart, int? now, bool held) =>
+        ok && newLevel != null && !UserLevelWins(atStart, now, held) ? newLevel : null;
+
     /// One automatic decision for one monitor (Windows rules).
     /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
     ///   hand-set level. The value seen on the first look is not a command, nor is the same value again
