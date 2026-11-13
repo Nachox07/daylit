@@ -149,17 +149,34 @@ static class Rules {
     /// The daylight fraction where a night offset has faded out completely.
     public const double NightOffsetEdge = 0.3;
 
+    /// A night offset without a location ends after this long (longer than any night but a polar one).
+    const double NightOffsetFallback = 18 * 3600;
+    /// How often the sun is sampled between setting an offset and now.
+    const double OffsetSampleStep = 600;
+
     /// An offset that no longer applies, even when no tick ran in between (the PC slept).
-    /// One set at night ends when daylight next passes the fade edge (OffsetWeight), not after a fixed time,
-    /// so a long polar night keeps it. One set by day ends with the calendar day once the sun is down; while
-    /// the sun is still up (polar day) it carries over midnight for at most 12 hours. Every offset ends after
-    /// 36 hours. `dayOf` gives the local calendar day of a Unix time; `sun` is the daylight fraction now.
-    public static bool OffsetExpired(Hold s, double now, double sun, Func<double, int> dayOf) {
+    /// With a location it is decided from what the sun did between `OffsetAt` and `now`, sampled every
+    /// 10 minutes, not from the current tick: one set at night ends once daylight reached the fade edge
+    /// (OffsetWeight) at any point since, so sleeping through a sunrise cannot keep it, while a polar night
+    /// does; one set by day ends with the calendar day if the sun set in between, and only a polar day
+    /// (the sun never went down) carries it over midnight, for at most 12 hours. Without a location
+    /// (possible with Home Assistant as the source) a night offset ends after 18 hours and a day one with
+    /// the calendar day. Every offset ends after 36 hours. `dayOf` gives the local calendar day of a Unix
+    /// time; `sun` is the daylight fraction now.
+    public static bool OffsetExpired(Hold s, double now, double sun, Func<double, int> dayOf, (double Lat, double Lon)? place = null, Tuning? tuning = null) {
         if (s.Offset == null || s.OffsetAt is not double at || now <= 0) return false;
         double age = now - at;
         if (age > OffsetMaxAge) return true;
-        if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at) && (sun <= 0 || age > DayOffsetCarryOver);
-        return sun >= NightOffsetEdge;
+        bool byDay = (s.OffsetSun ?? 0) > 0, newDay = dayOf(now) != dayOf(at);
+        if (place is not { } p) return byDay ? newDay : age > NightOffsetFallback;
+        var t = tuning ?? new Tuning();
+        double lowest = sun, highest = sun;
+        for (double x = at; x < now; x += OffsetSampleStep) {
+            double f = t.Fraction(Sun.Elevation(DateTimeOffset.FromUnixTimeMilliseconds((long)(x * 1000)), p.Lat, p.Lon));
+            lowest = Math.Min(lowest, f); highest = Math.Max(highest, f);
+        }
+        if (byDay) return newDay && (lowest <= 0 || age > DayOffsetCarryOver);
+        return highest >= NightOffsetEdge;
     }
 
     /// Seconds since the hand-set offset was set; null when unknown.
@@ -192,7 +209,8 @@ static class Rules {
     ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
     /// - An idle PC (someone may be using the other machine on these monitors) writes nothing automatic.
     public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun, bool touched = true,
-                              bool dragging = false, double now = 0, Func<double, int>? dayOf = null) {
+                              bool dragging = false, double now = 0, Func<double, int>? dayOf = null,
+                              (double Lat, double Lon)? place = null, Tuning? tuning = null) {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
@@ -206,7 +224,7 @@ static class Rules {
             }
         }
         int applied = c;
-        if (here && OffsetExpired(s, now, sun, dayOf ?? LocalDay)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
+        if (here && OffsetExpired(s, now, sun, dayOf ?? LocalDay, place, tuning)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
         if (auto && !fromRemote && here && !dragging) {
             if (s.LastSet is int last && c != last) {
                 if (touched || Math.Abs(c - last) > 1)   // moved by hand since the last tick
@@ -458,6 +476,9 @@ sealed class SavedHolds {
 /// works a few seconds later, so it is retried quickly and only shown once Home Assistant has been
 /// unreachable for a while. A rejected or missing token will not fix itself and shows at once.
 public static class HaErrorRule {
+    /// Whether an HTTP status is a brief outage (502, 503, 504: Home Assistant restarting behind a proxy)
+    /// rather than an answer that will not fix itself (403, 404, 500...).
+    public static bool Transient(int status) => status is 502 or 503 or 504;
     public static readonly double[] RetryDelays = { 2, 5 };
     public const double ShowAfter = 60;
     public static bool ShouldShow(bool transient, double? downSince, double now) =>

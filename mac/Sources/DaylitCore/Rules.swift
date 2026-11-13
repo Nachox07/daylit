@@ -185,17 +185,38 @@ public let offsetMaxAge = 36.0 * 3600
 /// (a computer that slept through the night wakes into a new day).
 let dayOffsetCarryOver = 12.0 * 3600
 
+/// A night offset without a location ends after this long (longer than any night but a polar one).
+let nightOffsetFallback = 18.0 * 3600
+/// How often the sun is sampled between setting an offset and now.
+let offsetSampleStep = 600.0
+
 /// An offset that no longer applies, even when no tick ran in between (the computer slept).
-/// One set at night ends when daylight next passes the fade edge (offsetWeight), not after a fixed time,
-/// so a long polar night keeps it. One set by day ends with the calendar day once the sun is down; while
-/// the sun is still up (polar day) it carries over midnight for at most 12 hours. Every offset ends after
-/// 36 hours. `dayOf` gives the local calendar day of a Unix time; `sun` is the daylight fraction now.
-public func offsetExpired(_ s: HoldState, now: Double, sun: Double, dayOf: (Double) -> Int) -> Bool {
+/// With a location it is decided from what the sun did between `offsetAt` and `now`, sampled every
+/// 10 minutes, not from the current tick: one set at night ends once daylight reached the fade edge
+/// (offsetWeight) at any point since, so sleeping through a sunrise cannot keep it, while a polar night
+/// does; one set by day ends with the calendar day if the sun set in between, and only a polar day
+/// (the sun never went down) carries it over midnight, for at most 12 hours. Without a location
+/// (possible with Home Assistant as the source) a night offset ends after 18 hours and a day one with
+/// the calendar day. Every offset ends after 36 hours. `dayOf` gives the local calendar day of a Unix
+/// time; `sun` is the daylight fraction now.
+public func offsetExpired(_ s: HoldState, now: Double, sun: Double, dayOf: (Double) -> Int,
+                          place: (latitude: Double, longitude: Double)? = nil, tuning: Tuning = Tuning()) -> Bool {
     guard s.offset != nil, let at = s.offsetAt, now > 0 else { return false }
     let age = now - at
     if age > offsetMaxAge { return true }
-    if (s.offsetSun ?? 0) > 0 { return dayOf(now) != dayOf(at) && (sun <= 0 || age > dayOffsetCarryOver) }
-    return sun >= nightOffsetEdge
+    let byDay = (s.offsetSun ?? 0) > 0
+    let newDay = dayOf(now) != dayOf(at)
+    guard let p = place else { return byDay ? newDay : age > nightOffsetFallback }
+    var lowest = sun, highest = sun
+    var t = at
+    while t < now {
+        let f = daylightFraction(elevation: solarElevation(latitude: p.latitude, longitude: p.longitude,
+                                                           at: Date(timeIntervalSince1970: t)), tuning: tuning)
+        lowest = min(lowest, f); highest = max(highest, f)
+        t += offsetSampleStep
+    }
+    if byDay { return newDay && (lowest <= 0 || age > dayOffsetCarryOver) }
+    return highest >= nightOffsetEdge
 }
 
 /// Seconds since the hand-set offset was set; nil when unknown.
@@ -220,7 +241,8 @@ public func localDay(_ t: Double, calendar: Calendar = .current) -> Int {
 ///   fades at dusk and ends at night (see offsetWeight); a new hand-set level replaces it.
 public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: HoldState,
                    here: Bool, auto: Bool, dragging: Bool, sun: Double, touched: Bool = true,
-                   now: Double = 0, dayOf: (Double) -> Int = { localDay($0) }) -> Step {
+                   now: Double = 0, dayOf: (Double) -> Int = { localDay($0) },
+                   place: (latitude: Double, longitude: Double)? = nil, tuning: Tuning = Tuning()) -> Step {
     var s = s0, c = c0, step = Step(state: s0, applied: c0)
     var fromRemote = false
     if let r = remote {
@@ -239,7 +261,7 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         }
     }
     if !here && !fromRemote { step.state = s; step.skip = true; return step }
-    if offsetExpired(s, now: now, sun: sun, dayOf: dayOf) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
+    if offsetExpired(s, now: now, sun: sun, dayOf: dayOf, place: place, tuning: tuning) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
 
     var applied = c
     if auto && !fromRemote && !dragging {
@@ -507,8 +529,12 @@ public struct SavedHolds: Equatable, Codable {
 /// Home Assistant errors. A connection that fails right after launch, wake or docking (macOS checks the
 /// local-network permission, or the network is still switching) usually works a few seconds later, so
 /// it is retried quickly and only shown once Home Assistant has been unreachable for a while. A
-/// rejected or missing token will not fix itself and shows at once.
+/// rejected or missing token will not fix itself and shows at once. A gateway answer (502, 503, 504:
+/// Home Assistant restarting behind a proxy) counts as a failed connection; any other status
+/// (403, 404, 500...) is an answer that will not fix itself and shows at once.
 public enum HAErrorRule {
+    /// Whether an HTTP status is a brief outage rather than an answer to act on.
+    public static func transient(status: Int) -> Bool { status == 502 || status == 503 || status == 504 }
     public static let retryDelays: [Double] = [2, 5]
     public static let showAfter: Double = 60
     /// Whether the panel should show the error: `downSince` is when the current outage started.

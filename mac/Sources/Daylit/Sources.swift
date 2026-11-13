@@ -28,9 +28,18 @@ enum HAClient {
         return p.terminationStatus == 0
     }
 
-    /// `.unreachable` is the only transient one (a connection that fails); `.http` is an answer Home Assistant
-    /// gave (403, 404, 5xx...), which will not fix itself in a minute, so it shows at once.
-    enum Failure: Error, Equatable { case noToken, rejected, unreachable, http(Int), badAnswer }
+    /// Transient (see `isTransient`): a connection that fails, or a gateway answer (502, 503, 504). Any other
+    /// `.http` is an answer Home Assistant gave (403, 404, 500...), which will not fix itself in a minute.
+    enum Failure: Error, Equatable {
+        case noToken, rejected, unreachable, http(Int), badAnswer
+        var isTransient: Bool {
+            switch self {
+            case .unreachable: return true
+            case .http(let code): return HAErrorRule.transient(status: code)
+            default: return false
+            }
+        }
+    }
     /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
     nonisolated(unsafe) static var lastCause: String?
 

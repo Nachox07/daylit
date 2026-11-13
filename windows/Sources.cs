@@ -45,6 +45,7 @@ static class HAClient {
             req.Headers.Authorization = new("Bearer", Token);
             using var r = await http.SendAsync(req);
             Transient = false;
+            if (!r.IsSuccessStatusCode && HaErrorRule.Transient((int)r.StatusCode)) Transient = true;
             if ((int)r.StatusCode == 401) { LastError = "Home Assistant rejected the token"; LastCause = "HTTP 401"; return null; }
             if (!r.IsSuccessStatusCode) { LastError = $"Home Assistant answered {(int)r.StatusCode}"; LastCause = $"HTTP {(int)r.StatusCode}"; return null; }
             LastError = null; LastCause = null;

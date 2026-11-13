@@ -311,30 +311,68 @@ final class DecideTests: XCTestCase {
         let h = SavedHolds(entries: ["m": .init(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, saved: 1000)])
         XCTAssertEqual(h.restore(key: "m", now: 2000)?.offsetAt, 1000)
     }
+    // A date in 2026 in UTC, as Unix seconds (real dates, so the sun samples are the season's).
+    func utc(_ month: Int, _ day: Int, _ hour: Double) -> Double {
+        var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!
+        let d = c.date(from: DateComponents(year: 2026, month: month, day: day))!.timeIntervalSince1970
+        return d + hour * 3600
+    }
+    let polar = (latitude: 78.0, longitude: 15.0)
+    let temperate = (latitude: 36.7, longitude: 0.0)
+
     func testANightDistanceLastsAsLongAsItStaysDark() {
-        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
-        for (day, hour) in [(101, 6.0), (101, 20.0)] {   // a polar night: still dark the next evening
-            XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
-                                   now: at(day, hour), dayOf: utcDay).state.offset)
-        }
+        // A real polar night: the sun does not reach the fade edge for days, so a night distance stays.
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 23))
+        XCTAssertFalse(offsetExpired(st, now: utc(12, 16, 20), sun: 0, dayOf: utcDay, place: polar))
+        let s = decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                       now: utc(12, 16, 20), dayOf: utcDay, place: polar)
+        XCTAssertNotNil(s.state.offset)
+    }
+    func testANightDistanceSetInTheEveningEndsAfterASleepThroughTheDay() {
+        // Set at 19:00 in December, nobody ticked while the sun was up, next evening it is dark again.
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 19))
+        XCTAssertTrue(offsetExpired(st, now: utc(12, 16, 19), sun: 0, dayOf: utcDay, place: temperate))
+        XCTAssertFalse(offsetExpired(st, now: utc(12, 16, 4), sun: 0, dayOf: utcDay, place: temperate))   // still the same night
+        let s = decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                       now: utc(12, 16, 19), dayOf: utcDay, place: temperate)
+        XCTAssertNil(s.state.offset)
+        XCTAssertEqual(s.write, 50)
     }
     func testANightDistanceEndsWhenDaylightPassesTheFadeEdgeEvenAfterASleep() {
-        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
-        XCTAssertFalse(offsetExpired(st, now: at(101, 5), sun: 0.29, dayOf: utcDay))
-        XCTAssertTrue(offsetExpired(st, now: at(101, 5), sun: 0.3, dayOf: utcDay))
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(4, 10, 23))
+        XCTAssertFalse(offsetExpired(st, now: utc(4, 11, 4), sun: 0.29, dayOf: utcDay, place: temperate))
+        XCTAssertTrue(offsetExpired(st, now: utc(4, 11, 4), sun: 0.3, dayOf: utcDay, place: temperate))
+    }
+    func testADaytimeDistanceSetInTheEveningDoesNotComeBackInTheMorning() {
+        // Set at 20:00 in June with the sun up; the next tick is 07:30 and the sun is up again.
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 1, offsetAt: utc(6, 20, 20))
+        let s = decide(current: 50, want: 70, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.5,
+                       now: utc(6, 21, 7.5), dayOf: utcDay, place: temperate)
+        XCTAssertNil(s.state.offset)
+        XCTAssertEqual(s.write, 70)
+        XCTAssertFalse(s.manual)
+    }
+    func testWithoutALocationANightDistanceEndsAfterEighteenHoursAndADayOneWithTheDay() {
+        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 19))
+        XCTAssertFalse(offsetExpired(night, now: utc(12, 15, 19) + 17.9 * 3600, sun: 1, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(night, now: utc(12, 15, 19) + 18.1 * 3600, sun: 0, dayOf: utcDay))
+        let day = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: utc(6, 20, 10))
+        XCTAssertFalse(offsetExpired(day, now: utc(6, 20, 23.5), sun: 0, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(day, now: utc(6, 21, 0.5), sun: 0.5, dayOf: utcDay))
     }
     func testEveryDistanceEndsAfterThirtySixHours() {
-        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 0))
-        XCTAssertFalse(offsetExpired(night, now: at(100, 0) + offsetMaxAge, sun: 0, dayOf: utcDay))
-        XCTAssertTrue(offsetExpired(night, now: at(100, 0) + offsetMaxAge + 1, sun: 0, dayOf: utcDay))
-        let day = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 1, offsetAt: at(100, 12))
-        XCTAssertTrue(offsetExpired(day, now: at(100, 12) + offsetMaxAge + 1, sun: 1, dayOf: { _ in 7 }))
+        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 0))
+        XCTAssertFalse(offsetExpired(night, now: utc(12, 15, 0) + offsetMaxAge, sun: 0, dayOf: utcDay, place: polar))
+        XCTAssertTrue(offsetExpired(night, now: utc(12, 15, 0) + offsetMaxAge + 1, sun: 0, dayOf: utcDay, place: polar))
+        let day = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 1, offsetAt: utc(6, 20, 12))
+        XCTAssertTrue(offsetExpired(day, now: utc(6, 20, 12) + offsetMaxAge + 1, sun: 1, dayOf: { _ in 7 }, place: polar))
     }
-    func testADaytimeDistanceCarriesPastMidnightWhileTheSunIsStillUp() {
-        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: at(100, 20))
-        XCTAssertFalse(offsetExpired(st, now: at(101, 1), sun: 0.1, dayOf: utcDay))   // polar day, new calendar day
-        XCTAssertTrue(offsetExpired(st, now: at(101, 1), sun: 0, dayOf: utcDay))      // a normal midnight
-        XCTAssertFalse(offsetExpired(st, now: at(100, 23), sun: 0, dayOf: utcDay))    // same day: the fade handles it
+    func testADaytimeDistanceCarriesPastMidnightOnlyInAPolarDay() {
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: utc(6, 20, 20))
+        XCTAssertFalse(offsetExpired(st, now: utc(6, 21, 1), sun: 0.1, dayOf: utcDay, place: polar))        // polar day, new calendar day
+        XCTAssertTrue(offsetExpired(st, now: utc(6, 21, 9), sun: 1, dayOf: utcDay, place: polar))           // but not for more than 12 hours
+        XCTAssertTrue(offsetExpired(st, now: utc(6, 21, 1), sun: 0, dayOf: utcDay, place: temperate))       // a normal midnight
+        XCTAssertFalse(offsetExpired(st, now: utc(6, 20, 23), sun: 0, dayOf: utcDay, place: temperate))     // same day: the fade handles it
     }
     func testASavedHoldIsRewrittenWhenOnlyTheOffsetTimeChanges() {
         var saved = SavedHolds()
@@ -853,6 +891,10 @@ final class SyncTests: XCTestCase {
         XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 159))
         XCTAssertTrue(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 160))
     }
+    func testOnlyGatewayStatusesAreTransient() {
+        for code in [502, 503, 504] { XCTAssertTrue(HAErrorRule.transient(status: code), "\(code)") }
+        for code in [400, 401, 403, 404, 500, 501, 505, 0] { XCTAssertFalse(HAErrorRule.transient(status: code), "\(code)") }
+    }
     func testHAErrorTokenProblemsShowAtOnce() {
         XCTAssertTrue(HAErrorRule.shouldShow(transient: false, downSince: nil, now: 0))
         XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
@@ -1086,6 +1128,8 @@ final class AuditLogicTests: XCTestCase {
         XCTAssertFalse(lightHistoryDue(elapsed: 3599, hasReference: true, young: true))
         XCTAssertFalse(lightHistoryDue(elapsed: 3600, hasReference: true, young: false))
         XCTAssertTrue(lightHistoryDue(elapsed: 86400, hasReference: true, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: -3600, hasReference: true, young: false))    // the clock was set back
+        XCTAssertTrue(lightHistoryDue(elapsed: -1, hasReference: false, young: false))
     }
     func testARetryStampMakesTheHistoryDueInAnHourNotOnTheNextTick() {
         let now = 1_000_000.0

@@ -191,8 +191,8 @@ public enum MonitorMatch {
         var best: (index: Int, length: Int)?
         for (i, m) in matches.enumerated() {
             let t = m.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty, name.localizedCaseInsensitiveContains(t), t.count > (best?.length ?? 0) else { continue }
-            best = (i, t.count)
+            guard !t.isEmpty, name.localizedCaseInsensitiveContains(t), t.utf16.count > (best?.length ?? 0) else { continue }
+            best = (i, t.utf16.count)
         }
         return best?.index
     }

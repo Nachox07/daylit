@@ -245,35 +245,74 @@ public class DecideTests {
         Assert.Equal(1000, h.Restore("m", 2000)?.OffsetAt);
     }
 
+    // A date in 2026 in UTC, as Unix seconds (real dates, so the sun samples are the season's).
+    static double UtcAt(int month, int day, double hour) => new DateTimeOffset(2026, month, day, 0, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds() + hour * 3600;
+    static readonly (double Lat, double Lon) Polar = (78, 15);
+    static readonly (double Lat, double Lon) Temperate = (36.7, 0);
+
     [Fact]
     public void ANightDistanceLastsAsLongAsItStaysDark() {
-        var st = new Hold(null, 30, 50, -20, 0, At(100, 23));
-        Assert.NotNull(DN(30, 50, st, 0, At(101, 6)).State.Offset);
-        Assert.NotNull(DN(30, 50, st, 0, At(101, 20)).State.Offset);   // a polar night: still dark the next evening
+        // A real polar night: the sun does not reach the fade edge for days, so a night distance stays.
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 23));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(12, 16, 20), 0, UtcDay, Polar));
+        var s = Rules.Decide(30, 50, null, st, true, true, 0, now: UtcAt(12, 16, 20), dayOf: UtcDay, place: Polar);
+        Assert.NotNull(s.State.Offset);
+    }
+
+    [Fact]
+    public void ANightDistanceSetInTheEveningEndsAfterASleepThroughTheDay() {
+        // Set at 19:00 in December, nobody ticked while the sun was up, next evening it is dark again.
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 19));
+        Assert.True(Rules.OffsetExpired(st, UtcAt(12, 16, 19), 0, UtcDay, Temperate));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(12, 16, 4), 0, UtcDay, Temperate));   // still the same night
+        var s = Rules.Decide(30, 50, null, st, true, true, 0, now: UtcAt(12, 16, 19), dayOf: UtcDay, place: Temperate);
+        Assert.Null(s.State.Offset);
+        Assert.Equal(50, s.Write);
     }
 
     [Fact]
     public void ANightDistanceEndsWhenDaylightPassesTheFadeEdgeEvenAfterASleep() {
-        var st = new Hold(null, 30, 50, -20, 0, At(100, 23));
-        Assert.False(Rules.OffsetExpired(st, At(101, 5), 0.29, UtcDay));
-        Assert.True(Rules.OffsetExpired(st, At(101, 5), 0.3, UtcDay));
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(4, 10, 23));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(4, 11, 4), 0.29, UtcDay, Temperate));
+        Assert.True(Rules.OffsetExpired(st, UtcAt(4, 11, 4), 0.3, UtcDay, Temperate));
+    }
+
+    [Fact]
+    public void ADaytimeDistanceSetInTheEveningDoesNotComeBackInTheMorning() {
+        // Set at 20:00 in June with the sun up; the next tick is 07:30 and the sun is up again.
+        var st = new Hold(null, 50, 70, -20, 1, UtcAt(6, 20, 20));
+        var s = Rules.Decide(50, 70, null, st, true, true, 0.5, now: UtcAt(6, 21, 7.5), dayOf: UtcDay, place: Temperate);
+        Assert.Null(s.State.Offset);
+        Assert.Equal(70, s.Write);
+        Assert.False(s.Manual);
+    }
+
+    [Fact]
+    public void WithoutALocationANightDistanceEndsAfterEighteenHoursAndADayOneWithTheDay() {
+        var night = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 19));
+        Assert.False(Rules.OffsetExpired(night, UtcAt(12, 15, 19) + 17.9 * 3600, 1, UtcDay));
+        Assert.True(Rules.OffsetExpired(night, UtcAt(12, 15, 19) + 18.1 * 3600, 0, UtcDay));
+        var day = new Hold(null, 50, 70, -20, 0.8, UtcAt(6, 20, 10));
+        Assert.False(Rules.OffsetExpired(day, UtcAt(6, 20, 23.5), 0, UtcDay));
+        Assert.True(Rules.OffsetExpired(day, UtcAt(6, 21, 0.5), 0.5, UtcDay));
     }
 
     [Fact]
     public void EveryDistanceEndsAfterThirtySixHours() {
-        var night = new Hold(null, 30, 50, -20, 0, At(100, 0));
-        Assert.False(Rules.OffsetExpired(night, At(100, 0) + Rules.OffsetMaxAge, 0, UtcDay));
-        Assert.True(Rules.OffsetExpired(night, At(100, 0) + Rules.OffsetMaxAge + 1, 0, UtcDay));
-        var day = new Hold(null, 30, 50, -20, 1, At(100, 12));
-        Assert.True(Rules.OffsetExpired(day, At(100, 12) + Rules.OffsetMaxAge + 1, 1, _ => 7));
+        var night = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 0));
+        Assert.False(Rules.OffsetExpired(night, UtcAt(12, 15, 0) + Rules.OffsetMaxAge, 0, UtcDay, Polar));
+        Assert.True(Rules.OffsetExpired(night, UtcAt(12, 15, 0) + Rules.OffsetMaxAge + 1, 0, UtcDay, Polar));
+        var day = new Hold(null, 30, 50, -20, 1, UtcAt(6, 20, 12));
+        Assert.True(Rules.OffsetExpired(day, UtcAt(6, 20, 12) + Rules.OffsetMaxAge + 1, 1, _ => 7, Polar));
     }
 
     [Fact]
-    public void ADaytimeDistanceCarriesPastMidnightWhileTheSunIsStillUp() {
-        var st = new Hold(null, 50, 70, -20, 0.8, At(100, 20));
-        Assert.False(Rules.OffsetExpired(st, At(101, 1), 0.1, UtcDay));   // polar day, new calendar day
-        Assert.True(Rules.OffsetExpired(st, At(101, 1), 0, UtcDay));      // a normal midnight
-        Assert.False(Rules.OffsetExpired(st, At(100, 23), 0, UtcDay));    // same day: the fade handles it
+    public void ADaytimeDistanceCarriesPastMidnightOnlyInAPolarDay() {
+        var st = new Hold(null, 50, 70, -20, 0.8, UtcAt(6, 20, 20));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(6, 21, 1), 0.1, UtcDay, Polar));        // polar day, new calendar day
+        Assert.True(Rules.OffsetExpired(st, UtcAt(6, 21, 9), 1, UtcDay, Polar));           // but not for more than 12 hours
+        Assert.True(Rules.OffsetExpired(st, UtcAt(6, 21, 1), 0, UtcDay, Temperate));       // a normal midnight
+        Assert.False(Rules.OffsetExpired(st, UtcAt(6, 20, 23), 0, UtcDay, Temperate));     // same day: the fade handles it
     }
 
     [Fact]
@@ -788,6 +827,10 @@ public class HaErrorRuleTests {
         Assert.False(HaErrorRule.ShouldShow(true, null, 100));
         Assert.False(HaErrorRule.ShouldShow(true, 100, 159));
         Assert.True(HaErrorRule.ShouldShow(true, 100, 160));
+    }
+    [Fact] public void OnlyGatewayStatusesAreTransient() {
+        foreach (var code in new[] { 502, 503, 504 }) Assert.True(HaErrorRule.Transient(code), code.ToString());
+        foreach (var code in new[] { 400, 401, 403, 404, 500, 501, 505, 0 }) Assert.False(HaErrorRule.Transient(code), code.ToString());
     }
     [Fact] public void TokenProblemsShowAtOnce() {
         Assert.True(HaErrorRule.ShouldShow(false, null, 0));
