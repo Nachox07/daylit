@@ -354,7 +354,6 @@ sealed class SettingsWindow : Window {
             // The example shows in grey while the box is empty, so it does not read as a value.
             var hint = new TextBlock { Text = "e.g. " + placeholder, Opacity = 0.45, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center,
                                        Margin = new Thickness(7, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
-            System.Windows.Automation.AutomationProperties.SetAccessibilityView(hint, System.Windows.Automation.Peers.AccessibilityView.Raw);
             t.TextChanged += (_, _) => hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             cell = new Grid { Children = { t, hint } };
