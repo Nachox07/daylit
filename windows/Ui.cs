@@ -129,11 +129,11 @@ sealed class Flyout : Window {
 
         // A newer Daylit: one line, Download (the release page), What's new and Not now. Release notes are plain text.
         updateText = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
-        var download = new Button { Content = "Download", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 8, 0), ToolTip = "Open the release page" };
+        var download = new Button { Content = "Download", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 6, 0), ToolTip = "Open the release page" };
         download.Click += (_, _) => app.DownloadUpdate();
-        whatsNew = new Button { Content = "What's new", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 8, 0) };
+        whatsNew = new Button { Content = "What's new", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 6, 0) };
         whatsNew.Click += (_, _) => app.ToggleUpdateNotes();
-        var later = new Button { Content = "Not now", Padding = new Thickness(12, 4, 12, 4), ToolTip = "Not for this version; a newer one shows again" };
+        var later = new Button { Content = "Not now", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), ToolTip = "Not for this version; a newer one shows again" };
         later.Click += (_, _) => app.DismissUpdate();
         updateNotes = Small(""); updateNotes.Margin = new Thickness(0, 8, 0, 0);
         updateBox = new StackPanel { Margin = new Thickness(2, 12, 2, 0), Visibility = Visibility.Collapsed, Children = {
