@@ -74,6 +74,10 @@ public struct SettingsEdit: Equatable {
     public var pushEditable = false
     /// homeAssistant.push (experimental); nil removes the key (off is the default), false is written as false.
     public var push: Bool? = nil
+    /// The window shows the "Automatically check for updates" switch. When false, `checkUpdates` in the file is kept as it is.
+    public var checkUpdatesEditable = false
+    /// checkUpdates; nil or true removes the key (on is the default), false is written as false.
+    public var checkUpdates: Bool? = nil
     /// Tuning values keyed "group.key"; a known key missing here is removed (back to its default).
     public var tuning: [String: Double] = [:]
     /// tuning.theme.room; nil or true removes the key (true is the default).
@@ -115,6 +119,7 @@ public enum ConfigPatch {
         }
         if e.pushEditable { ha["push"] = e.push }
         root["homeAssistant"] = ha.isEmpty ? nil : ha
+        if e.checkUpdatesEditable { root["checkUpdates"] = e.checkUpdates == false ? false : nil }
 
         if let raw = root["monitors"], !(raw is NSNull), !(raw is [[String: Any]]) {
             throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
