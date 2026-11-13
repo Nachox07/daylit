@@ -144,9 +144,9 @@ public class ChartTests {
 
     [Fact]
     public void ALinkedMonitorEndsOnTheGroupsLevel() {
-        var d = Chart.Explain(80, 60, 30, 30, 40, false, linked: 64, leader: "Studio Display");
+        var d = Chart.Explain(80, 60, 30, 30, 40, false, linked: 64, leader: "LG 27UP850");
         Assert.Equal(64, d.Level);
-        Assert.Equal(new DecisionStep("Linked to Studio Display", "→ 64", Final: true), d.Steps[^1]);
+        Assert.Equal(new DecisionStep("Linked to LG 27UP850", "→ 64", Final: true), d.Steps[^1]);
     }
 
     [Fact]

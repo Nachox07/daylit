@@ -49,14 +49,14 @@ static class Snapshots {
             SettingsWindow.FixedTokenStored = true;
             SettingsWindow.FixedNow = DateTimeOffset.FromUnixTimeSeconds(1_781_870_400);   // 2026-06-19 12:00 UTC
             foreach (var pane in new[] { "displays", "automatic", "homeAssistant", "appearance", "app" }) {
-                var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp, pane);
+                var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("LG 27UP850", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp, pane);
                 Save(Frame(settings.Detach(), 860, Palette.Solid, 8), Path.Combine(dir, $"settings-{pane.ToLowerInvariant()}-{mode}.png"));
                 settings.Close();
             }
             foreach (var (name, chart) in ChartScenes())
                 Save(Frame(chart(), 632, Palette.Solid, 0), Path.Combine(dir, $"{name}-{mode}.png"));
             var osd = new Osd();
-            Save(Frame(osd.Detach("Studio Display", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
+            Save(Frame(osd.Detach("LG 27UP850", 72), 260, Brushes.Transparent, 0), Path.Combine(dir, $"osd-{mode}.png"));
             osd.Close();
         }
         File.Delete(tmp);
@@ -66,7 +66,7 @@ static class Snapshots {
     const string SettingsJson = """
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
-          "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
+          "monitors": [ { "match": "27UP850", "day": 75, "blindDown": 45, "night": 25 },
                         { "match": "U2723QE", "contrast": 60, "homeAssistant": { "day": "input_number.dell_day" } } ],
           "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """;
@@ -74,7 +74,7 @@ static class Snapshots {
     /// The brightness chart from fixed state: Greenwich (or 80°N), UTC, levels 90 / 70 / 45, a blind 40% open,
     /// clouds capping daylight at 80% and a hand-set +6, unless a scene says otherwise. The Mac draws the same scenes.
     static IEnumerable<(string name, Func<FrameworkElement> chart)> ChartScenes() {
-        ChartMonitor[] mons = [new("a", "Studio Display", 90, 70, 45), new("b", "Dell U2723QE", 80, 60, 30)];
+        ChartMonitor[] mons = [new("a", "LG 27UP850", 90, 70, 45), new("b", "Dell U2723QE", 80, 60, 30)];
         var plusSix = new Dictionary<string, (int Value, double Weight)> { ["a"] = (6, 1) };
         var live = new LiveInputs(Pos: 40, Lights: false, Light: 0.8, Offsets: plusSix);
         static DateTimeOffset Date(string iso) => DateTimeOffset.Parse(iso, System.Globalization.CultureInfo.InvariantCulture);
@@ -100,7 +100,7 @@ static class Snapshots {
     static IEnumerable<(string name, string json, Func<List<Mon>> mons, bool sync, string subtitle)> Scenes() {
         const string sun = """{ "source": "sun", "location": { "latitude": 51.4769, "longitude": -0.0005 } }""";
         const string ha = """{ "source": "homeAssistant", "homeAssistant": { "url": "http://homeassistant.local:8123" } }""";
-        List<Mon> Two() => new() { Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48) };
+        List<Mon> Two() => new() { Fake("LG 27UP850", 72, hdr: true), Fake("Dell U2723QE", 48) };
         yield return ("panel-two", sun, Two, false, "Sun · 21.7° above the horizon");
         yield return ("panel-two-linked", sun, Two, true, "Sun · 21.7° above the horizon");
         yield return ("panel-three-linked", sun, () => [.. Two(), Fake("LG 27UK850", 60)], true, "Sun · 21.7° above the horizon");

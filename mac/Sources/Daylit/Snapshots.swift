@@ -26,9 +26,9 @@ import DaylitCore
             if sync { d.syncOffsets = SyncOffsets(levels: mons.map { (key: $0.uuid, level: Int($0.level)) }) }
             return d
         }
-        let two = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48)]
+        let two = [mon(1, "LG 27UP850", 72), mon(2, "Dell U2723QE", 48)]
         let three = two + [mon(3, "LG 27UK850", 60)]
-        let settingsMons = [mon(1, "Studio Display", 72), mon(2, "Dell U2723QE", 48, control: .ddc)]   // the Dell over DDC: its contrast box shows
+        let settingsMons = [mon(1, "LG 27UP850", 72), mon(2, "Dell U2723QE", 48, control: .ddc)]   // the Dell over DDC: its contrast box shows
         return [
             ("panel-two", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon")))),
             ("panel-two-linked", AnyView(Panel(m: model(two, source: .sun, detail: "Sun · 21.7° above the horizon", sync: true)))),
@@ -61,7 +61,7 @@ import DaylitCore
                 return d
             }()))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
-            ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
+            ("hud", AnyView(HUDView(label: "LG 27UP850", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [
             ("settings-displays", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator()))),
             ("settings-automatic", AnyView(SettingsView(m: model(settingsMons, source: .homeAssistant), close: {}, file: settingsFile(), locator: Locator(), initialPane: .automatic))),
@@ -75,7 +75,7 @@ import DaylitCore
     /// clouds capping daylight at 80% and a hand-set +6, unless a scene says otherwise.
     static func chartScenes() -> [(String, AnyView)] {
         let gmt = TimeZone(identifier: "GMT")!
-        let mons = [ChartMonitor(id: "a", label: "Studio Display", day: 90, blindDown: 70, night: 45),
+        let mons = [ChartMonitor(id: "a", label: "LG 27UP850", day: 90, blindDown: 70, night: 45),
                     ChartMonitor(id: "b", label: "Dell U2723QE", day: 80, blindDown: 60, night: 30)]
         let live = LiveInputs(pos: 40, lights: false, light: 0.8, offsets: ["a": (6, 1)])
         func date(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
@@ -105,7 +105,7 @@ import DaylitCore
         PanelBackground.plain = true
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let gmt = TimeZone(identifier: "GMT")!
-        let mons = [ChartMonitor(id: "a", label: "Studio Display", day: 90, blindDown: 70, night: 45)]
+        let mons = [ChartMonitor(id: "a", label: "LG 27UP850", day: 90, blindDown: 70, night: 45)]
         func date(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
         let june = date("2026-06-19T00:00:00Z")
         func ease(_ i: Int, _ n: Int) -> Double { let x = Double(i) / Double(max(n - 1, 1)); return x * x * (3 - 2 * x) }
@@ -155,7 +155,7 @@ import DaylitCore
         try? Data("""
         { "source": "homeAssistant", "location": { "latitude": 51.48, "longitude": 0.00 },
           "homeAssistant": { "url": "http://homeassistant.local:8123", "cover": "cover.office_blind", "lights": "light.office" },
-          "monitors": [ { "match": "Studio", "day": 75, "blindDown": 45, "night": 25 },
+          "monitors": [ { "match": "27UP850", "day": 75, "blindDown": 45, "night": 25 },
                         { "match": "U2723QE", "contrast": 60, "homeAssistant": { "day": "input_number.dell_day" } } ],
           "tuning": { "brightness": { "sunDay": 15 }, "theme": { "lightSunAbove": 6 } } }
         """.utf8).write(to: u)
