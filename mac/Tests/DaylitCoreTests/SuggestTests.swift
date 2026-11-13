@@ -208,7 +208,7 @@ final class SuggestTriggerTests: XCTestCase {
         XCTAssertEqual(Suggestion.fmt(62), "62")
         XCTAssertEqual(Suggestion.fmt(62.004), "62")
         let up = Suggestion(monitor: "m", changes: [LevelChange(level: .night, from: 20, to: 30)], amount: 8, lower: false, samples: 3, days: 3)
-        XCTAssertEqual(up.sentence(label: "Monitor"), "You raise Monitor by about 8 in the evening. Set night 20 → 30?")
+        XCTAssertEqual(up.sentence(label: "Monitor"), "You raise Monitor by about 8 when the room is dim. Set night 20 → 30?")
     }
 }
 
@@ -451,7 +451,8 @@ final class SuggestFixtureTests: XCTestCase {
              Fixture.sample(6 + d, 15, elev: e.1, p: 0.58, chosen: 72, levels: l)]
         }
         XCTAssertEqual(samples.map(\.auto), [75, 79, 75, 79, 75, 78])
-        XCTAssertEqual(Suggest.candidates(samples, dayOf: Fixture.utcDay), [])   // no level reaches 0.55 of the weight
+        // Day and blind down never reach 0.55 of the weight; night is the largest at 0.45 or more only on two days.
+        XCTAssertEqual(Suggest.candidates(samples, dayOf: Fixture.utcDay), [])
         XCTAssertNil(Suggest.suggestion(monitor: "m", samples: samples, levels: l, steps: [.whole, .whole, .whole],
                                         now: Fixture.t0 + 10 * 86400, dismissedUntil: nil, dayOf: Fixture.utcDay))
     }

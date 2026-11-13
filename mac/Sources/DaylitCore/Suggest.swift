@@ -3,15 +3,18 @@
 // Suggest.suggestion for a change to offer in the panel. Same rules on Windows (windows/Suggest.cs).
 import Foundation
 
-/// The three levels of a monitor, in the order `target` and the config use them.
+/// The levels of a monitor, in the order `target` and the config use them: day, blind down, night and the
+/// optional lights-on night level (nightLights).
 public enum Level: Int, CaseIterable, Codable {
-    case day = 0, blindDown = 1, night = 2
+    case day = 0, blindDown = 1, night = 2, nightLights = 3
     /// As the panel says it.
-    public var name: String { ["day", "blind down", "night"][rawValue] }
-    /// The config key: monitors[].day / blindDown / night.
-    public var key: String { ["day", "blindDown", "night"][rawValue] }
+    public var name: String { ["day", "blind down", "night", "lights on"][rawValue] }
+    /// The config key: monitors[].day / blindDown / night / nightLights.
+    public var key: String { ["day", "blindDown", "night", "nightLights"][rawValue] }
     /// When this level is the one that counts most.
-    public var situation: String { ["with the blind open", "with the blind partly or fully down", "in the evening"][rawValue] }
+    public var situation: String {
+        ["with the blind open", "with the blind partly or fully down", "when the room is dim", "with the lights on"][rawValue]
+    }
 }
 
 /// One deliberate correction by hand.
@@ -32,22 +35,41 @@ public struct Sample: Codable, Equatable {
 }
 
 public enum Suggest {
-    /// A level "carries most of the weight" in a sample from this weight (0.55, so a blind exactly 40% open still counts).
+    /// Day or blind down "carries most of the weight" in a sample from this weight (0.55, so a blind exactly 40% open still counts).
     public static let dominant = 0.55
+    /// Night or the lights-on level carries most of the weight when its weight is the largest of the four and at
+    /// least this much (with the lights on at dusk the two share what daylight leaves, so neither reaches 0.55).
+    public static let dimDominant = 0.45
     /// A level is a candidate only with dominant samples on this many local days.
     public static let minDays = 3
 
     /// How much each level counts in `target` for a sample: [day, blindDown, night], summing to 1.
     public static func weights(s: Double, p: Double) -> [Double] { [s * p, s * (1 - p), 1 - s] }
 
-    /// Whether `level` carries most of the weight in this sample.
-    public static func dominates(_ x: Sample, _ level: Level) -> Bool {
-        weights(s: x.s, p: x.p)[level.rawValue] >= dominant - 1e-9
+    /// How much each level counts in `target` for a sample: [day, blindDown, night, nightLights], summing to 1.
+    /// With a nightLights level and the lights on, what daylight leaves is split between night (sun high) and
+    /// nightLights (sun down): [s·p, s·(1−p), (1−s)·sun, (1−s)·(1−sun)], sun the elevation's own daylight
+    /// fraction (no cloud cap). Otherwise [s·p, s·(1−p), 1−s, 0].
+    public static func weights(_ x: Sample, nightLights: Bool, tuning: Tuning = Tuning()) -> [Double] {
+        let w = weights(s: x.s, p: x.p)
+        guard nightLights && x.lights else { return w + [0] }
+        let sun = daylightFraction(elevation: x.elev, tuning: tuning)
+        return [w[0], w[1], w[2] * sun, w[2] * (1 - sun)]
+    }
+
+    /// Whether `level` carries most of the weight in this sample (with the levels the sample was taken with).
+    public static func dominates(_ x: Sample, _ level: Level, tuning: Tuning = Tuning()) -> Bool {
+        let w = weights(x, nightLights: nightLightsLevel(x.levels) != nil, tuning: tuning), v = w[level.rawValue]
+        switch level {
+        case .day, .blindDown: return v >= dominant - 1e-9
+        case .night, .nightLights:   // a tie for the largest weight counts for neither
+            return v >= dimDominant - 1e-9 && w.indices.allSatisfy { $0 == level.rawValue || v > w[$0] + 1e-9 }
+        }
     }
 
     /// The levels the samples can tell apart: dominant samples on at least `minDays` different local days.
-    public static func candidates(_ samples: [Sample], dayOf: (Double) -> Int = { localDay($0) }) -> [Level] {
-        Level.allCases.filter { l in Set(samples.filter { dominates($0, l) }.map { dayOf($0.at) }).count >= minDays }
+    public static func candidates(_ samples: [Sample], tuning: Tuning = Tuning(), dayOf: (Double) -> Int = { localDay($0) }) -> [Level] {
+        Level.allCases.filter { l in Set(samples.filter { dominates($0, l, tuning: tuning) }.map { dayOf($0.at) }).count >= minDays }
     }
 }
 
@@ -55,16 +77,19 @@ extension Suggest {
     /// Least squares for the candidate levels, the others held at their current values, with a pull of
     /// weight 1 toward the current value (as one extra sample at the current level):
     ///     minimise Σ (chosen − x·L)² + Σ_candidates (L_k − current_k)²
-    /// Returns all three levels, each fitted one clamped to 0–100 (not rounded: see roundToStep).
-    public static func fit(_ samples: [Sample], levels: [Double], candidates: [Level]) -> [Double] {
-        let c = candidates.map(\.rawValue), n = c.count
-        guard n > 0, levels.count >= 3 else { return levels }   // a fourth level (nightLights) is kept as it is
+    /// The weights come from `levels` (four with nightLights), not from the levels each sample was taken with.
+    /// Returns all the levels, each fitted one clamped to 0–100 (not rounded: see roundToStep).
+    public static func fit(_ samples: [Sample], levels: [Double], candidates: [Level], tuning: Tuning = Tuning()) -> [Double] {
+        let hasNL = nightLightsLevel(levels) != nil
+        // nightLights can only be fitted on a monitor that has one.
+        let c = candidates.map(\.rawValue).filter { $0 < 3 || hasNL }, n = c.count
+        guard n > 0, (3...4).contains(levels.count) else { return levels }
         var a = [[Double]](repeating: [Double](repeating: 0, count: n), count: n)
         var b = [Double](repeating: 0, count: n)
         for x in samples {
-            let w = weights(s: x.s, p: x.p)
+            let w = weights(x, nightLights: hasNL, tuning: tuning)
             var y = Double(x.chosen)
-            for k in 0..<3 where !c.contains(k) { y -= w[k] * levels[k] }
+            for k in 0..<levels.count where !c.contains(k) { y -= w[k] * levels[k] }
             for i in 0..<n {
                 b[i] += w[c[i]] * y
                 for j in 0..<n { a[i][j] += w[c[i]] * w[c[j]] }
@@ -127,12 +152,16 @@ extension Suggest {
     }
 }
 
-/// One level to change: from its current value to the proposed one.
+/// One level to change: from its current value to the proposed one. `added`: the monitor has no such level
+/// yet (only nightLights): Apply adds it at `to`, and `from` is the same value (what the lights give now).
 public struct LevelChange: Equatable {
     public var level: Level
     public var from: Double
     public var to: Double
-    public init(level: Level, from: Double, to: Double) { self.level = level; self.from = from; self.to = to }
+    public var added: Bool
+    public init(level: Level, from: Double, to: Double, added: Bool = false) {
+        self.level = level; self.from = from; self.to = to; self.added = added
+    }
 }
 
 /// What the panel offers for one monitor.
@@ -148,9 +177,10 @@ public struct Suggestion: Equatable {
     }
 
     public var main: Level { changes[0].level }
-    /// "blind down 78 → 62, day 100 → 95"
+    /// "blind down 78 → 62, day 100 → 95"; an added level reads "lights on 80 (new)".
     public var changeText: String {
-        changes.map { "\($0.level.name) \(Self.fmt($0.from)) → \(Self.fmt($0.to))" }.joined(separator: ", ")
+        changes.map { $0.added ? "\($0.level.name) \(Self.fmt($0.to)) (new)" : "\($0.level.name) \(Self.fmt($0.from)) → \(Self.fmt($0.to))" }
+            .joined(separator: ", ")
     }
     /// The panel line: "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62?"
     public func sentence(label: String) -> String {
@@ -198,40 +228,69 @@ extension Suggest {
 
     /// The change to offer for one monitor, or nil.
     /// - samples: all recorded samples (other monitors' and stale ones are ignored here)
-    /// - levels: the monitor's [day, blindDown, night] now
-    /// - steps: per level, what it can be stored as; nil = it comes from Home Assistant and is unavailable now
+    /// - levels: the monitor's [day, blindDown, night] now, plus nightLights when it has one
+    /// - steps: per level [day, blindDown, night, nightLights], what it can be stored as; nil = it comes from Home
+    ///   Assistant and is unavailable now. For a monitor without nightLights, steps[3] non-nil means one may be
+    ///   added (the room lights come from Home Assistant); three steps = never.
     /// - dismissedUntil: "Not now" was clicked; nothing until this time
     public static func suggestion(monitor: String, samples all: [Sample], levels: [Double], steps: [NumberStep?], now: Double,
                                   dismissedUntil: Double?, tuning: Tuning = Tuning(),
                                   dayOf: (Double) -> Int = { localDay($0) }) -> Suggestion? {
         if let d = dismissedUntil, now < d { return nil }
-        guard (3...4).contains(levels.count), steps.count == 3 else { return nil }
+        guard (3...4).contains(levels.count), (3...4).contains(steps.count) else { return nil }
         let mine = dropOld(all, now: now).filter { $0.monitor == monitor && sameLevels($0.levels, levels) }
-        let cand = candidates(mine, dayOf: dayOf).filter { steps[$0.rawValue] != nil }
+        let cand = candidates(mine, tuning: tuning, dayOf: dayOf).filter { $0.rawValue < steps.count && steps[$0.rawValue] != nil }
         guard !cand.isEmpty else { return nil }
-        let fitted = fit(mine, levels: levels, candidates: cand)
-        var proposed = levels
-        var changes: [LevelChange] = []
-        for l in cand {
-            guard let v = roundToStep(fitted[l.rawValue], steps[l.rawValue]!) else { continue }
-            if abs(v - levels[l.rawValue]) >= minMove - 1e-9 {
-                proposed[l.rawValue] = v
-                changes.append(LevelChange(level: l, from: levels[l.rawValue], to: v))
+        let base = proposal(mine, levels: levels, candidates: cand, steps: steps, tuning: tuning)
+        var picked: (levels: [Double], changes: [LevelChange])?
+        // Lowering night on a monitor without nightLights would lower its lit evenings too (the boost sits on top of
+        // night). Offer the pair instead: add nightLights where the lights put it today (night + the boost) and
+        // lower night, refitted and scored with the four-level rule. A lit evening stays where it is.
+        if nightLightsLevel(levels) == nil, levels.count == 3, steps.count == 4, let nlStep = steps[3],
+           base.changes.contains(where: { $0.level == .night && $0.to < $0.from }),
+           let start = roundToStep(levels[2] + tuning.lightsBoost, nlStep) {
+            let four = levels + [start]
+            var pair = proposal(mine, levels: four, candidates: cand.filter { $0 != .nightLights }, steps: steps, tuning: tuning)
+            if pair.changes.contains(where: { $0.level == .night && $0.to < $0.from }) {
+                pair.changes.append(LevelChange(level: .nightLights, from: start, to: start, added: true))
+                if gain(mine, from: levels, to: pair.levels, tuning: tuning) >= minGain - 1e-9 { picked = pair }
             }
         }
-        guard !changes.isEmpty else { return nil }
-        let gain = meanAbsError(mine, levels: levels, tuning: tuning) - meanAbsError(mine, levels: proposed, tuning: tuning)
-        guard gain >= minGain - 1e-9 else { return nil }
+        if picked == nil, !base.changes.isEmpty, gain(mine, from: levels, to: base.levels, tuning: tuning) >= minGain - 1e-9 { picked = base }
+        guard let chosen = picked else { return nil }
+        let changes = chosen.changes
         var main = changes[0]   // the one that moves most; the first of them on a tie
         for c in changes where abs(c.to - c.from) > abs(main.to - main.from) { main = c }
         let ordered = [main] + changes.filter { $0.level != main.level }
         // The sentence follows the change: only the samples that pull the same way as the proposal count for the amount.
         let lower = main.to < main.from
-        let agree = mine.filter { dominates($0, main.level) && (lower ? $0.chosen < $0.auto : $0.chosen > $0.auto) }
+        let agree = mine.filter { dominates($0, main.level, tuning: tuning) && (lower ? $0.chosen < $0.auto : $0.chosen > $0.auto) }
         guard !agree.isEmpty else { return nil }
         let mean = Double(agree.reduce(0) { $0 + abs($1.chosen - $1.auto) }) / Double(agree.count)
         return Suggestion(monitor: monitor, changes: ordered, amount: Int(mean.rounded()), lower: lower,
                           samples: mine.count, days: Set(mine.map { dayOf($0.at) }).count)
+    }
+
+    /// The fitted candidates rounded to their steps, keeping those that move at least `minMove`: the levels
+    /// they give (`levels` with those replaced) and the changes, in candidate order.
+    static func proposal(_ samples: [Sample], levels: [Double], candidates: [Level], steps: [NumberStep?],
+                         tuning: Tuning) -> (levels: [Double], changes: [LevelChange]) {
+        let fitted = fit(samples, levels: levels, candidates: candidates, tuning: tuning)
+        var proposed = levels
+        var changes: [LevelChange] = []
+        for l in candidates where l.rawValue < levels.count {
+            guard let st = steps[l.rawValue], let v = roundToStep(fitted[l.rawValue], st) else { continue }
+            if abs(v - levels[l.rawValue]) >= minMove - 1e-9 {
+                proposed[l.rawValue] = v
+                changes.append(LevelChange(level: l, from: levels[l.rawValue], to: v))
+            }
+        }
+        return (proposed, changes)
+    }
+
+    /// How much the mean absolute error falls from `from` to `to` (each scored with its own rule: three or four levels).
+    static func gain(_ samples: [Sample], from: [Double], to: [Double], tuning: Tuning) -> Double {
+        meanAbsError(samples, levels: from, tuning: tuning) - meanAbsError(samples, levels: to, tuning: tuning)
     }
 }
 
@@ -283,15 +342,13 @@ extension Suggest {
     }
 
     /// The sample for a tick where decide recorded a new hand-set level, or nil when it may not be recorded:
-    /// see SampleContext, the lights boost deciding the target, a monitor with nightLights while its lights are on and the sun is not fully up, or `chosen` / `auto` at 0 or 100 (the clamp
-    /// hides the true wish). `pos` is the blind position 0–100 (100 without a blind), `light` the cloud cap (1 without a sensor).
+    /// see SampleContext, the lights boost deciding the target, or `chosen` / `auto` at 0 or 100 (the clamp hides the
+    /// true wish). A monitor with nightLights records its lit evenings too: the four-level weights explain them. `pos` is the blind position 0–100 (100 without a blind), `light` the cloud cap (1 without a sensor).
     public static func makeSample(monitor: String, chosen: Int, auto: Int, elev: Double, pos: Double, lights: Bool, light: Double,
                                   levels: [Double], tuning: Tuning, now: Double, context: SampleContext) -> Sample? {
         if context.follower || context.writeFailed || context.idle || context.paused || context.sunFallback { return nil }
         guard (3...4).contains(levels.count), levels.allSatisfy(\.isFinite), elev.isFinite, pos.isFinite, light.isFinite,
               (1...99).contains(chosen), (1...99).contains(auto) else { return nil }
-        // With nightLights, lights on and the sun not fully up, the four-level rule decides: the three-level fit would be wrong.
-        if nightLightsLevel(levels) != nil && lights && daylightFraction(elevation: elev, tuning: tuning) < 1 { return nil }
         if boostDecides(levels: levels, elev: elev, pos: pos, lights: lights, tuning: tuning, light: light) { return nil }
         return Sample(monitor: monitor, chosen: chosen, auto: auto, s: min(daylightFraction(elevation: elev, tuning: tuning), light),
                       p: min(max(pos, 0), 100) / 100, elev: elev, lights: lights, levels: levels, at: now)
