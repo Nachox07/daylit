@@ -1,6 +1,6 @@
 cask "daylit" do
-  version "1.5.1"
-  sha256 "714056afb90b5d9659c6ff0591396a2079ee7d4d3a255d6c80d8cbb8bc3ba4a8"
+  version "1.6.0"
+  sha256 "a443df87230dbc16e462248e1aebb1e09ac721f7e3bf875775b87ec6551feddf"
 
   # DDC/CI monitors need m1ddc, which only exists for Apple silicon.
   on_arm do
