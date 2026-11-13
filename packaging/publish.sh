@@ -103,6 +103,6 @@ else
   commit "$WORK/main" "Point packaging at $VERSION"
   git -C "$WORK/main" push -q -f origin "$PB"
   [ -n "$(gh pr list -R Nachox07/daylit --head "$PB" --state open --json number -q '.[].number')" ] ||
-  gh pr create -R Nachox07/daylit --head "$PB" --base main --title "Point packaging at $VERSION" \
+  gh pr create -R Nachox07/daylit --head "$PB" --base main --label packaging --title "Point packaging at $VERSION" \
     --body "The release workflow updated the Homebrew cask and winget manifests for v$VERSION and published them. This keeps the copies in packaging/ in step."
 fi

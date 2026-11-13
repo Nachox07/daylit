@@ -1,0 +1,5 @@
+# Shapes the "What's changed" list the release workflow puts at the top of each release:
+# every pull request merged since the previous release, except the release's own bookkeeping.
+changelog:
+  exclude:
+    labels: [packaging]   # "Point packaging at X.Y.Z", opened by packaging/publish.sh
