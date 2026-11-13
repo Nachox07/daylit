@@ -13,7 +13,10 @@ import DaylitCore
     @Published var auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
     @Published var detail = ""          // one line under the Automatic switch
     @Published var lightStatus: String?  // the daylight sensor's state, for the Settings window
-    @Published var problem: String?     // config / connection problem, shown as a caption
+    @Published var problem: String? {   // config / connection problem, shown as a caption
+        didSet { if problem != LocalNetworkBlock.message { localNetworkBlocked = false } }   // Open Settings only under its own message
+    }
+    @Published var localNetworkBlocked = false   // the problem is macOS's Local Network permission: the panel offers Open Settings
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
     @Published var hasBattery = Power.hasBattery
@@ -126,9 +129,10 @@ import DaylitCore
         suggestDirty = true; stepCache = [:]; notNumber = []; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
-        configProblem = err ?? srcErr
+        let ddcNote = DDC.configure(c.ddcTool)
+        if let ddcNote { log(ddcNote) }
+        configProblem = err ?? srcErr ?? ddcNote   // shown in the panel too: an ignored ddcTool is easy to miss in the file
         problem = configProblem
-        DDC.tool = c.ddcTool ?? DDC.defaultTool
         HAClient.clearTokenCache()
         log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
@@ -158,7 +162,7 @@ import DaylitCore
         generation += 1
         let old = Dictionary(mons.map { ($0.uuid, $0) }, uniquingKeysWith: { a, _ in a })
         mons = externalScreens().map { s in
-            let cfg = config.monitors?.first { s.name.localizedCaseInsensitiveContains($0.match) }
+            let cfg = config.monitor(for: s.name)
             let control: Control
             let nativeOK = Native.usable(s.id)
             switch cfg?.control {
@@ -265,7 +269,7 @@ import DaylitCore
         wasHere = here
         guard source != .off else { return }
         let interval = PushRule.pollInterval(healthy: push.healthy, onBattery: Power.onBattery, tuning: config.tuned)
-        if Date().timeIntervalSince(lastTick) >= interval { refresh() }
+        if tickDue(elapsed: Date().timeIntervalSince(lastTick), interval: interval) { refresh() }
     }
 
     /// A level set by hand (slider or keys). With sync on, the other monitors follow with their offsets.
@@ -392,6 +396,7 @@ import DaylitCore
     func setAuto(_ on: Bool) {
         auto = on
         if source == .homeAssistant, let ha = config.homeAssistant, let sw = ha.autoSwitch {
+            // lastHAAuto is saved when Home Assistant's own answer confirms it, not before.
             Task { _ = await HAClient.call(ha, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), ["entity_id": sw]) }
         } else {
             UserDefaults.standard.set(on, forKey: "auto")
@@ -542,7 +547,7 @@ import DaylitCore
         if key != lightRefFor { lightRef = LightReference(); lightRefAt = nil; lightRefFor = key }
         // Hourly while there is no reference, or only hours of it since a unit change; then daily.
         let young = unit.historyDays(10, now: Date().timeIntervalSince1970) < 1
-        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty || young ? 3600 : 86400) { return }
+        if let at = lightRefAt, !lightHistoryDue(elapsed: Date().timeIntervalSince(at), hasReference: !lightRef.isEmpty, young: young) { return }
         lightRefBusy = true; defer { lightRefBusy = false }
         lightRefAt = Date()
         switch await HAClient.history(ha, e, days: unit.historyDays(10, now: Date().timeIntervalSince1970)) {
@@ -554,11 +559,11 @@ import DaylitCore
                       (fresh.isEmpty ? " (not enough history, trying again in an hour)" : ""))
             if !fresh.isEmpty { lightRef = fresh }
             else if lightRef.isEmpty { lightStatus = "Not enough history in Home Assistant yet: trying again in an hour." }
-            else { retryLightSoon() }   // an odd answer does not replace a good reference
+            else { retryLightSoon(young) }   // an odd answer does not replace a good reference
         case .failure:
             Log.write("light: could not read its history (\(HAClient.lastCause ?? "no answer")), trying again in an hour")
             if lightRef.isEmpty { lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour." }
-            retryLightSoon()
+            retryLightSoon(young)
         }
     }
 
@@ -574,7 +579,9 @@ import DaylitCore
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
-    func retryLightSoon() { lightRefAt = Date().addingTimeInterval(3600 - 86400) }
+    func retryLightSoon(_ young: Bool) {
+        lightRefAt = Date(timeIntervalSince1970: lightRetryStamp(now: Date().timeIntervalSince1970, hasReference: !lightRef.isEmpty, young: young))
+    }
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     func stepLight(toward goal: Double) -> Double {
@@ -596,6 +603,21 @@ import DaylitCore
     var lastHAPos: Double?
     /// The room lights Home Assistant last gave: a monitor with a nightLights level keeps them while it is down.
     var lastHALights: Bool?
+    /// The Automatic state Home Assistant last gave, kept across restarts: the sun fallback uses it, so an outage
+    /// never flips Automatic (nil: none seen yet).
+    /// Saved with the autoSwitch it was seen on; read back only while the config names that same entity.
+    var lastHAAuto: Bool? {
+        get { storedAutomatic(value: UserDefaults.standard.object(forKey: "lastHAAuto") as? Bool,
+                              entity: UserDefaults.standard.string(forKey: "lastHAAutoEntity"), configured: config.homeAssistant?.autoSwitch) }
+        set {
+            if let v = newValue, let e = config.homeAssistant?.autoSwitch, !e.isEmpty {
+                UserDefaults.standard.set(v, forKey: "lastHAAuto"); UserDefaults.standard.set(e, forKey: "lastHAAutoEntity")
+            } else { UserDefaults.standard.removeObject(forKey: "lastHAAuto"); UserDefaults.standard.removeObject(forKey: "lastHAAutoEntity") }
+        }
+    }
+    /// The missing-entity note last shown and when it was logged (the log gets it once, then every 10 minutes).
+    var missingNoteShown: String?
+    var missingNoteLoggedAt: Date?
     var lastProbe: String?
 
     func tick() async {
@@ -612,6 +634,7 @@ import DaylitCore
         let snapshot = mons
 
         // Current brightness: detects values set by hand (keys, the monitor's own buttons).
+        let beforeRead: [Int?] = snapshot.map { Int($0.level) }   // a level set by hand during the read is newer than it
         var cur: [Int?] = []
         for m in snapshot {
             switch m.control {
@@ -628,8 +651,15 @@ import DaylitCore
                 cur[i] = mons[i].readState.current(reading: cur[i], slider: Int(mons[i].level))
             }
             mons[i].available = cur[i] != nil
-            if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
+            if let v = cur[i] {
+                let held = dragging.contains(mons[i].id)
+                cur[i] = levelToDecideOn(read: v, atRead: beforeRead[i], model: Int(mons[i].level), held: held)
+                if !held { mons[i].level = Double(cur[i]!) }
+            }
         }
+
+        // What the model held right after the read: a level that differs after the Home Assistant wait was set by hand.
+        let atRead: [Int?] = mons.map { Int($0.level) }
 
         guard source != .off else { detail = ""; problem = configProblem; if live != nil { live = nil }; return }
         // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
@@ -657,8 +687,11 @@ import DaylitCore
         var linkedNow: [String: Int] = [:]   // linked followers: the level they land on (for the Settings chart)
         let now = Date().timeIntervalSince1970
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
-            guard let c0 = cur[i] else { continue }
+            guard let read = cur[i] else { continue }
             let m = mons[i]
+            // A slider or key change during the Home Assistant wait is newer than the reading: decide on that level.
+            // This decision uses it, so `touched` is cleared below like any other (a dragged slider keeps it).
+            let c0 = levelToDecideOn(read: read, atRead: atRead[i], model: Int(m.level), held: dragging.contains(m.id))
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
             let clearedAt = offsetCleared[m.uuid]
             var want = ownTarget(m)
@@ -673,49 +706,75 @@ import DaylitCore
                 state.lastSet = nil; state.offset = nil; state.offsetSun = nil; state.offsetAt = nil
             }
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
-                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
+                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now,
+                              place: config.location.map { ($0.latitude, $0.longitude) }, tuning: config.tuned)
             if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
             if !dragging.contains(m.id) { mons[i].touched = false }
             if let v = step.remote, !m.writeFailing { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
+            /// Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
+            func noteHand(_ st: HoldState, ok: Bool) {
+                if step.remote != nil {
+                    // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
+                    recorder.drop(m.uuid)
+                } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
+                    let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
+                                            sunFallback: source == .homeAssistant && !inp.fromHA)
+                    // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
+                    recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
+                        Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
+                                           light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
+                    })
+                }
+            }
+            /// Logged once when a failure starts and once when it ends, not every tick while it lasts.
+            func noteWrite(_ j: Int, ok: Bool, level v: Int) {
+                if ok == mons[j].writeFailing {
+                    Log.write(ok ? "display: \(m.label) takes brightness changes again"
+                                 : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
+                }
+                mons[j].writeFailing = !ok
+            }
             var ok = true
             if let v = step.write {
                 if step.remote == nil && !m.writeFailing { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
                 ok = await write(m, v)
-                guard gen == generation else { return }
-                // Logged once when it starts and once when it ends, not every tick while it lasts.
-                if ok == mons[i].writeFailing {
-                    Log.write(ok ? "display: \(m.label) takes brightness changes again"
-                                 : "display: \(m.label) did not take brightness \(v)%; trying again each tick")
+                guard gen == generation else {
+                    // Displays changed during the write: record what was written on the live monitor, or the next
+                    // tick reads the new level against the old lastSet and invents an offset.
+                    if let j = mons.firstIndex(where: { $0.uuid == m.uuid }), let c = writeCommit(
+                        step: step, before: state, ok: ok, clearedMeanwhile: offsetCleared[m.uuid] != clearedAt, controlChanged: mons[j].control != m.control,
+                        levelAtStart: Int(m.level), levelNow: Int(mons[j].level), held: dragging.contains(mons[j].id)) {
+                        if offsetCleared[m.uuid] != clearedAt { recorder.drop(m.uuid) }
+                        noteWrite(j, ok: ok, level: v)
+                        mons[j].lastSet = c.state.lastSet; mons[j].lastTarget = c.state.lastTarget
+                        mons[j].remoteSeen = c.state.remoteSeen; mons[j].remoteValue = c.state.remoteValue
+                        mons[j].offset = c.state.offset; mons[j].offsetSun = c.state.offsetSun; mons[j].offsetAt = c.state.offsetAt
+                        if let l = c.level { mons[j].level = Double(l) }
+                        noteHand(c.state, ok: ok)
+                        saveHolds()
+                    }
+                    return
                 }
-                mons[i].writeFailing = !ok
+                noteWrite(i, ok: ok, level: v)
             }
-            var st = step.state.afterWrite(ok: ok, before: state)   // a refused write is retried next tick
             // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
             let appliedMeanwhile = offsetCleared[m.uuid] != clearedAt
-            if appliedMeanwhile { st = Suggest.afterApply(st); recorder.drop(m.uuid) }
+            // A refused write is retried next tick.
+            let commit = writeCommit(step: step, before: state, ok: ok, clearedMeanwhile: appliedMeanwhile, controlChanged: false,
+                                     levelAtStart: Int(m.level), levelNow: Int(mons[i].level), held: dragging.contains(m.id))!
+            let st = commit.state
+            if appliedMeanwhile { recorder.drop(m.uuid) }
             if i == leader { base = syncOffsets.base(key: m.uuid, level: ok ? step.applied : c0) }   // followers go where the leader really is
             mons[i].lastSet = st.lastSet; mons[i].lastTarget = st.lastTarget; mons[i].remoteSeen = st.remoteSeen; mons[i].remoteValue = st.remoteValue
             if st.offset != m.offset, let o = st.offset {
                 Log.write("manual: \(m.label) kept \(o > 0 ? "+" : "")\(o) from the automatic level")
             }
             mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
-            // Suggestions (DaylitCore.Suggest): a new hand-set level becomes a sample once it has held 5 minutes.
-            if step.remote != nil {
-                // A Home Assistant "set" applied this tick overrides whatever was pending by hand: that change ends here.
-                recorder.drop(m.uuid)
-            } else if Suggest.isHandChange(before: state, after: step.state, remote: step.remote, now: now) {
-                let ctx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
-                                        sunFallback: source == .homeAssistant && !inp.fromHA)
-                // An offset back at 0 (st.offset == nil) passes nil, which ends the pending change.
-                recorder.handChanged(monitor: m.uuid, sample: st.offset.flatMap { o in
-                    Suggest.makeSample(monitor: m.uuid, chosen: want + o, auto: want, elev: inp.elev, pos: inp.pos, lights: lightsFor(m),
-                                       light: inp.light, levels: levels(of: m, inp), tuning: config.tuned, now: now, context: ctx)
-                })
-            }
+            noteHand(st, ok: ok)
             if let done = recorder.settle(monitor: m.uuid, held: auto && st.offset != nil, levels: levels(of: m, inp), now: now) {
                 corrections.append(done); saveCorrections(); suggestDirty = true
             }
-            if ok, let v = step.level { mons[i].level = Double(v) }
+            if let v = commit.level { mons[i].level = Double(v) }   // not over a level set by hand during our own write
             if step.skip { continue }   // idle: the other machine on these monitors may be in use, so don't fight it
             let applied = ok ? step.applied : c0, manual = step.manual && !appliedMeanwhile
             if follower { linkedNow[m.uuid] = applied }
@@ -744,6 +803,7 @@ import DaylitCore
         let leaderLabel = leader.map { mons[$0].label } ?? ""
         let next = LiveInputs(elev: inp.elev, pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels,
                               offsets: offs, linked: linkedNow, leader: leaderLabel, applying: auto && here,
+                              setHelper: source == .homeAssistant && inp.fromHA && mons.contains { !($0.ha?.set ?? "").trimmingCharacters(in: .whitespaces).isEmpty },
                               lightsUsed: Dictionary(mons.map { ($0.uuid, lightsFor($0)) }, uniquingKeysWith: { a, _ in a }))
         if live != next { live = next }
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too
@@ -756,10 +816,7 @@ import DaylitCore
         let before = holds, now = Date().timeIntervalSince1970
         for m in mons {
             let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
-            // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
-            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget && $0.offset == st.offset }) != true {
-                holds.record(key: m.uuid, state: st, now: now)
-            }
+            holds.record(key: m.uuid, state: st, now: now)   // re-saves only when the state changed
         }
         if holds != before, let d = try? JSONEncoder().encode(holds) { UserDefaults.standard.set(d, forKey: "holds") }
     }
@@ -799,30 +856,45 @@ import DaylitCore
             guard let ha = config.homeAssistant else { return nil }
             var result = await HAClient.state(ha, mons)
             for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
-                guard case .failure(.unreachable) = result else { break }
+                guard case .failure(let failure) = result, failure.isTransient else { break }
                 if haDownSince == nil { Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))") }   // once, not every tick of an outage
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 result = await HAClient.state(ha, mons)
             }
             switch result {
             case .success(let s):
-                problem = configProblem ?? push.problem
+                let missing = s.missingEntities(ha)
+                let note = HAState.noValueNote(missing)
+                problem = HAState.problemLine(config: configProblem, missing: missing) ?? push.problem   // push last: the REST tick still works
+                if let note {
+                    if HAErrorRule.shouldLog(message: note, lastMessage: missingNoteShown, lastLogged: missingNoteLoggedAt?.timeIntervalSince1970,
+                                             now: Date().timeIntervalSince1970) {
+                        Log.write("home assistant: \(note)"); missingNoteLoggedAt = Date()
+                    }
+                } else { missingNoteLoggedAt = nil }
+                missingNoteShown = note
                 if lastHAError != nil {
                     let mins = haDownSince.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
                     Log.write("home assistant: ok" + (mins > 0 ? " again after \(mins) min" : ""))
                     lastHAError = nil
                 }
                 haDownSince = nil; haLoggedAt = nil
+                localNetworkBlocked = false
                 lastHALevels = s.m.mapValues(fallbackLevels)
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
                 lastHALights = s.lights
-                if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
-                let sun = Int((daylightFraction(elevation: s.elev, tuning: config.tuned) * 100).rounded())
+                if let a = s.auto, lastHAAuto != a { lastHAAuto = a }
+                // A switch Home Assistant has no value for leaves Automatic as it was, as in an outage.
+                auto = automaticNow(hasSwitch: !(ha.autoSwitch ?? "").isEmpty, fromHA: s.auto, lastFromHA: lastHAAuto,
+                                    local: UserDefaults.standard.object(forKey: "auto") as? Bool ?? true)
+                // A sun entity Home Assistant does not have: the computed sun when there is a location, else night as before.
+                let elev = s.elev ?? config.location.map { solarElevation(latitude: $0.latitude, longitude: $0.longitude) } ?? -10
+                let sun = Int((daylightFraction(elevation: elev, tuning: config.tuned) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(pos))%" }
                 if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned) }
-                var i = Inputs(elev: s.elev, pos: pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                var i = Inputs(elev: elev, pos: pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                                hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
                 if let e = ha.light, Config.isEntityId(e), let loc = config.location {
                     noteLightUnit(e, s.lightUnit)
@@ -850,23 +922,28 @@ import DaylitCore
                 }
                 return i
             case .failure(let f):
-                let message = HAClient.describe(f, ha)
-                if HAErrorRule.shouldLog(message: message, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
+                var blocked = false
+                if f == .unreachable { blocked = await LocalNetworkProbe.blocked(url: ha.url, errorCode: HAClient.lastCode) }
+                let message = blocked ? LocalNetworkBlock.message : HAClient.describe(f, ha)
+                let logMessage = blocked ? LocalNetworkBlock.logMessage : message
+                if HAErrorRule.shouldLog(message: logMessage, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
                                          now: Date().timeIntervalSince1970) {
-                    let still = haLoggedAt != nil && message == lastHAError
-                    Log.write("home assistant: \(message)" + (HAClient.lastCause.map { " (\($0))" } ?? "")
+                    let still = haLoggedAt != nil && logMessage == lastHAError
+                    Log.write("home assistant: \(logMessage)" + (HAClient.lastCause.map { " (\($0))" } ?? "")
                               + (still ? ", still, for \(Int(Date().timeIntervalSince(haDownSince ?? Date()) / 60)) min" : ""))
                     haLoggedAt = Date()
                 }
-                lastHAError = message
+                lastHAError = logMessage
                 if haDownSince == nil { haDownSince = Date() }
-                let transient = f == .unreachable
+                let transient = f.isTransient
                 let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
                                                   now: Date().timeIntervalSince1970)
                 problem = show ? message : configProblem ?? push.problem
+                localNetworkBlocked = blocked && show
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= config.tuned.haFallbackSeconds {
-                    auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
+                    auto = automaticFallback(hasSwitch: !(ha.autoSwitch ?? "").isEmpty, lastFromHA: lastHAAuto,
+                                             local: UserDefaults.standard.object(forKey: "auto") as? Bool ?? true)
                     return fromSun(nil)   // the error line under it says Home Assistant is unreachable
                 }
                 if show { detail = "Home Assistant · not connected" }

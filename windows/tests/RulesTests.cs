@@ -24,6 +24,39 @@ public class SunTests {
     public void DaylightFraction(double elev, double expected) => Assert.Equal(expected, Sun.Fraction(elev), 1e-9);
 }
 
+public class UserLevelWinsTests {
+    [Fact] public void ALevelSetByHandDuringTheWaitBeatsTheOlderReading() => Assert.True(Rules.UserLevelWins(40, 52, false));
+    [Fact] public void AnUnchangedLevelKeepsTheReading() => Assert.False(Rules.UserLevelWins(40, 40, false));
+    [Fact] public void ADraggedSliderIsNeverOverriddenByAReading() {
+        Assert.True(Rules.UserLevelWins(40, 40, true));
+        Assert.True(Rules.UserLevelWins(40, 63, true));
+    }
+    [Fact] public void NothingToTrustWithoutALevel() => Assert.False(Rules.UserLevelWins(null, null, true));
+    [Fact] public void AHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
+        var hold = new Hold(null, 40, 40, null, null, null, null);
+        int c = Rules.LevelToDecideOn(40, 40, 52, false)!.Value;
+        Assert.Equal(52, c);
+        var step = Rules.Decide(c, 40, null, hold, auto: true, here: true, sun: 1, touched: true);
+        Assert.Equal(12, step.State.Offset);
+        Assert.Null(step.Write);
+    }
+    [Fact] public void TheReadingStandsWhenNothingMovedTheLevel() => Assert.Equal(41, Rules.LevelToDecideOn(41, 40, 40, false));
+    [Fact] public void ADraggedSliderHoldsItsLevelAndMakesNoAutomaticWrite() {
+        var hold = new Hold(null, 40, 40, null, null, null, null);
+        int c = Rules.LevelToDecideOn(40, 40, 63, true)!.Value;
+        Assert.Equal(63, c);
+        var step = Rules.Decide(c, 40, null, hold, auto: true, here: true, sun: 1, touched: true, dragging: true);
+        Assert.Null(step.Write);
+        Assert.Null(step.State.Offset);
+    }
+    [Fact] public void AWriteOverwritesTheLevelOnlyWhenItWasUntouchedMeanwhile() {
+        Assert.Equal(70, Rules.LevelAfterWrite(70, true, 40, 40, false));
+        Assert.Null(Rules.LevelAfterWrite(70, true, 40, 55, false));    // moved by hand during the write
+        Assert.Null(Rules.LevelAfterWrite(70, true, 40, 40, true));     // slider held
+        Assert.Null(Rules.LevelAfterWrite(70, false, 40, 40, false));   // refused
+    }
+}
+
 public class SunSpanTests {
     /// A day's elevations every 10 minutes from local midnight, as the sun curve samples them.
     static List<(double t, double e)> Day(double lat, double lon, string start) {
@@ -212,11 +245,85 @@ public class DecideTests {
         Assert.Equal(1000, h.Restore("m", 2000)?.OffsetAt);
     }
 
+    // A date in 2026 in UTC, as Unix seconds (real dates, so the sun samples are the season's).
+    static double UtcAt(int month, int day, double hour) => new DateTimeOffset(2026, month, day, 0, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds() + hour * 3600;
+    static readonly (double Lat, double Lon) Polar = (78, 15);
+    static readonly (double Lat, double Lon) Temperate = (36.7, 0);
+
     [Fact]
-    public void ANightDistanceEndsAfterALongSleep() {
-        var st = new Hold(null, 30, 50, -20, 0, At(100, 23));
-        Assert.NotNull(DN(30, 50, st, 0, At(101, 6)).State.Offset);    // the same night, past midnight
-        Assert.Null(DN(30, 50, st, 0, At(101, 20)).State.Offset);      // the next evening
+    public void ANightDistanceLastsAsLongAsItStaysDark() {
+        // A real polar night: the sun does not reach the fade edge for days, so a night distance stays.
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 23));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(12, 16, 20), 0, UtcDay, Polar));
+        var s = Rules.Decide(30, 50, null, st, true, true, 0, now: UtcAt(12, 16, 20), dayOf: UtcDay, place: Polar);
+        Assert.NotNull(s.State.Offset);
+    }
+
+    [Fact]
+    public void ANightDistanceSetInTheEveningEndsAfterASleepThroughTheDay() {
+        // Set at 19:00 in December, nobody ticked while the sun was up, next evening it is dark again.
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 19));
+        Assert.True(Rules.OffsetExpired(st, UtcAt(12, 16, 19), 0, UtcDay, Temperate));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(12, 16, 4), 0, UtcDay, Temperate));   // still the same night
+        var s = Rules.Decide(30, 50, null, st, true, true, 0, now: UtcAt(12, 16, 19), dayOf: UtcDay, place: Temperate);
+        Assert.Null(s.State.Offset);
+        Assert.Equal(50, s.Write);
+    }
+
+    [Fact]
+    public void ANightDistanceEndsWhenDaylightPassesTheFadeEdgeEvenAfterASleep() {
+        var st = new Hold(null, 30, 50, -20, 0, UtcAt(4, 10, 23));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(4, 11, 4), 0.29, UtcDay, Temperate));
+        Assert.True(Rules.OffsetExpired(st, UtcAt(4, 11, 4), 0.3, UtcDay, Temperate));
+    }
+
+    [Fact]
+    public void ADaytimeDistanceSetInTheEveningDoesNotComeBackInTheMorning() {
+        // Set at 20:00 in June with the sun up; the next tick is 07:30 and the sun is up again.
+        var st = new Hold(null, 50, 70, -20, 1, UtcAt(6, 20, 20));
+        var s = Rules.Decide(50, 70, null, st, true, true, 0.5, now: UtcAt(6, 21, 7.5), dayOf: UtcDay, place: Temperate);
+        Assert.Null(s.State.Offset);
+        Assert.Equal(70, s.Write);
+        Assert.False(s.Manual);
+    }
+
+    [Fact]
+    public void WithoutALocationANightDistanceEndsAfterEighteenHoursAndADayOneWithTheDay() {
+        var night = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 19));
+        Assert.False(Rules.OffsetExpired(night, UtcAt(12, 15, 19) + 17.9 * 3600, 1, UtcDay));
+        Assert.True(Rules.OffsetExpired(night, UtcAt(12, 15, 19) + 18.1 * 3600, 0, UtcDay));
+        var day = new Hold(null, 50, 70, -20, 0.8, UtcAt(6, 20, 10));
+        Assert.False(Rules.OffsetExpired(day, UtcAt(6, 20, 23.5), 0, UtcDay));
+        Assert.True(Rules.OffsetExpired(day, UtcAt(6, 21, 0.5), 0.5, UtcDay));
+    }
+
+    [Fact]
+    public void EveryDistanceEndsAfterThirtySixHours() {
+        var night = new Hold(null, 30, 50, -20, 0, UtcAt(12, 15, 0));
+        Assert.False(Rules.OffsetExpired(night, UtcAt(12, 15, 0) + Rules.OffsetMaxAge, 0, UtcDay, Polar));
+        Assert.True(Rules.OffsetExpired(night, UtcAt(12, 15, 0) + Rules.OffsetMaxAge + 1, 0, UtcDay, Polar));
+        var day = new Hold(null, 30, 50, -20, 1, UtcAt(6, 20, 12));
+        Assert.True(Rules.OffsetExpired(day, UtcAt(6, 20, 12) + Rules.OffsetMaxAge + 1, 1, _ => 7, Polar));
+    }
+
+    [Fact]
+    public void ADaytimeDistanceCarriesPastMidnightOnlyInAPolarDay() {
+        var st = new Hold(null, 50, 70, -20, 0.8, UtcAt(6, 20, 20));
+        Assert.False(Rules.OffsetExpired(st, UtcAt(6, 21, 1), 0.1, UtcDay, Polar));        // polar day, new calendar day
+        Assert.True(Rules.OffsetExpired(st, UtcAt(6, 21, 9), 1, UtcDay, Polar));           // but not for more than 12 hours
+        Assert.True(Rules.OffsetExpired(st, UtcAt(6, 21, 1), 0, UtcDay, Temperate));       // a normal midnight
+        Assert.False(Rules.OffsetExpired(st, UtcAt(6, 20, 23), 0, UtcDay, Temperate));     // same day: the fade handles it
+    }
+
+    [Fact]
+    public void ASavedHoldIsRewrittenWhenOnlyTheOffsetTimeChanges() {
+        var saved = new SavedHolds();
+        var a = new Hold(null, 40, 70, -30, 1, 900);
+        Assert.True(saved.Record("A", a, 1000));
+        Assert.False(saved.Record("A", a, 1100));                          // nothing changed
+        var again = a with { OffsetAt = 1050, OffsetSun = 0.5 };           // same offset, held again
+        Assert.True(saved.Record("A", again, 1100));
+        Assert.Equal(again, saved.Restore("A", 1200));
     }
 
     [Fact]
@@ -722,6 +829,10 @@ public class HaErrorRuleTests {
         Assert.False(HaErrorRule.ShouldShow(true, 100, 159));
         Assert.True(HaErrorRule.ShouldShow(true, 100, 160));
     }
+    [Fact] public void OnlyGatewayStatusesAreTransient() {
+        foreach (var code in new[] { 502, 503, 504 }) Assert.True(HaErrorRule.Transient(code), code.ToString());
+        foreach (var code in new[] { 400, 401, 403, 404, 500, 501, 505, 0 }) Assert.False(HaErrorRule.Transient(code), code.ToString());
+    }
     [Fact] public void TokenProblemsShowAtOnce() {
         Assert.True(HaErrorRule.ShouldShow(false, null, 0));
         Assert.Equal(new double[] { 2, 5 }, HaErrorRule.RetryDelays);
@@ -1066,5 +1177,66 @@ public class LightTests {
         Assert.Equal(w, LightUnit.Update(unknown, "sensor.pv_power", "W", 60));
         // Another sensor starts fresh with its own history.
         Assert.Equal(new LightUnit("sensor.solar_power", "kW", 0), LightUnit.Update(w, "sensor.solar_power", "kW", 50));
+    }
+}
+
+public class AuditLogicTests {
+    static System.Text.Json.Nodes.JsonObject Json(string s) => (System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(s)!;
+
+    [Fact]
+    public void TheLongestMatchingEntryWinsAndTheOrderDoesNotMatter() {
+        const string name = "Dell AW3821DW";
+        Assert.Equal(1, MonitorMatch.Best(name, ["Dell", "AW3821DW"]));
+        Assert.Equal(0, MonitorMatch.Best(name, ["AW3821DW", "Dell"]));
+        Assert.Equal(0, MonitorMatch.Best(name, ["Dell", "Dell"]));   // equal: the first
+    }
+
+    [Fact]
+    public void AMatchIsTrimmedCaseInsensitiveAndNeverEmpty() {
+        Assert.Equal(0, MonitorMatch.Best("Dell AW3821DW", ["  aw3821dw "]));
+        Assert.Null(MonitorMatch.Best("Dell AW3821DW", ["", "   ", null]));
+        Assert.Null(MonitorMatch.Best("Dell AW3821DW", ["LG"]));
+        Assert.Equal(1, MonitorMatch.Best("Dell AW3821DW", ["   ", "Dell "]));
+    }
+
+    [Fact]
+    public void SavingChoosesTheLongestMatchingEntry() {
+        const string original = """{ "monitors": [ { "match": "Dell", "day": 10 }, { "match": "AW3821DW", "day": 20 } ] }""";
+        var e = new SettingsEdit("off", null, null, [new("Dell AW3821DW", "AW3821DW", "", 77, 40, 20)]);
+        var list = Json(ConfigPatch.Apply(e, original))["monitors"]!.AsArray();
+        Assert.Equal(10, (int)list[0]!["day"]!);
+        Assert.Equal(77, (int)list[1]!["day"]!);
+        var applied = Json(ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 55 }, "Dell AW3821DW", "AW3821DW", original))["monitors"]!.AsArray();
+        Assert.Equal(55, (int)applied[1]!["day"]!);
+    }
+
+    [Fact]
+    public void ANullMonitorsListIsAsAbsentForSaveAndApply() {
+        const string original = """{ "source": "off", "monitors": null }""";
+        var e = new SettingsEdit("off", null, null, [new("DELL U2723QE", "U2723QE", "", 80, 45, 15)]);
+        Assert.Single(Json(ConfigPatch.Apply(e, original))["monitors"]!.AsArray());
+        var applied = Json(ConfigPatch.SetLevels(new Dictionary<string, int> { ["day"] = 55 }, "DELL U2723QE", "U2723QE", original))["monitors"]!.AsArray();
+        Assert.Equal(55, (int)applied[0]!["day"]!);
+    }
+
+    [Fact]
+    public void TheLightHistoryWaitsAnHourWithoutAReferenceAndADayWithOne() {
+        Assert.False(LightHistoryRule.Due(3599, false, false));
+        Assert.True(LightHistoryRule.Due(3600, false, false));
+        Assert.False(LightHistoryRule.Due(3599, true, true));
+        Assert.False(LightHistoryRule.Due(3600, true, false));
+        Assert.True(LightHistoryRule.Due(86400, true, false));
+        Assert.True(LightHistoryRule.Due(-5, true, false));   // a clock set back
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void ARetryStampMakesTheHistoryDueInAnHourNotOnTheNextTick(bool has, bool young) {
+        double now = 1_000_000, stamp = LightHistoryRule.RetryStamp(now, has, young);
+        Assert.False(LightHistoryRule.Due(now + 30 - stamp, has, young));
+        Assert.True(LightHistoryRule.Due(now + 3600 - stamp, has, young));
     }
 }

@@ -81,6 +81,7 @@ import DaylitCore
             ("curve-parked", chart(date("2026-12-21T12:00:00Z"), lat: 80)),
             ("curve-no-blind", chart(date("2026-06-19T15:00:00Z"), blind: false, live: LiveInputs(pos: nil, light: 0.8, offsets: ["a": (6, 1)]))),
             ("curve-dusk", chart(dusk, live: LiveInputs(pos: 0, lights: true))),
+            ("curve-automatic-off", chart(date("2026-06-19T15:00:00Z"), live: LiveInputs(pos: 40, light: 0.8, applying: false, setHelper: true))),
         ]
     }
 
@@ -150,6 +151,7 @@ import DaylitCore
 
     static func render(to dir: URL) -> Int32 {
         PanelBackground.plain = true
+        SettingsView.fixedTokenStored = true
         SettingsView.fixedNow = Date(timeIntervalSince1970: 1_781_870_400)   // 2026-06-19 12:00 UTC
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for (name, view) in scenes() {

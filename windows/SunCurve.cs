@@ -1,8 +1,10 @@
 // Today's sun as a picture: its height through the day at the user's location, with draggable lines
 // for the elevations the rules use. Each line shows when the sun crosses it today, so nobody has to
-// think in degrees. Same as the Mac's SunCurve.
+// think in degrees. Same as the Mac's SunCurve. The keyboard moves the lines too: Left / Right (or Tab) pick a handle,
+// Up / Down move it by half a degree (Page Up / Page Down by five), and Narrator reads it as a slider.
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -20,6 +22,7 @@ sealed class SunCurve : FrameworkElement {
     const double ChartH = 170;
     readonly List<(Marker m, Rect r)> handles = new();
     string? dragging;
+    int active;   // the handle the keyboard and Narrator act on
     double top, bottom;
 
     public SunCurve(double lat, double lon, DateTimeOffset now, TimeZoneInfo tz, IReadOnlyList<Marker> markers,
@@ -27,8 +30,71 @@ sealed class SunCurve : FrameworkElement {
         (this.lat, this.lon, this.now, this.tz, this.markers, this.get, this.set) = (lat, lon, now, tz, markers, get, set);
         Height = ChartH;
         Cursor = Cursors.Arrow;
+        Focusable = true;
+        FocusVisualStyle = null;   // the active handle gets its own ring in OnRender
         System.Windows.Automation.AutomationProperties.SetName(this, "Today's sun");
+        // Arriving by keyboard starts on the first handle (Tab) or the last (Shift+Tab); a click picks its own.
+        GotKeyboardFocus += (_, e) => {
+            if (e.OldFocus != null && Mouse.LeftButton != MouseButtonState.Pressed && markers.Count > 0)
+                active = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? markers.Count - 1 : 0;
+            InvalidateVisual();
+        };
+        LostKeyboardFocus += (_, _) => InvalidateVisual();
     }
+
+    Marker? Active => markers.Count == 0 ? null : markers[Math.Clamp(active, 0, markers.Count - 1)];
+
+    // MARK: keyboard and Narrator
+
+    /// What Narrator calls the active handle, and its value with today's times.
+    internal string ActiveName => Active is { } m ? m.Title + ", today's sun" : "Today's sun";
+    internal string ActiveStatus => Active is { } m ? $"{get(m.Id).ToString("0.#", CultureInfo.InvariantCulture)} degrees, {Crossings(Samples(), get(m.Id), m.Below, Day(), tz)}" : "";
+    internal double ActiveValue => Active is { } m ? get(m.Id) : 0;
+    internal const double Lowest = -18, Highest = 60;   // the ranges tuning accepts
+
+    /// Sets the active handle's line (half-degree steps) and tells Narrator.
+    internal void SetActive(double value) {
+        if (Active is not { } m) return;
+        double before = get(m.Id);
+        set(m.Id, Math.Round(Math.Clamp(value, Lowest, Highest) * 2, MidpointRounding.AwayFromZero) / 2);
+        InvalidateVisual();
+        (UIElementAutomationPeer.FromElement(this) as SunCurvePeer)?.ValueChanged(before, get(m.Id));
+    }
+
+    void Select(int index) {
+        string before = ActiveName;
+        double beforeValue = ActiveValue;
+        active = Math.Clamp(index, 0, Math.Max(markers.Count - 1, 0));
+        InvalidateVisual();
+        (UIElementAutomationPeer.FromElement(this) as SunCurvePeer)?.SelectionChanged(before, ActiveName, beforeValue);
+    }
+
+    // Tab walks the handles first, then leaves the curve.
+    protected override void OnPreviewKeyDown(KeyEventArgs e) {
+        if (e.Key == Key.Tab && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 && markers.Count > 1) {
+            int next = active + ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? -1 : 1);
+            if (next >= 0 && next < markers.Count) { Select(next); e.Handled = true; return; }
+        }
+        base.OnPreviewKeyDown(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e) {
+        if (Active == null) { base.OnKeyDown(e); return; }
+        switch (e.Key) {
+            case Key.Up: SetActive(ActiveValue + 0.5); break;
+            case Key.Down: SetActive(ActiveValue - 0.5); break;
+            case Key.PageUp: SetActive(ActiveValue + 5); break;
+            case Key.PageDown: SetActive(ActiveValue - 5); break;
+            case Key.Left: Select(active - 1); break;
+            case Key.Right: Select(active + 1); break;
+            default: base.OnKeyDown(e); return;
+        }
+        e.Handled = true;
+    }
+
+    protected override void OnMouseDown(MouseButtonEventArgs e) { Focus(); base.OnMouseDown(e); }
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new SunCurvePeer(this);
 
     /// Today from local midnight to the next one: 23 or 25 hours on the days the clocks change.
     (DateTimeOffset start, double hours) Day() {
@@ -100,6 +166,7 @@ sealed class SunCurve : FrameworkElement {
             dc.DrawText(grip, new Point(pill.X + 11 - grip.Width / 2, hy - grip.Height / 2));
             dc.DrawText(label, new Point(pill.X + 24, hy - label.Height / 2));
             handles.Add((m, pill));
+            if (IsKeyboardFocused && idx == active) dc.DrawRoundedRectangle(null, new Pen(Palette.Text, 2), new Rect(pill.X - 2, pill.Y - 2, pill.Width + 4, pill.Height + 4), 13, 13);
         }
         dc.Pop();
         dc.DrawRoundedRectangle(null, new Pen(Palette.CardBorder, 1), new Rect(0.5, 0.5, w - 1, ChartH - 1), 8, 8);
@@ -116,6 +183,8 @@ sealed class SunCurve : FrameworkElement {
         var p = e.GetPosition(this);
         var hit = handles.LastOrDefault(h => h.r.Contains(p));
         if (hit.m == null) return;
+        active = Math.Max(markers.ToList().FindIndex(x => x.Id == hit.m.Id), 0);
+        Focus();
         dragging = hit.m.Id; CaptureMouse(); e.Handled = true;
     }
     protected override void OnMouseMove(MouseEventArgs e) {
@@ -123,11 +192,44 @@ sealed class SunCurve : FrameworkElement {
         Cursor = dragging != null || handles.Any(h => h.r.Contains(p)) ? Cursors.SizeNS : Cursors.Arrow;
         if (dragging == null) return;
         double v = top - Math.Clamp(p.Y, 0, ChartH) / ChartH * (top - bottom);
-        set(dragging, Math.Round(Math.Clamp(v, -18, 60) * 2, MidpointRounding.AwayFromZero) / 2);
+        set(dragging, Math.Round(Math.Clamp(v, Lowest, Highest) * 2, MidpointRounding.AwayFromZero) / 2);
         InvalidateVisual();
     }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { dragging = null; ReleaseMouseCapture(); }
 
     protected override Size MeasureOverride(Size available) =>
         new(double.IsInfinity(available.Width) ? 400 : available.Width, Height);
+}
+
+/// Narrator reads the curve as a slider on the active handle: its name, value in degrees and today's times.
+sealed class SunCurvePeer : FrameworkElementAutomationPeer, System.Windows.Automation.Provider.IRangeValueProvider {
+    readonly SunCurve curve;
+    public SunCurvePeer(SunCurve curve) : base(curve) { this.curve = curve; }
+
+    protected override System.Windows.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Slider;
+    protected override string GetClassNameCore() => "SunCurve";
+    protected override string GetNameCore() => curve.ActiveName;
+    protected override string GetItemStatusCore() => curve.ActiveStatus;
+    public override object? GetPattern(PatternInterface pattern) =>
+        pattern == PatternInterface.RangeValue ? this : base.GetPattern(pattern);
+
+    public double Value => curve.ActiveValue;
+    public bool IsReadOnly => false;
+    public double Maximum => SunCurve.Highest;
+    public double Minimum => SunCurve.Lowest;
+    public double LargeChange => 5;
+    public double SmallChange => 0.5;
+    public void SetValue(double value) {
+        if (double.IsNaN(value) || value < Minimum || value > Maximum) throw new ArgumentOutOfRangeException(nameof(value));
+        curve.SetActive(value);
+    }
+
+    internal void ValueChanged(double before, double after) {
+        if (before != after)
+            RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, before, after);
+    }
+    internal void SelectionChanged(string before, string after, double beforeValue) {
+        RaisePropertyChangedEvent(System.Windows.Automation.AutomationElementIdentifiers.NameProperty, before, after);
+        RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, beforeValue, curve.ActiveValue);
+    }
 }

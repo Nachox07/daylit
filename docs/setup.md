@@ -120,10 +120,10 @@ in the same menu. On macOS Daylit also notices the change within a few seconds.
 |---|---|
 | `source` | `off`, `sun` or `homeAssistant`. Default: `homeAssistant` when a `homeAssistant.url` is set, else `sun` when a `location` is set, else `off`. |
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
-| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
+| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20; a value outside that range is a config problem, and a Home Assistant value above 100 counts as 100), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
-| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
+| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only). Only Homebrew's `m1ddc` is run: `/opt/homebrew/bin/m1ddc` or `/usr/local/bin/m1ddc`, or the place one of those links points to under the Homebrew `Cellar`. Any other value (a bare `m1ddc` too: the app started at login has a shorter `PATH` than a terminal) is ignored, with a note in the panel, in `--check-config` and in the log. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
 Find the `match` text for your monitors with the built-in commands:
@@ -153,6 +153,7 @@ into another computer right now) and which config entry matched which monitor.
      `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
    - Windows: the app asks on first start and saves it in Credential Manager. Right-click the tray
      icon → *Home Assistant token…* to change it.
+   Settings → *Home Assistant* shows whether a token is stored ("Token: stored"), never the token.
 4. In the config, set `homeAssistant.url` and, per monitor, a `homeAssistant` block:
 
 ```json
@@ -171,7 +172,7 @@ into another computer right now) and which config entry matched which monitor.
 - `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`,
   `light` (how clear the sky is, 0–1, with a daylight sensor), `blind`, `lights`, `source` attributes), so you can graph it.
 - `set` is optional: changing that helper sets the monitor right away, even when the computer is
-  idle (dim it from your phone). It then counts as a level set by hand.
+  idle or Automatic is off (dim it from your phone). It then counts as a level set by hand.
 
 With an `http://` URL the token travels unencrypted on your local network; use your `https://`
 address if you have one. On macOS, plain `http://` works for local addresses only (an IP, `*.local`
@@ -276,8 +277,10 @@ and forth, and a manual switch stays until the automatic decision next changes. 
 config reload or turning the feature on, a reading inside a gap keeps the mode the computer already
 shows; only a reading past a threshold switches it.
 
-- Windows: if the wallpaper is one of Windows 11's stock light/dark pair, it is swapped too; a
-  custom wallpaper is never touched.
+- Windows: it switches the apps theme (`AppsUseLightTheme`) only. The taskbar and Start theme
+  (`SystemUsesLightTheme`) stays as you set it in Settings → Personalization → Colors. Daylit's own
+  "is it dark now" check reads `AppsUseLightTheme` as well. If the wallpaper is one of Windows 11's
+  stock light/dark pair, it is swapped too; a custom wallpaper is never touched.
 - macOS: it switches the system appearance through System Events, so the first switch asks for the
   Automation permission.
 
@@ -379,7 +382,7 @@ set.
 - **A monitor shows "no brightness control".** Turn on DDC/CI in the monitor's own menu, and try
   another cable or port: some docks and adapters block DDC. On Apple-silicon Macs, `brew install m1ddc` if it is
   missing. m1ddc does not support Intel Macs; there only monitors that accept macOS's own
-  brightness control work.
+  brightness control work. If the panel says "ddcTool ignored", the `ddcTool` in `config.json` is not Homebrew's `m1ddc`: remove it or point it at `/opt/homebrew/bin/m1ddc`.
 - **A monitor says "doesn't report its brightness".** Some monitors accept DDC changes but never
   answer reads. Move its slider once: if the monitor reacts, Daylit keeps it as write-only (the
   slider shows the last level sent, and automatic mode drives it). If it refuses, check DDC/CI in
@@ -388,6 +391,14 @@ set.
   `--check-config` explains config problems. A computer with no input for 5 minutes stops changing
   brightness on purpose (see *Two machines* in the README), and so does a laptop on battery with
   *Pause on battery* on.
+- **Home Assistant unreachable after an update on macOS.** If the panel says "macOS is blocking
+  Daylit from your local network" (the log says `home assistant: blocked by macOS Local Network
+  permission`), macOS dropped the Local Network permission, which happens when an update changes
+  the app's signature. Click *Open Settings* in the panel (or System Settings → Privacy & Security
+  → Local Network), turn Daylit off and on again, then wait a few seconds. (On macOS 27.2 and later you can also
+  remove Daylit from the list and relaunch it so macOS asks again; earlier versions have no remove
+  button.) Releases signed with a stable certificate keep the Accessibility and Automation grants
+  and are expected to keep this one too (maintainers: [release-signing.md](release-signing.md)).
 - **Logs:** `~/Library/Logs/Daylit/daylit.log` (macOS) and `%LOCALAPPDATA%\Daylit\daylit.log`
   (Windows) record automatic changes, publishes, idle/back, battery pause, theme switches and Home
   Assistant errors.

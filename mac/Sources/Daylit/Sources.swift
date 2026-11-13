@@ -33,9 +33,22 @@ enum HAClient {
         return p.terminationStatus == 0
     }
 
-    enum Failure: Error { case noToken, rejected, unreachable, badAnswer }
+    /// Transient (see `isTransient`): a connection that fails, or a gateway answer (502, 503, 504). Any other
+    /// `.http` is an answer Home Assistant gave (403, 404, 500...), which will not fix itself in a minute.
+    enum Failure: Error, Equatable {
+        case noToken, rejected, unreachable, http(Int), badAnswer
+        var isTransient: Bool {
+            switch self {
+            case .unreachable: return true
+            case .http(let code): return HAErrorRule.transient(status: code)
+            default: return false
+            }
+        }
+    }
     /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
     nonisolated(unsafe) static var lastCause: String?
+    /// The NSURLError code of the last failed call (nil for an HTTP status).
+    nonisolated(unsafe) static var lastCode: Int?
 
     /// A POST with `body`, or a GET without one.
     static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6) async -> Result<Data, Failure> {
@@ -56,11 +69,13 @@ enum HAClient {
         catch {
             let e = error as NSError
             lastCause = "\(e.domain) \(e.code): \(e.localizedDescription)"
+            lastCode = e.domain == NSURLErrorDomain ? e.code : nil
             return .failure(.unreachable)
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        lastCode = nil
         if code == 401 { cache(name, nil); lastCause = "HTTP 401"; return .failure(.rejected) }
-        if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.unreachable) }
+        if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.http(code)) }
         lastCause = nil
         return .success(d)
     }
@@ -101,6 +116,7 @@ enum HAClient {
         case .noToken: return "No Home Assistant token in the keychain (\"\(ha.tokenName ?? "daylit-home-assistant")\", gear menu → Home Assistant Token…)"
         case .rejected: return "Home Assistant rejected the token"
         case .unreachable: return "Cannot reach Home Assistant"
+        case .http(let code): return "Home Assistant answered \(code)"
         case .badAnswer: return "Unexpected answer from Home Assistant (check the entity ids)"
         }
     }

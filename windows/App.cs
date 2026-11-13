@@ -73,6 +73,8 @@ sealed partial class Controller {
     bool? lookDark;
     readonly LookRule look = new();   // light/dark decision with hysteresis (Rules.cs)
     string? lastHaError;
+    string? missingNoteShown;       // the missing-entity note last shown, and when it was logged (once, then every 10 minutes)
+    DateTime? missingNoteLoggedAt;
     // When Home Assistant stopped answering. The sun takes over only after a minute, so a slow
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
@@ -387,7 +389,7 @@ sealed partial class Controller {
     public async void SetAuto(bool on) {
         try {
             AutoOn = on;
-            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);
+            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);   // LastHaAuto is saved when Home Assistant's own answer confirms it
             else Settings.Auto = on;
             if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; recorder.Drop(m.Key); }
             await Tick("automatic " + (on ? "on" : "off"));
@@ -459,7 +461,8 @@ sealed partial class Controller {
         var l = Cfg.Location!;
         bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
-                          mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(), null,
+                          mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(),
+                          keep ? Rules.AutomaticFallback(!string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch), Settings.LastHaAuto(Cfg.HomeAssistant?.AutoSwitch), Settings.Auto) : null,   // an outage keeps the last Automatic state
                           keep && lastHaPos != null);
     }
     double? lastHaPos;
@@ -489,7 +492,7 @@ sealed partial class Controller {
         if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
         // Hourly while there is no reference, or only hours of it since a unit change; then daily.
         bool young = unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0) < 1;
-        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty || young ? 3600 : 86400)) return;
+        if (lightRefAt is DateTime at && !LightHistoryRule.Due((DateTime.UtcNow - at).TotalSeconds, !lightRef.IsEmpty, young)) return;
         lightRefBusy = true;
         try {
             lightRefAt = DateTime.UtcNow;
@@ -502,13 +505,13 @@ sealed partial class Controller {
                           (fresh.IsEmpty ? " (not enough history, trying again in an hour)" : ""));
                 if (!fresh.IsEmpty) lightRef = fresh;
                 else if (lightRef.IsEmpty) LightStatus = "Not enough history in Home Assistant yet: trying again in an hour.";
-                else RetryLightSoon();   // an odd answer does not replace a good reference
+                else RetryLightSoon(young);   // an odd answer does not replace a good reference
             } else {
                 Log.Write($"light: could not read its history ({cause ?? "no answer"}), trying again in an hour");
                 if (lightRef.IsEmpty) LightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour.";
-                RetryLightSoon();
+                RetryLightSoon(young);
             }
-        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(); }
+        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(young); }
         finally { lightRefBusy = false; }
     }
 
@@ -523,7 +526,8 @@ sealed partial class Controller {
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
-    void RetryLightSoon() => lightRefAt = DateTime.UtcNow.AddSeconds(3600 - 86400);
+    void RetryLightSoon(bool young) =>
+        lightRefAt = DateTime.UtcNow.AddSeconds(LightHistoryRule.RetryStamp(0, !lightRef.IsEmpty, young));
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     double StepLight(double goal) {
@@ -593,6 +597,7 @@ sealed partial class Controller {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
         await ApplyContrast(mons);
+        var beforeRead = mons.Select(m => m.Cur).ToArray();
         var cur = await Task.Run(() => mons.Select(m => { try { return m.Read(); } catch { return (int?)null; } }).ToArray());
         for (int i = 0; i < mons.Length; i++) {
             var r = cur[i];
@@ -600,7 +605,8 @@ sealed partial class Controller {
                 mons[i].Reads = mons[i].Reads.AfterRead(r != null);
                 r = mons[i].Reads.Current(r, mons[i].Cur ?? 50);   // write-only: the slider is the record of its level
             }
-            mons[i].Cur = r;
+            // A slider drag or key press during the read (or just before it, while the monitor may still show the old level) is newer than the reading.
+            mons[i].Cur = Rules.LevelToDecideOn(r, beforeRead[i], mons[i].Cur, mons[i].Dragging || (DateTime.UtcNow - mons[i].UserTouched).TotalSeconds < 1.5);
         }
         Error = ConfigError;
 
@@ -643,13 +649,23 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.FromHa is { } haRow && i < haRow.Length ? haRow[i] : s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
             lastHaLights = s.Lights;
+            if (s.Auto is bool seenAuto && Settings.LastHaAuto(Cfg.HomeAssistant?.AutoSwitch) != seenAuto) Settings.SetLastHaAuto(seenAuto, Cfg.HomeAssistant?.AutoSwitch);   // kept across restarts for the sun fallback
+            if (HaTemplate.NoValueNote(s.Missing) is { } gone) {
+                Error = HaTemplate.ProblemLine(ConfigError, s.Missing);
+                if (HaErrorRule.ShouldLog(gone, missingNoteShown, missingNoteLoggedAt is { } mt ? (double?)(mt - DateTime.UnixEpoch).TotalSeconds : null, (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds)) {
+                    Log.Write("home assistant: " + gone); missingNoteLoggedAt = DateTime.UtcNow;
+                }
+                missingNoteShown = gone;
+            } else { missingNoteShown = null; missingNoteLoggedAt = null; }
         }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
         Error ??= push?.Problem;   // after the REST errors, like the Mac
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
 
         s = ApplyLight(s, !haDown && Source == Source.HomeAssistant, out double light);
-        AutoOn = s.Auto ?? Settings.Auto;
+        // A switch Home Assistant has no value for leaves Automatic as it was, as in an outage.
+        var autoEntity = Source == Source.HomeAssistant ? Cfg.HomeAssistant?.AutoSwitch : null;
+        AutoOn = Rules.AutomaticNow(!string.IsNullOrWhiteSpace(autoEntity), s.Auto, Settings.LastHaAuto(autoEntity), Settings.Auto);
         double sun = Cfg.Tuned.Fraction(s.Elev);
         bool boost = s.Elev < Cfg.Tuned.LightsBoostSunBelow;
         // The Mac and this PC may share these monitors through input switching. Only the machine in
@@ -693,7 +709,8 @@ sealed partial class Controller {
             bool dragging = m.Dragging;   // the slider is in the user's hand
             double tickNow = Now;         // the same time for Decide and for the suggestion samples below
             int clearedAt = offsetCleared.GetValueOrDefault(m.Key);   // see ApplySuggestion
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, tickNow);
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, tickNow,
+                                   place: Cfg.Location is { } tickLoc ? (tickLoc.Latitude, tickLoc.Longitude) : null, tuning: Cfg.Tuned);
             if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
             if (!dragging) m.Touched = false;
             bool remote = step.Remote != null;
@@ -732,7 +749,9 @@ sealed partial class Controller {
                 corrections.Add(settled); SaveCorrections(); suggestDirty = true;
             }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
-            m.Cur = ok ? step.Current : c; m.Manual = step.Manual && !appliedMeanwhile;
+            // Not while the slider is held, or when a hand change landed during the write: that level is newer.
+            if (Rules.LevelAfterWrite(step.Current, ok, c, m.Cur, m.Dragging) is int written) m.Cur = written;
+            m.Manual = step.Manual && !appliedMeanwhile;
             int applied = ok ? step.Applied : c;
             if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&
@@ -756,12 +775,14 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < raw.Length; i++) fresh[mons[i].Key] = raw[i];
             haLevels = fresh;
         }
+        bool setHelper = Source == Source.HomeAssistant && !haDown && mons.Any(m => !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Set));
         Live = new LiveInputs(s.Elev, s.HasBlind ? s.Pos : null, s.Lights, light, haLevels, offs, linkedNow,
-                              li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed);
+                              li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed,
+                              SetHelper: setHelper);
         LiveChanged?.Invoke();
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
-        Subtitle = !AutoOn ? "Off — sliders and hotkeys only"
+        Subtitle = !AutoOn ? "Off — sliders and hotkeys" + (setHelper ? ", and the set helper" : " only")
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
@@ -779,7 +800,7 @@ sealed partial class Controller {
         if (!Settings.AutoLook) { lookDark = null; look.Reset(); return; }
         bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat, Cfg.Tuned, lookDark == null ? Theme.Dark : null);
         if (dark != lookDark) {
-            if (!Look.Shows(dark)) {   // already showing it (apps, taskbar, stock wallpaper): nothing to switch
+            if (!Look.Shows(dark)) {   // already showing it (apps, stock wallpaper): nothing to switch
                 Log.Write("theme: " + (dark ? "dark" : "light"));
                 Look.SetDark(dark);
                 tray.Icon = Theme.SunIcon();

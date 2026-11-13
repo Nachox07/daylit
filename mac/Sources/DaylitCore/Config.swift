@@ -94,7 +94,7 @@ public struct Config: Decodable {
         do { c = try JSONDecoder().decode(Config.self, from: ConfigText.relaxed(d)) }
         catch { return (nil, "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
-            var safe = Config(pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
+            var safe = Config(pauseOnBattery: c.pauseOnBattery, monitors: c.monitors)   // no ddcTool: it names a program to run
             safe.builtIn = c.builtIn
             return (safe, err)
         }
@@ -135,6 +135,11 @@ public struct Config: Decodable {
                     (at + "night", h.night), (at + "set", h.set), (at + "nightLights", h.nightLights)]
         }
         for m in monitors ?? [] {
+            for (key, v) in [("day", m.day), ("blindDown", m.blindDown), ("night", m.night)] {
+                if let v, !(v.isFinite && (0...100).contains(v)) {
+                    return "config.json: monitor \"\(m.match)\" \(key) is 0 to 100"
+                }
+            }
             if let v = m.nightLights, !(v.isFinite && (0...100).contains(v)) {
                 return "config.json: monitor \"\(m.match)\" nightLights is 0 to 100"
             }
@@ -179,7 +184,28 @@ public struct Config: Decodable {
 
 public enum Source { case off, sun, homeAssistant }
 
+/// Which config entry a connected display belongs to: the longest `match` (trimmed, case-insensitive,
+/// contained in the display's name) wins, so a "Dell" entry does not take the "Dell AW3821DW" that has its
+/// own entry. An empty match never matches; on equal length the first entry wins.
+public enum MonitorMatch {
+    public static func best(name: String, matches: [String]) -> Int? {
+        var best: (index: Int, length: Int)?
+        for (i, m) in matches.enumerated() {
+            let t = m.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, name.localizedCaseInsensitiveContains(t), t.utf16.count > (best?.length ?? 0) else { continue }
+            best = (i, t.utf16.count)
+        }
+        return best?.index
+    }
+}
+
 extension Config {
+    /// The entry for a connected display (see MonitorMatch).
+    public func monitor(for name: String) -> MonitorConfig? {
+        guard let list = monitors, let i = MonitorMatch.best(name: name, matches: list.map(\.match)) else { return nil }
+        return list[i]
+    }
+
     /// The source to use, plus a problem to show when the config asks for something it cannot do.
     public func resolvedSource() -> (Source, String?) {
         let hasHA = !(homeAssistant?.url ?? "").isEmpty

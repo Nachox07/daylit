@@ -74,6 +74,18 @@ static class Settings {
     static void Set(string name, bool v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v ? 1 : 0, RegistryValueKind.DWord); }
     /// Automatic mode when it is not a Home Assistant switch.
     public static bool Auto { get => Get("Auto", true); set => Set("Auto", value); }
+    /// The Automatic state Home Assistant last gave (null: none seen yet): the sun fallback uses it, so an outage never flips Automatic.
+    /// Saved with the autoSwitch it was seen on; read back only while the config names that same entity.
+    public static bool? LastHaAuto(string? entity) {
+        using var k = Registry.CurrentUser.OpenSubKey(Key);
+        bool? v = k?.GetValue("LastHaAuto") is int i ? i == 1 : null;
+        return Rules.StoredAutomatic(v, k?.GetValue("LastHaAutoEntity") as string, entity);
+    }
+    public static void SetLastHaAuto(bool value, string? entity) {
+        if (string.IsNullOrEmpty(entity)) return;
+        Set("LastHaAuto", value);
+        using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("LastHaAutoEntity", entity, RegistryValueKind.String);
+    }
     /// Light/dark mode from daylight and room lights.
     public static bool AutoLook { get => Get("AutoLook", true); set => Set("AutoLook", value); }
     /// Pause on battery, once changed in the panel; null = use the config's pauseOnBattery (default on).
@@ -193,14 +205,15 @@ static class Look {
     [DllImport("user32", CharSet = CharSet.Unicode)]
     static extern IntPtr SendMessageTimeoutW(IntPtr h, uint msg, IntPtr w, string l, uint flags, uint timeout, out IntPtr r);
 
-    /// Whether Windows already shows this mode: apps, taskbar and (a stock) wallpaper.
+    /// Whether Windows already shows this mode: apps and (a stock) wallpaper. The taskbar and Start theme
+    /// (SystemUsesLightTheme) is the user's own choice and is never touched.
     public static bool Shows(bool dark) {
         using var k = Registry.CurrentUser.OpenSubKey(Pers);
         return ThemeIs(k, dark) && WallpaperToSet(dark) == null;
     }
     static bool ThemeIs(RegistryKey? k, bool dark) {
         int v = dark ? 0 : 1;
-        return k?.GetValue("AppsUseLightTheme") is int a && a == v && k.GetValue("SystemUsesLightTheme") is int b && b == v;
+        return k?.GetValue("AppsUseLightTheme") is int a && a == v;
     }
 
     public static void SetDark(bool dark) {
@@ -209,7 +222,6 @@ static class Look {
         int v = dark ? 0 : 1;
         if (ThemeIs(k, dark)) return;
         k.SetValue("AppsUseLightTheme", v, RegistryValueKind.DWord);
-        k.SetValue("SystemUsesLightTheme", v, RegistryValueKind.DWord);
         SendMessageTimeoutW((IntPtr)0xFFFF, 0x1A /* WM_SETTINGCHANGE */, IntPtr.Zero, "ImmersiveColorSet", 2, 1000, out _);
     }
 

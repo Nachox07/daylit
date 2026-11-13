@@ -38,6 +38,12 @@ struct Panel: View {
             if let p = [m.problem, m.suggestError].compactMap({ $0 }).joined(separator: "\n") as String?, !p.isEmpty {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                if m.localNetworkBlocked, m.problem == LocalNetworkBlock.message {
+                    Button("Open Settings") {
+                        if let u = URL(string: LocalNetworkBlock.settingsURL) { NSWorkspace.shared.open(u) }
+                    }
+                    .controlSize(.small)
+                }
             }
         }
         .padding(14)

@@ -39,9 +39,12 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>NSLocalNetworkUsageDescription</key><string>Daylit reads the sun, blind and lights from Home Assistant.</string>
 </dict></plist>
 PL
-# Sign with a stable identity when one exists, so macOS keeps the Accessibility permission across
-# rebuilds (an ad-hoc signature changes every build and macOS forgets the permission).
-ID=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')
+# Sign with a stable identity when one exists, so macOS keeps the Accessibility and Local Network
+# permissions across rebuilds and updates (an ad-hoc signature changes every build and macOS forgets
+# them). DAYLIT_SIGN_IDENTITY (a certificate hash or name; releases set it from the MAC_CERT_P12
+# secret) wins, then an Apple Development identity, else ad-hoc.
+ID="${DAYLIT_SIGN_IDENTITY:-}"
+[ -n "$ID" ] || ID=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')
 codesign --force -s "${ID:--}" "$APP"
 echo "built $APP"
 if [ -n "$RUNNING" ]; then open "$APP"; echo "restarted the running Daylit"; fi

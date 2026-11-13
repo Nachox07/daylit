@@ -121,6 +121,77 @@ final class TargetTests: XCTestCase {
     }
 }
 
+final class UserLevelWinsTests: XCTestCase {
+    func testALevelSetByHandDuringTheWaitBeatsTheOlderReading() {
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 52, held: false))   // a key press while Home Assistant answered
+    }
+    func testAnUnchangedLevelKeepsTheReading() {
+        XCTAssertFalse(userLevelWins(atRead: 40, now: 40, held: false))
+    }
+    func testADraggedSliderIsNeverOverriddenByAReading() {
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 40, held: true))
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 63, held: true))
+    }
+    func testNothingToTrustWithoutALevel() {
+        XCTAssertFalse(userLevelWins(atRead: nil, now: nil, held: true))
+    }
+    func testAHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
+        let st = HoldState(lastSet: 40, lastTarget: 40)
+        let c = levelToDecideOn(read: 40, atRead: 40, model: 52, held: false)
+        XCTAssertEqual(c, 52)
+        let s = decide(current: c, want: 40, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1, touched: true)
+        XCTAssertEqual(s.state.offset, 12)
+        XCTAssertNil(s.write)
+    }
+    func testTheReadingStandsWhenNothingMovedTheLevel() {
+        XCTAssertEqual(levelToDecideOn(read: 41, atRead: 40, model: 40, held: false), 41)   // the monitor's own buttons
+    }
+    func testADraggedSliderHoldsItsLevelAndMakesNoAutomaticWrite() {
+        let st = HoldState(lastSet: 40, lastTarget: 40)
+        let c = levelToDecideOn(read: 40, atRead: 40, model: 63, held: true)
+        XCTAssertEqual(c, 63)
+        let s = decide(current: c, want: 40, remote: nil, state: st, here: true, auto: true, dragging: true, sun: 1, touched: true)
+        XCTAssertNil(s.write); XCTAssertNil(s.state.offset)
+    }
+    func testAWriteOverwritesTheSliderOnlyWhenItWasUntouchedMeanwhile() {
+        XCTAssertEqual(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 40, held: false), 70)
+        XCTAssertNil(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 55, held: false))   // moved by hand during the write
+        XCTAssertNil(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 40, held: true))    // slider held
+        XCTAssertNil(levelAfterWrite(new: 70, ok: false, atStart: 40, now: 40, held: false))  // refused
+    }
+    func testACommittedWriteLeavesTheSliderAtWhatWasWrittenSoAWriteOnlyMonitorGetsNoOffset() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertEqual(step.write, 70)
+        let c = writeCommit(step: step, before: before, ok: true, clearedMeanwhile: false, controlChanged: false,
+                            levelAtStart: 40, levelNow: 40, held: false)!
+        XCTAssertEqual(c.state.lastSet, 70)
+        XCTAssertEqual(c.level, 70)   // slider == lastSet, so the next tick's slider-based reading is no hand change
+        let next = decide(current: c.level!, want: 70, remote: nil, state: c.state, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertNil(next.state.offset); XCTAssertNil(next.write)
+    }
+    func testAFailedCommitForgetsLastSetAndMovesNoSlider() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        let c = writeCommit(step: step, before: before, ok: false, clearedMeanwhile: false, controlChanged: false,
+                            levelAtStart: 40, levelNow: 40, held: false)!
+        XCTAssertNil(c.state.lastSet); XCTAssertNil(c.level)
+    }
+    func testNothingIsCommittedWhenTheControlChangedInTheRebuild() {
+        let before = HoldState(lastSet: 40, lastTarget: 40)
+        let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        XCTAssertNil(writeCommit(step: step, before: before, ok: true, clearedMeanwhile: false, controlChanged: true,
+                                 levelAtStart: 40, levelNow: 40, held: false))
+    }
+    func testAnOffsetClearedByApplyDuringTheWriteStaysCleared() {
+        let before = HoldState(lastSet: 40, lastTarget: 40, offset: 5, offsetSun: 1, offsetAt: 1)
+        let step = decide(current: 45, want: 40, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false, now: 2)
+        let c = writeCommit(step: step, before: before, ok: true, clearedMeanwhile: true, controlChanged: false,
+                            levelAtStart: 45, levelNow: 45, held: false)!
+        XCTAssertNil(c.state.offset); XCTAssertNil(c.state.lastSet)
+    }
+}
+
 final class DecideTests: XCTestCase {
     func step(_ c: Int, want: Int, remote: RemoteSet? = nil, state: HoldState = HoldState(),
               here: Bool = true, auto: Bool = true, dragging: Bool = false, sun: Double = 1, touched: Bool = true) -> Step {
@@ -240,13 +311,79 @@ final class DecideTests: XCTestCase {
         let h = SavedHolds(entries: ["m": .init(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, saved: 1000)])
         XCTAssertEqual(h.restore(key: "m", now: 2000)?.offsetAt, 1000)
     }
-    func testANightDistanceEndsAfterALongSleep() {
-        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
-        XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
-                               now: at(101, 6), dayOf: utcDay).state.offset)     // the same night, past midnight
-        XCTAssertNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
-                            now: at(101, 20), dayOf: utcDay).state.offset)       // the next evening
+    // A date in 2026 in UTC, as Unix seconds (real dates, so the sun samples are the season's).
+    func utc(_ month: Int, _ day: Int, _ hour: Double) -> Double {
+        var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!
+        let d = c.date(from: DateComponents(year: 2026, month: month, day: day))!.timeIntervalSince1970
+        return d + hour * 3600
     }
+    let polar = (latitude: 78.0, longitude: 15.0)
+    let temperate = (latitude: 36.7, longitude: 0.0)
+
+    func testANightDistanceLastsAsLongAsItStaysDark() {
+        // A real polar night: the sun does not reach the fade edge for days, so a night distance stays.
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 23))
+        XCTAssertFalse(offsetExpired(st, now: utc(12, 16, 20), sun: 0, dayOf: utcDay, place: polar))
+        let s = decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                       now: utc(12, 16, 20), dayOf: utcDay, place: polar)
+        XCTAssertNotNil(s.state.offset)
+    }
+    func testANightDistanceSetInTheEveningEndsAfterASleepThroughTheDay() {
+        // Set at 19:00 in December, nobody ticked while the sun was up, next evening it is dark again.
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 19))
+        XCTAssertTrue(offsetExpired(st, now: utc(12, 16, 19), sun: 0, dayOf: utcDay, place: temperate))
+        XCTAssertFalse(offsetExpired(st, now: utc(12, 16, 4), sun: 0, dayOf: utcDay, place: temperate))   // still the same night
+        let s = decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                       now: utc(12, 16, 19), dayOf: utcDay, place: temperate)
+        XCTAssertNil(s.state.offset)
+        XCTAssertEqual(s.write, 50)
+    }
+    func testANightDistanceEndsWhenDaylightPassesTheFadeEdgeEvenAfterASleep() {
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(4, 10, 23))
+        XCTAssertFalse(offsetExpired(st, now: utc(4, 11, 4), sun: 0.29, dayOf: utcDay, place: temperate))
+        XCTAssertTrue(offsetExpired(st, now: utc(4, 11, 4), sun: 0.3, dayOf: utcDay, place: temperate))
+    }
+    func testADaytimeDistanceSetInTheEveningDoesNotComeBackInTheMorning() {
+        // Set at 20:00 in June with the sun up; the next tick is 07:30 and the sun is up again.
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 1, offsetAt: utc(6, 20, 20))
+        let s = decide(current: 50, want: 70, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0.5,
+                       now: utc(6, 21, 7.5), dayOf: utcDay, place: temperate)
+        XCTAssertNil(s.state.offset)
+        XCTAssertEqual(s.write, 70)
+        XCTAssertFalse(s.manual)
+    }
+    func testWithoutALocationANightDistanceEndsAfterEighteenHoursAndADayOneWithTheDay() {
+        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 19))
+        XCTAssertFalse(offsetExpired(night, now: utc(12, 15, 19) + 17.9 * 3600, sun: 1, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(night, now: utc(12, 15, 19) + 18.1 * 3600, sun: 0, dayOf: utcDay))
+        let day = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: utc(6, 20, 10))
+        XCTAssertFalse(offsetExpired(day, now: utc(6, 20, 23.5), sun: 0, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(day, now: utc(6, 21, 0.5), sun: 0.5, dayOf: utcDay))
+    }
+    func testEveryDistanceEndsAfterThirtySixHours() {
+        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: utc(12, 15, 0))
+        XCTAssertFalse(offsetExpired(night, now: utc(12, 15, 0) + offsetMaxAge, sun: 0, dayOf: utcDay, place: polar))
+        XCTAssertTrue(offsetExpired(night, now: utc(12, 15, 0) + offsetMaxAge + 1, sun: 0, dayOf: utcDay, place: polar))
+        let day = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 1, offsetAt: utc(6, 20, 12))
+        XCTAssertTrue(offsetExpired(day, now: utc(6, 20, 12) + offsetMaxAge + 1, sun: 1, dayOf: { _ in 7 }, place: polar))
+    }
+    func testADaytimeDistanceCarriesPastMidnightOnlyInAPolarDay() {
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: utc(6, 20, 20))
+        XCTAssertFalse(offsetExpired(st, now: utc(6, 21, 1), sun: 0.1, dayOf: utcDay, place: polar))        // polar day, new calendar day
+        XCTAssertTrue(offsetExpired(st, now: utc(6, 21, 9), sun: 1, dayOf: utcDay, place: polar))           // but not for more than 12 hours
+        XCTAssertTrue(offsetExpired(st, now: utc(6, 21, 1), sun: 0, dayOf: utcDay, place: temperate))       // a normal midnight
+        XCTAssertFalse(offsetExpired(st, now: utc(6, 20, 23), sun: 0, dayOf: utcDay, place: temperate))     // same day: the fade handles it
+    }
+    func testASavedHoldIsRewrittenWhenOnlyTheOffsetTimeChanges() {
+        var saved = SavedHolds()
+        let a = HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1, offsetAt: 900)
+        XCTAssertTrue(saved.record(key: "A", state: a, now: 1000))
+        XCTAssertFalse(saved.record(key: "A", state: a, now: 1100))                   // nothing changed
+        var again = a; again.offsetAt = 1050; again.offsetSun = 0.5                    // same offset, held again
+        XCTAssertTrue(saved.record(key: "A", state: again, now: 1100))
+        XCTAssertEqual(saved.restore(key: "A", now: 1200), again)
+    }
+
     func testALevelSetInTheLastLightFadesOverHalfAnHour() {
         // Replays an evening: the user turned the screen 30 up with little light left.
         var st = HoldState(lastSet: 55, lastTarget: 55)
@@ -755,6 +892,10 @@ final class SyncTests: XCTestCase {
         XCTAssertFalse(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 159))
         XCTAssertTrue(HAErrorRule.shouldShow(transient: true, downSince: 100, now: 160))
     }
+    func testOnlyGatewayStatusesAreTransient() {
+        for code in [502, 503, 504] { XCTAssertTrue(HAErrorRule.transient(status: code), "\(code)") }
+        for code in [400, 401, 403, 404, 500, 501, 505, 0] { XCTAssertFalse(HAErrorRule.transient(status: code), "\(code)") }
+    }
     func testHAErrorTokenProblemsShowAtOnce() {
         XCTAssertTrue(HAErrorRule.shouldShow(transient: false, downSince: nil, now: 0))
         XCTAssertEqual(HAErrorRule.retryDelays, [2, 5])
@@ -936,5 +1077,67 @@ final class TuningTests: XCTestCase {
         XCTAssertNotNil(try check(#"{"tuning":{"theme":{"lightSunAbove":0,"darkSunBelow":2}}}"#))
         XCTAssertNotNil(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#))
         XCTAssertEqual(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#), "config.json: tuning.timing.pollSeconds must be 5–3600")
+    }
+}
+
+final class AuditLogicTests: XCTestCase {
+    func testTheLongestMatchingEntryWinsAndTheOrderDoesNotMatter() {
+        let name = "Dell AW3821DW"
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["Dell", "AW3821DW"]), 1)
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["AW3821DW", "Dell"]), 0)
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["Dell", "Dell"]), 0)    // equal: the first
+    }
+    func testAMatchIsTrimmedCaseInsensitiveAndNeverEmpty() {
+        XCTAssertEqual(MonitorMatch.best(name: "Dell AW3821DW", matches: ["  aw3821dw "]), 0)
+        XCTAssertNil(MonitorMatch.best(name: "Dell AW3821DW", matches: ["", "   "]))
+        XCTAssertNil(MonitorMatch.best(name: "Dell AW3821DW", matches: ["LG"]))
+        XCTAssertEqual(MonitorMatch.best(name: "Dell AW3821DW", matches: ["   ", "Dell "]), 1)
+    }
+    func testTheConfigFindsTheEntryByTheLongestMatch() throws {
+        let c = try JSONDecoder().decode(Config.self, from: Data(#"{"monitors":[{"match":"Dell","day":10},{"match":"AW3821DW","day":90}]}"#.utf8))
+        XCTAssertEqual(c.monitor(for: "Dell AW3821DW")?.day, 90)
+        XCTAssertEqual(c.monitor(for: "Dell U2723QE")?.day, 10)
+        XCTAssertNil(c.monitor(for: "LG"))
+    }
+    func testSavingChoosesTheLongestMatchingEntry() throws {
+        let original = #"{ "monitors": [ { "match": "Dell", "day": 10 }, { "match": "AW3821DW", "day": 20 } ] }"#
+        let e = SettingsEdit(source: "off", monitors: [.init(name: "Dell AW3821DW", suggestedMatch: "AW3821DW", label: "", day: 77, blindDown: 40, night: 20)])
+        let out = try JSONSerialization.jsonObject(with: ConfigPatch.apply(e, to: Data(original.utf8))) as! [String: Any]
+        let list = out["monitors"] as! [[String: Any]]
+        XCTAssertEqual(list[0]["day"] as? Int, 10)
+        XCTAssertEqual(list[1]["day"] as? Int, 77)
+        let applied = try JSONSerialization.jsonObject(with: ConfigPatch.setLevels(["day": 55], display: "Dell AW3821DW", suggestedMatch: "AW3821DW", in: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((applied["monitors"] as! [[String: Any]])[1]["day"] as? Int, 55)
+    }
+    func testANullMonitorsListIsAsAbsentForSaveAndApply() throws {
+        let original = #"{ "source": "off", "monitors": null }"#
+        let e = SettingsEdit(source: "off", monitors: [.init(name: "DELL U2723QE", suggestedMatch: "U2723QE", label: "", day: 80, blindDown: 45, night: 15)])
+        let saved = try JSONSerialization.jsonObject(with: ConfigPatch.apply(e, to: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((saved["monitors"] as! [[String: Any]]).count, 1)
+        let applied = try JSONSerialization.jsonObject(with: ConfigPatch.setLevels(["day": 55], display: "DELL U2723QE", suggestedMatch: "U2723QE", in: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((applied["monitors"] as! [[String: Any]])[0]["day"] as? Int, 55)
+        XCTAssertThrowsError(try ConfigPatch.apply(e, to: Data(#"{"monitors": 5}"#.utf8)))   // a wrong type still stops
+    }
+    func testAClockSetBackDoesNotHoldTicksOff() {
+        XCTAssertFalse(tickDue(elapsed: 10, interval: 30))
+        XCTAssertTrue(tickDue(elapsed: 30, interval: 30))
+        XCTAssertTrue(tickDue(elapsed: -3600, interval: 30))   // lastTick is in the future
+    }
+    func testTheLightHistoryWaitsAnHourWithoutAReferenceAndADayWithOne() {
+        XCTAssertFalse(lightHistoryDue(elapsed: 3599, hasReference: false, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: 3600, hasReference: false, young: false))
+        XCTAssertFalse(lightHistoryDue(elapsed: 3599, hasReference: true, young: true))
+        XCTAssertFalse(lightHistoryDue(elapsed: 3600, hasReference: true, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: 86400, hasReference: true, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: -3600, hasReference: true, young: false))    // the clock was set back
+        XCTAssertTrue(lightHistoryDue(elapsed: -1, hasReference: false, young: false))
+    }
+    func testARetryStampMakesTheHistoryDueInAnHourNotOnTheNextTick() {
+        let now = 1_000_000.0
+        for (has, young) in [(false, false), (true, true), (true, false), (false, true)] {
+            let stamp = lightRetryStamp(now: now, hasReference: has, young: young)
+            XCTAssertFalse(lightHistoryDue(elapsed: now + 30 - stamp, hasReference: has, young: young), "30 s later, \(has) \(young)")
+            XCTAssertTrue(lightHistoryDue(elapsed: now + 3600 - stamp, hasReference: has, young: young), "an hour later, \(has) \(young)")
+        }
     }
 }

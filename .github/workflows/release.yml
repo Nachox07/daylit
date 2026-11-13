@@ -30,11 +30,44 @@ jobs:
         run: swift test
         working-directory: mac
       - name: Build (Apple silicon + Intel)
+        # With the secrets MAC_CERT_P12 (base64 .p12) and MAC_CERT_PASSWORD the app is signed with that
+        # certificate (a stable identity, so macOS keeps its permissions across updates); without them
+        # build.sh signs ad-hoc, as before. See docs/release-signing.md.
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
+          if [ -n "$MAC_CERT_P12" ] && [ -n "$MAC_CERT_PASSWORD" ]; then
+            KEYCHAIN="$RUNNER_TEMP/daylit-signing.keychain-db"
+            P12="$RUNNER_TEMP/daylit-cert.p12"
+            trap 'rm -f "$P12"' EXIT   # the decoded certificate never outlives this step
+            KEYCHAIN_PASSWORD=$(uuidgen)
+            printf '%s' "$MAC_CERT_P12" | base64 --decode > "$P12"
+            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security set-keychain-settings -lut 3600 "$KEYCHAIN"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security import "$P12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+            rm -f "$P12"
+            unset MAC_CERT_P12 MAC_CERT_PASSWORD   # not needed any more: keep them out of the build's environment
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+            security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+            # No -v: a self-signed certificate is not "trusted", but codesign can still use it.
+            DAYLIT_SIGN_IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\)/ {print $2; exit}')
+            if [ -z "$DAYLIT_SIGN_IDENTITY" ]; then
+              echo "::error::MAC_CERT_P12 holds no code-signing identity"
+              exit 1
+            fi
+            export DAYLIT_SIGN_IDENTITY
+          fi
           DAYLIT_UNIVERSAL=1 DAYLIT_VERSION="$VERSION" mac/build.sh "$RUNNER_TEMP"
+          if [ -n "${KEYCHAIN:-}" ]; then
+            codesign -dv "$RUNNER_TEMP/Daylit.app" 2>&1 | grep -E 'Authority|Signature|Identifier' | sed -n 1,3p || true
+          fi
           ditto -c -k --keepParent "$RUNNER_TEMP/Daylit.app" "Daylit-mac-$VERSION.zip"
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/daylit-signing.keychain-db" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac
@@ -100,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ github.ref }}   # the tag that triggered the run, never a moving branch
           persist-credentials: false
       - name: Publish to the package managers
         env:

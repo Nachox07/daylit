@@ -76,7 +76,7 @@ static class Cli {
         if (error != null) problems.Add(error);
         var lightsNotes = new List<string>();
         var monitors = (cfg.Monitors ?? []).Select(m => {
-            var hit = displays.FirstOrDefault(d => Mon.Match(d, [m]) != null);
+            var hit = displays.FirstOrDefault(d => ReferenceEquals(Mon.Match(d, cfg.Monitors), m));
             var ha = m.HomeAssistant;
             if (ha != null && cfg.Effective != Source.HomeAssistant)
                 problems.Add($"monitor \"{m.Match}\" has homeAssistant entities but the source is {cfg.Effective}");

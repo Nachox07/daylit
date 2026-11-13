@@ -91,6 +91,7 @@ struct TokenView: View {
             window?.close()
             if saved {
                 HAClient.clearTokenCache()
+                NotificationCenter.default.post(name: .daylitTokenSaved, object: nil)
                 Log.write("token: saved to the keychain")
                 model.push.tokenChanged()
                 model.refresh()
@@ -110,4 +111,9 @@ struct TokenView: View {
         let service = model.config.homeAssistant?.tokenName ?? "daylit-home-assistant"
         if !HAClient.tokenStored(service) { show(model) }
     }
+}
+
+extension Notification.Name {
+    /// Posted after a token is stored, so an open Settings window shows it.
+    static let daylitTokenSaved = Notification.Name("daylit.tokenSaved")
 }

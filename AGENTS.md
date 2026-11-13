@@ -108,7 +108,7 @@ see [docs/setup.md → Tuning](docs/setup.md#tuning). Leave it out unless the us
 Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `night` (0–100), an optional `nightLights` (0–100: the level after sunset with the room lights on; only with a Home Assistant lights entity), an
 optional fixed `contrast` (0–100, DDC monitors only, set at start and after a display change), and with
 Home Assistant a `homeAssistant` block naming three `input_number` entities (a fourth, `nightLights`, is optional), an optional `sensor`
-to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
+to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle or Automatic is off). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
 `homeAssistant.push` (experimental, default off) makes Home Assistant tell Daylit when one of those entities changes ([docs/setup.md → Experimental](docs/setup.md#experimental)); leave it off unless the user asks.
 
 Ask the user for: latitude/longitude (city level is enough), the HA URL, and which blind / lights
@@ -142,7 +142,7 @@ computer right now, or no token stored yet) and which config entry matched which
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
   and *Automatic*. A level set by hand keeps its distance from the
-  automatic one until sunset, and survives a restart (for up to 12 hours). Repeated hand changes in the
+  automatic one until sunset (one set at night: until the sun has come up, even if the computer slept through it; at most 36 hours; without a location in the config: 18 hours at night, the calendar day by day), and survives a restart (for up to 12 hours). Repeated hand changes in the
   same situation make the panel offer a new level (*Apply* / *Not now*, [docs/setup.md → Suggested
   levels](docs/setup.md#suggested-levels)); the samples stay on that machine in `corrections.json`.
 - "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on

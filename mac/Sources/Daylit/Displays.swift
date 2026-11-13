@@ -7,6 +7,9 @@ import DaylitCore
 
 struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
 
+/// Displays already reported as skipped, so the log says it once.
+@MainActor private var skippedNoUUID = Set<CGDirectDisplayID>()
+
 /// External displays only: the built-in screen keeps its own brightness handling.
 @MainActor func externalScreens() -> [Screen] {
     if ProcessInfo.processInfo.environment["DAYLIT_DEBUG_NO_DISPLAYS"] == "1" { return [] }   // tests: the empty state
@@ -14,6 +17,11 @@ struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
         guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
               CGDisplayIsBuiltin(id) == 0 else { return nil }
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
+        // Everything is keyed by the UUID (holds, sync, DDC): several displays without one would share the key "".
+        guard !uuid.isEmpty else {
+            if skippedNoUUID.insert(id).inserted { Log.write("display \"\(s.localizedName)\" id=\(id) has no UUID: skipped") }
+            return nil
+        }
         return (id, uuid, s.localizedName)
     }
     return found.enumerated().map { i, d in Screen(id: d.0, uuid: d.1, name: DisplayName.label(d.2, index: i)) }
@@ -58,18 +66,28 @@ enum DDC {
     nonisolated(unsafe) static var tool = defaultTool
     static let defaultTool = ["/opt/homebrew/bin/m1ddc", "/usr/local/bin/m1ddc"]
         .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/opt/homebrew/bin/m1ddc"
+    /// True while a configured `ddcTool` is being ignored (the hint says so instead of "install m1ddc").
+    nonisolated(unsafe) static var ignoredConfig = false
+    /// Points `tool` at the configured m1ddc, or the default when `ddcTool` is unset or not Homebrew's m1ddc.
+    /// Returns the note to show (and log) when a configured value was ignored.
+    @discardableResult static func configure(_ configured: String?) -> String? {
+        let r = DDCToolRule.resolve(configured: configured)
+        tool = r.path ?? defaultTool
+        ignoredConfig = r.note != nil
+        return r.note
+    }
     static var available: Bool { FileManager.default.isExecutableFile(atPath: tool) }
     /// Why DDC isn't available here: m1ddc only exists for Apple silicon.
     static var hint: String {
         #if arch(arm64)
-        return "install m1ddc for DDC monitors"
+        return ignoredConfig ? DDCToolRule.note : "install m1ddc for DDC monitors"
         #else
         return "DDC needs an Apple-silicon Mac"
         #endif
     }
     static var missingNote: String {
         #if arch(arm64)
-        return "m1ddc not found: DDC monitors need it (brew install m1ddc)"
+        return ignoredConfig ? "m1ddc not found. " + DDCToolRule.note : "m1ddc not found: DDC monitors need it (brew install m1ddc)"
         #else
         return "DDC monitors are not supported on Intel Macs (m1ddc is Apple silicon only); monitors that accept macOS's own brightness control still work"
         #endif

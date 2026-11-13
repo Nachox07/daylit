@@ -12,8 +12,17 @@ public func blindPosition(reported: Double, last: Double?) -> Double {
     reported >= 0 ? min(reported, 100) : last ?? 100
 }
 
-public func target(day: Double, blindDown: Double, night: Double, elev: Double, pos: Double, lights: Bool,
-                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights: Double? = nil) -> Int {
+/// A brightness level as a finite 0–100: out of range is clamped, infinity counts as the nearest end,
+/// and NaN as 0 (a level that is not a number must never reach the formula).
+public func clampLevel(_ v: Double) -> Double {
+    v.isNaN ? 0 : min(max(v, 0), 100)
+}
+
+public func target(day day0: Double, blindDown blindDown0: Double, night night0: Double, elev: Double, pos pos0: Double, lights: Bool,
+                   tuning t: Tuning = Tuning(), light: Double = 1, nightLights nightLights0: Double? = nil) -> Int {
+    let day = clampLevel(day0), blindDown = clampLevel(blindDown0), night = clampLevel(night0)
+    let nightLights = nightLights0.map(clampLevel)
+    let pos = clampLevel(pos0)
     let sunUp = daylightFraction(elevation: elev, tuning: t)
     let sun = min(sunUp, light)
     let daytime = blindDown + (day - blindDown) * pos / 100
@@ -28,6 +37,8 @@ public func target(day: Double, blindDown: Double, night: Double, elev: Double, 
         v = night + (daytime - night) * sun
         if lights && elev < t.lightsBoostSunBelow { v = max(v, night + t.lightsBoost) }
     }
+    // Last guard: a NaN from elev or light would stop the app at Int(); fall back to the night level.
+    guard v.isFinite else { return Int(night.rounded()) }
     return Int(min(max(v, 0), 100).rounded())
 }
 
@@ -36,11 +47,11 @@ public func target(day: Double, blindDown: Double, night: Double, elev: Double, 
 /// `fromHA`: a template row [day, blindDown, night, nightLights, set, setChanged] or what fallbackLevels kept.
 /// Home Assistant's value wins where it has one (>= 0), else the local number.
 public func effectiveLevels(local: [Double], fromHA: [Double]?) -> [Double] {
-    var lv = Array(local.prefix(3))
-    if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = ov[k] } }
+    var lv = local.prefix(3).map(clampLevel)
+    if let ov = fromHA { for k in 0..<min(3, ov.count, lv.count) where ov[k] >= 0 { lv[k] = clampLevel(ov[k]) } }
     let fromRow = fromHA.flatMap { $0.count > 3 && $0[3] >= 0 ? $0[3] : nil }
     let own = local.count > 3 && local[3] >= 0 ? local[3] : nil
-    if let nl = fromRow ?? own { lv.append(nl) }
+    if let nl = fromRow ?? own { lv.append(clampLevel(nl)) }
     return lv
 }
 
@@ -54,6 +65,26 @@ public func nightLightsLevel(_ levels: [Double]) -> Double? { levels.count > 3 &
 public func roomLights(reported: Bool, fromHA: Bool, last: Bool?, hasNightLights: Bool) -> Bool {
     if fromHA { return reported }
     return hasNightLights ? last ?? false : false
+}
+
+/// Automatic mode while Home Assistant does not answer (the sun fallback). With an autoSwitch it keeps the
+/// last state Home Assistant gave, so an outage never turns Automatic on or off; without a switch, or before
+/// one was ever seen, the local setting decides.
+public func automaticFallback(hasSwitch: Bool, lastFromHA: Bool?, local: Bool) -> Bool {
+    hasSwitch ? lastFromHA ?? local : local
+}
+
+/// Automatic mode on a tick Home Assistant answered. Its switch decides when it gave a value; a switch it did not
+/// give one for (a missing entity, `unavailable`) leaves Automatic as it was, the same as during an outage.
+public func automaticNow(hasSwitch: Bool, fromHA: Bool?, lastFromHA: Bool?, local: Bool) -> Bool {
+    fromHA ?? automaticFallback(hasSwitch: hasSwitch, lastFromHA: lastFromHA, local: local)
+}
+
+/// The Automatic state saved from Home Assistant counts only for the autoSwitch it was seen on: a different
+/// entity in the config (or an older save with none recorded) starts again from the local setting.
+public func storedAutomatic(value: Bool?, entity: String?, configured: String?) -> Bool? {
+    guard let configured, !configured.isEmpty, entity == configured else { return nil }
+    return value
 }
 
 /// The part of a Home Assistant row the sun fallback keeps: [day, blindDown, night, nightLights]. The "set"
@@ -111,6 +142,9 @@ public struct Step: Equatable {
     public var level: Int?           // new value for the slider
 }
 
+/// The daylight fraction where a night offset has faded out completely.
+public let nightOffsetEdge = 0.3
+
 /// How much of a hand-set offset applies (0…1) for the sun now, or nil once it is over.
 /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
 /// (offsetExpired), so tomorrow starts clean. One set at night ends as the sun comes up. Either way the
@@ -118,7 +152,7 @@ public struct Step: Equatable {
 /// A daytime one never fades faster than that half hour from when it was set (`age`, seconds): one set
 /// in the last light would otherwise be gone in minutes.
 public func offsetWeight(sun: Double, setAt: Double, age: Double? = nil) -> Double? {
-    let edge = 0.3, fade = 1800.0
+    let edge = nightOffsetEdge, fade = 1800.0
     if setAt > 0 {
         let w = min(1, max(0, sun) / min(edge, setAt))
         guard let a = age, a >= 0, a < fade else { return w }
@@ -128,12 +162,61 @@ public func offsetWeight(sun: Double, setAt: Double, age: Double? = nil) -> Doub
     return 1 - sun / edge
 }
 
-/// An offset from an earlier day, or from a night long over, no longer applies, even when no tick ran
-/// in between (the computer slept). `dayOf` gives the local calendar day of a Unix time.
-public func offsetExpired(_ s: HoldState, now: Double, dayOf: (Double) -> Int) -> Bool {
+/// Whether the next tick is due: `elapsed` seconds since the last one. A negative `elapsed` means the
+/// clock was set back past the last tick, which must not hold ticks off until wall time catches up.
+public func tickDue(elapsed: Double, interval: Double) -> Bool { elapsed < 0 || elapsed >= interval }
+
+/// Whether the light sensor's history is due again: `elapsed` seconds since it was last tried. Hourly while
+/// there is no reference (or only hours of it), daily otherwise; a clock set back counts as due.
+public func lightHistoryDue(elapsed: Double, hasReference: Bool, young: Bool) -> Bool {
+    elapsed < 0 || elapsed >= (hasReference && !young ? 86400 : 3600)
+}
+
+/// The time to store as "last tried" so the history is due again in an hour. With a reference in use the
+/// wait is a day, so the stamp is moved back by the difference; otherwise the wait already is an hour
+/// and the stamp is now (moving it back there made the retry fire on every tick).
+public func lightRetryStamp(now: Double, hasReference: Bool, young: Bool) -> Double {
+    hasReference && !young ? now + 3600 - 86400 : now
+}
+
+/// The longest a hand-set offset can live, whatever the sky does (a polar night or day never ends it).
+public let offsetMaxAge = 36.0 * 3600
+/// A daytime offset that is still older than this when the calendar day changes ends even with the sun up
+/// (a computer that slept through the night wakes into a new day).
+let dayOffsetCarryOver = 12.0 * 3600
+
+/// A night offset without a location ends after this long (longer than any night but a polar one).
+let nightOffsetFallback = 18.0 * 3600
+/// How often the sun is sampled between setting an offset and now.
+let offsetSampleStep = 600.0
+
+/// An offset that no longer applies, even when no tick ran in between (the computer slept).
+/// With a location it is decided from what the sun did between `offsetAt` and `now`, sampled every
+/// 10 minutes, not from the current tick: one set at night ends once daylight reached the fade edge
+/// (offsetWeight) at any point since, so sleeping through a sunrise cannot keep it, while a polar night
+/// does; one set by day ends with the calendar day if the sun set in between, and only a polar day
+/// (the sun never went down) carries it over midnight, for at most 12 hours. Without a location
+/// (possible with Home Assistant as the source) a night offset ends after 18 hours and a day one with
+/// the calendar day. Every offset ends after 36 hours. `dayOf` gives the local calendar day of a Unix
+/// time; `sun` is the daylight fraction now.
+public func offsetExpired(_ s: HoldState, now: Double, sun: Double, dayOf: (Double) -> Int,
+                          place: (latitude: Double, longitude: Double)? = nil, tuning: Tuning = Tuning()) -> Bool {
     guard s.offset != nil, let at = s.offsetAt, now > 0 else { return false }
-    if (s.offsetSun ?? 0) > 0 { return dayOf(now) != dayOf(at) }
-    return now - at > 18 * 3600   // longer than any night
+    let age = now - at
+    if age > offsetMaxAge { return true }
+    let byDay = (s.offsetSun ?? 0) > 0
+    let newDay = dayOf(now) != dayOf(at)
+    guard let p = place else { return byDay ? newDay : age > nightOffsetFallback }
+    var lowest = sun, highest = sun
+    var t = at
+    while t < now {
+        let f = daylightFraction(elevation: solarElevation(latitude: p.latitude, longitude: p.longitude,
+                                                           at: Date(timeIntervalSince1970: t)), tuning: tuning)
+        lowest = min(lowest, f); highest = max(highest, f)
+        t += offsetSampleStep
+    }
+    if byDay { return newDay && (lowest <= 0 || age > dayOffsetCarryOver) }
+    return highest >= nightOffsetEdge
 }
 
 /// Seconds since the hand-set offset was set; nil when unknown.
@@ -158,7 +241,8 @@ public func localDay(_ t: Double, calendar: Calendar = .current) -> Int {
 ///   fades at dusk and ends at night (see offsetWeight); a new hand-set level replaces it.
 public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: HoldState,
                    here: Bool, auto: Bool, dragging: Bool, sun: Double, touched: Bool = true,
-                   now: Double = 0, dayOf: (Double) -> Int = { localDay($0) }) -> Step {
+                   now: Double = 0, dayOf: (Double) -> Int = { localDay($0) },
+                   place: (latitude: Double, longitude: Double)? = nil, tuning: Tuning = Tuning()) -> Step {
     var s = s0, c = c0, step = Step(state: s0, applied: c0)
     var fromRemote = false
     if let r = remote {
@@ -177,7 +261,7 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         }
     }
     if !here && !fromRemote { step.state = s; step.skip = true; return step }
-    if offsetExpired(s, now: now, dayOf: dayOf) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
+    if offsetExpired(s, now: now, sun: sun, dayOf: dayOf, place: place, tuning: tuning) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
 
     var applied = c
     if auto && !fromRemote && !dragging {
@@ -203,6 +287,46 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
     let w = s.offset == nil ? 0 : offsetWeight(sun: sun, setAt: s.offsetSun ?? sun, age: offsetAge(s, now)) ?? 0
     step.state = s; step.applied = applied; step.manual = s.offset != nil && (fromRemote || (auto && w > 0))
     return step
+}
+
+/// Which brightness a tick should trust after it waited (the Home Assistant read, a write to another
+/// monitor). `atRead` is the level the model held when the monitor was read, `now` what it holds after
+/// the wait. A level that moved in between came from the user's hand (slider, keys); it is newer than
+/// the reading, so it wins and the tick decides on it. `held`: the slider is in the user's hand.
+public func userLevelWins(atRead: Int?, now: Int?, held: Bool) -> Bool {
+    guard now != nil else { return false }
+    return held || atRead != now
+}
+
+/// The level a tick decides on for one monitor: the model's level when the user set one after the
+/// reading (see userLevelWins), else the reading.
+public func levelToDecideOn(read: Int, atRead: Int?, model: Int?, held: Bool) -> Int {
+    userLevelWins(atRead: atRead, now: model, held: held) ? model ?? read : read
+}
+
+/// The slider value after a write of `new`: nil keeps the current one. A refused write changes nothing,
+/// and a level the user set while Daylit was writing (or a held slider) is newer than the write.
+public func levelAfterWrite(new: Int?, ok: Bool, atStart: Int?, now: Int?, held: Bool) -> Int? {
+    guard ok, let new, !userLevelWins(atRead: atStart, now: now, held: held) else { return nil }
+    return new
+}
+
+/// What a finished write leaves on its monitor.
+public struct WriteCommit: Equatable {
+    public var state: HoldState
+    public var level: Int?
+}
+
+/// The result of one write, for the monitor as it is now. Used when the monitor list was rebuilt under
+/// the write: the new list's monitor takes the written state, or the next tick reads the new level
+/// against the old lastSet and invents an offset. nil when the monitor's control changed in that
+/// rebuild (the old level is on another scale). `clearedMeanwhile`: Apply cleared its offset meanwhile.
+public func writeCommit(step: Step, before: HoldState, ok: Bool, clearedMeanwhile: Bool, controlChanged: Bool,
+                        levelAtStart: Int?, levelNow: Int?, held: Bool) -> WriteCommit? {
+    guard !controlChanged else { return nil }
+    var st = step.state.afterWrite(ok: ok, before: before)
+    if clearedMeanwhile { st = Suggest.afterApply(st) }
+    return WriteCommit(state: st, level: levelAfterWrite(new: step.level, ok: ok, atStart: levelAtStart, now: levelNow, held: held))
 }
 
 /// Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
@@ -383,10 +507,16 @@ public struct SavedHolds: Equatable, Codable {
     public var entries: [String: Entry]
     public init(entries: [String: Entry] = [:]) { self.entries = entries }
 
-    /// Records a monitor's state; one with nothing to remember is removed.
-    public mutating func record(key: String, state: HoldState, now: Double) {
-        if state.lastSet == nil && state.lastTarget == nil { entries[key] = nil; return }
+    /// Records a monitor's state; one with nothing to remember is removed. A state equal to the stored one
+    /// (offset, when it was set and in which sun included) is not stored again, so the time means "last
+    /// decided", not "last tick". Returns whether anything changed.
+    @discardableResult
+    public mutating func record(key: String, state: HoldState, now: Double) -> Bool {
+        if state.lastSet == nil && state.lastTarget == nil { return entries.removeValue(forKey: key) != nil }
+        if let e = entries[key], e.lastSet == state.lastSet, e.lastTarget == state.lastTarget, e.offset == state.offset,
+           e.offsetSun == state.offsetSun, e.offsetAt == state.offsetAt { return false }
         entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, offset: state.offset, offsetSun: state.offsetSun, offsetAt: state.offsetAt, saved: now)
+        return true
     }
     /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
     public func restore(key: String, now: Double, maxAge: Double = Self.maxAge) -> HoldState? {
@@ -399,8 +529,12 @@ public struct SavedHolds: Equatable, Codable {
 /// Home Assistant errors. A connection that fails right after launch, wake or docking (macOS checks the
 /// local-network permission, or the network is still switching) usually works a few seconds later, so
 /// it is retried quickly and only shown once Home Assistant has been unreachable for a while. A
-/// rejected or missing token will not fix itself and shows at once.
+/// rejected or missing token will not fix itself and shows at once. A gateway answer (502, 503, 504:
+/// Home Assistant restarting behind a proxy) counts as a failed connection; any other status
+/// (403, 404, 500...) is an answer that will not fix itself and shows at once.
 public enum HAErrorRule {
+    /// Whether an HTTP status is a brief outage rather than an answer to act on.
+    public static func transient(status: Int) -> Bool { status == 502 || status == 503 || status == 504 }
     public static let retryDelays: [Double] = [2, 5]
     public static let showAfter: Double = 60
     /// Whether the panel should show the error: `downSince` is when the current outage started.

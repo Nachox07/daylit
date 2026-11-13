@@ -27,11 +27,12 @@ sealed record Decision(int Level, IReadOnlyList<DecisionStep> Steps);
 /// in effect and how much of it applies now, per monitor key. Linked: linked monitors that follow another,
 /// and the level they land on; Leader: the monitor they follow. Applying: false when Automatic is off or
 /// this PC is idle, so nothing is being set. LightsUsed: the room lights each monitor's target used, per monitor key.
+/// SetHelper: a monitor has a Home Assistant "set" helper, which still applies while Automatic is off or the PC is idle.
 sealed record LiveInputs(double? Elev = null, double? Pos = null, bool Lights = false, double Light = 1,
                          IReadOnlyDictionary<string, double[]>? Levels = null,
                          IReadOnlyDictionary<string, (int Value, double Weight)>? Offsets = null,
                          IReadOnlyDictionary<string, int>? Linked = null, string Leader = "", bool Applying = true,
-                         IReadOnlyDictionary<string, bool>? LightsUsed = null);
+                         IReadOnlyDictionary<string, bool>? LightsUsed = null, bool SetHelper = false);
 
 static class Chart {
     static int R(double x) => (int)Math.Round(x, MidpointRounding.AwayFromZero);
@@ -86,11 +87,11 @@ static class Chart {
     /// `fromHa`: a template row [day, blindDown, night, nightLights, set, setChanged] or its first four numbers.
     /// Home Assistant's value wins where it has one (>= 0), else the local number.
     public static double[] EffectiveLevels(double[] local, double[]? fromHa) {
-        var lv = local.Take(3).ToArray();
-        if (fromHa != null) for (int k = 0; k < Math.Min(3, Math.Min(fromHa.Length, lv.Length)); k++) if (fromHa[k] >= 0) lv[k] = fromHa[k];
+        var lv = local.Take(3).Select(Rules.ClampLevel).ToArray();
+        if (fromHa != null) for (int k = 0; k < Math.Min(3, Math.Min(fromHa.Length, lv.Length)); k++) if (fromHa[k] >= 0) lv[k] = Rules.ClampLevel(fromHa[k]);
         double? fromRow = fromHa != null && fromHa.Length > 3 && fromHa[3] >= 0 ? (double?)fromHa[3] : null;
         double? own = local.Length > 3 && local[3] >= 0 ? (double?)local[3] : null;
-        return (fromRow ?? own) is double nl ? lv.Append(nl).ToArray() : lv;
+        return (fromRow ?? own) is double nl ? lv.Append(Rules.ClampLevel(nl)).ToArray() : lv;
     }
 
     /// The level right now and how it got there: the blind picks the daytime level, the sun blends it with

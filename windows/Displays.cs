@@ -185,5 +185,5 @@ sealed class Mon {
     }
 
     public static MonitorConfig? Match(Display d, MonitorConfig[]? specs) =>
-        specs?.FirstOrDefault(s => s.Match is { } m && d.Friendly.Contains(m.Trim(), StringComparison.OrdinalIgnoreCase));
+        specs != null && MonitorMatch.Best(d.Friendly, specs.Select(s => s.Match)) is int i ? specs[i] : null;
 }

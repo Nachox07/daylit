@@ -111,17 +111,13 @@ public enum ConfigPatch {
         }
         root["homeAssistant"] = ha.isEmpty ? nil : ha
 
-        if let raw = root["monitors"], !(raw is [[String: Any]]) {
+        if let raw = root["monitors"], !(raw is NSNull), !(raw is [[String: Any]]) {
             throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
         }
         var list = root["monitors"] as? [[String: Any]] ?? []
         var claimed = Set<Int>()   // an entry matching two connected monitors takes the first one's levels only
         for m in e.monitors {
-            let i = list.indices.first { j in
-                let entry = list[j]
-                guard let match = entry["match"] as? String, !match.isEmpty else { return false }
-                return m.name.localizedCaseInsensitiveContains(match.trimmingCharacters(in: .whitespaces))
-            }
+            let i = MonitorMatch.best(name: m.name, matches: list.map { $0["match"] as? String ?? "" })
             if let i { if claimed.contains(i) { continue }; claimed.insert(i) }
             var entry = i.map { list[$0] } ?? ["match": m.suggestedMatch]
             let label = m.label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -189,14 +185,11 @@ extension ConfigPatch {
             }
             root = o
         }
-        if let raw = root["monitors"], !(raw is [[String: Any]]) {
+        if let raw = root["monitors"], !(raw is NSNull), !(raw is [[String: Any]]) {
             throw ConfigEditError.invalid("monitors must be a list of objects; fix it with Open Config File")
         }
         var list = root["monitors"] as? [[String: Any]] ?? []
-        let i = list.indices.first { j in
-            guard let match = list[j]["match"] as? String, !match.isEmpty else { return false }
-            return display.localizedCaseInsensitiveContains(match.trimmingCharacters(in: .whitespaces))
-        }
+        let i = MonitorMatch.best(name: display, matches: list.map { $0["match"] as? String ?? "" })
         var entry = i.map { list[$0] } ?? ["match": suggestedMatch]
         for (k, v) in levels where Level.allCases.contains(where: { $0.key == k }) { entry[k] = clamp(v) }
         if let i { list[i] = entry } else { list.append(entry) }

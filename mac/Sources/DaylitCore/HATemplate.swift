@@ -2,7 +2,7 @@
 import Foundation
 
 public struct HAState: Decodable {
-    public let elev: Double
+    public let elev: Double?                // nil when the sun entity does not exist in Home Assistant
     public let pos: Double                  // the blind's position; -1 when Home Assistant has none (blind unavailable)
     public let lights: Bool
     public let auto: Bool?                  // nil when there is no autoSwitch
@@ -14,6 +14,23 @@ public struct HAState: Decodable {
     /// Per display UUID: [day, blindDown, night, nightLights, set, setChanged]; -1 = use the local value / no set helper;
     /// setChanged is the set helper's last_changed (Unix seconds).
     public let m: [String: [Double]]
+
+    /// The configured entities Home Assistant does not have, as far as this answer shows: the autoSwitch
+    /// (its `auto` came back null) and the sun entity (its `elev` came back null).
+    public func missingEntities(_ ha: HAConfig) -> [String] {
+        var r: [String] = []
+        if let a = ha.autoSwitch, !a.isEmpty, auto == nil { r.append(a) }
+        if elev == nil { r.append(ha.sun.flatMap { $0.isEmpty ? nil : $0 } ?? "sun.sun") }
+        return r
+    }
+
+    /// The problem line for those entities, or nil when none is missing.
+    public static func noValueNote(_ ids: [String]) -> String? {
+        ids.isEmpty ? nil : "Home Assistant gives no value for " + ids.joined(separator: ", ") + " (missing or unavailable)"
+    }
+
+    /// The problem line: a config problem first (the user fixes the file), else the missing entities.
+    public static func problemLine(config: String?, missing: [String]) -> String? { config ?? noValueNote(missing) }
 
     /// nil when the answer is not what the template produces (e.g. a wrong entity id broke the JSON).
     public static func parse(_ d: Data) -> HAState? {
@@ -33,7 +50,10 @@ public enum HATemplate {
                                                                               night: ok($0.night), set: ok($0.set), nightLights: ok($0.nightLights)) }) }
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(-1)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
-        let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson }}" } ?? "null"   // null outside {{ }}: Jinja has no null
+        // A missing or unavailable entity renders null, not false: a typo or an outage must not look like "Automatic is off". states['…'] is None when missing.
+        let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson if states['\($0)'] and states['\($0)'].state not in ['unavailable', 'unknown'] else 'null' }}" } ?? "null"   // null outside {{ }}: Jinja has no null
+        let sunId = ha.sun ?? "sun.sun"
+        let elev = "{{ state_attr('\(sunId)','elevation') | float if state_attr('\(sunId)','elevation') is number else 'null' }}"   // no number: null, so the computed sun is used
         let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"
         let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }
@@ -47,7 +67,7 @@ public enum HATemplate {
             return "\"\(mon.uuid)\": [\(num(h.day)), \(num(h.blindDown)), \(num(h.night)), \(num(h.nightLights)), \(set)]"
         }.joined(separator: ", ")
         return """
-        {"elev": {{ state_attr('\(ha.sun ?? "sun.sun")','elevation') | float(-10) }},
+        {"elev": \(elev),
          "pos": {{ \(pos) }},
          "lights": {{ \(lights) }},
          "auto": \(auto),

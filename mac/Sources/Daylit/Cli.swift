@@ -49,13 +49,14 @@ import DaylitCore
 
     static func listMonitors() -> [String: Any] {
         let (cfg, _) = Config.load()
-        DDC.tool = cfg.ddcTool ?? DDC.defaultTool
+        DDC.configure(cfg.ddcTool)
         var out: [[String: Any]] = []
         for s in NSScreen.screens {
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { continue }
             let builtIn = CGDisplayIsBuiltin(id) != 0
             let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
-            let entry = cfg.monitors?.first { s.localizedName.localizedCaseInsensitiveContains($0.match) }
+            if uuid.isEmpty && !builtIn { continue }   // like the app: everything is keyed by the UUID
+            let entry = cfg.monitor(for: s.localizedName)
             var control = "none", level: Int? = nil
             if builtIn { control = "native (manual slider only; automatic mode leaves it to macOS)"; level = Native.get(id) }
             else {
@@ -81,10 +82,11 @@ import DaylitCore
         var problems: [String] = [], notes: [String] = []
         if let err { problems.append(err) }
         if let srcErr { problems.append(srcErr) }
+        if let note = DDC.configure(cfg.ddcTool) { notes.append(note) }
         let names = externalScreens().map(\.name)
         var monitors: [[String: Any]] = []
-        for m in cfg.monitors ?? [] {
-            let hit = names.first { $0.localizedCaseInsensitiveContains(m.match) }
+        for (mi, m) in (cfg.monitors ?? []).enumerated() {
+            let hit = names.first { MonitorMatch.best(name: $0, matches: (cfg.monitors ?? []).map(\.match)) == mi }
             if m.homeAssistant != nil && src != .homeAssistant {
                 problems.append("monitor \"\(m.match)\" has homeAssistant entities but the source is \(src)")
             }

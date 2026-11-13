@@ -16,7 +16,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 run() { if [ "$DRY" = 1 ]; then echo "dry run: $*"; else "$@"; fi; }
-clone() { git clone -q --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/$1.git" "$2"; }
+# git authenticates through gh's credential helper, which reads GH_TOKEN from the environment: the
+# token is never in a remote URL, a command line or the clones' .git/config. Set through the
+# environment, so no global git config is touched.
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_0="credential.https://github.com.helper" GIT_CONFIG_VALUE_0=""
+export GIT_CONFIG_KEY_1="credential.https://github.com.helper" GIT_CONFIG_VALUE_1="!gh auth git-credential"
+export GIT_TERMINAL_PROMPT=0
+clone() { git clone -q --depth 1 "https://github.com/$1.git" "$2"; }
 commit() { git -C "$1" -c user.name="daylit-release" -c user.email="noreply@github.com" commit -q -m "$2"; }
 [ "$DRY" = 1 ] || [ -n "${GH_TOKEN:-}" ] || { echo "GH_TOKEN is not set" >&2; exit 1; }
 
@@ -55,7 +62,7 @@ else
     mkdir -p "$WORK/winget/manifests"
   else
     git clone -q --depth 1 --filter=blob:none --sparse \
-      "https://x-access-token:${GH_TOKEN}@github.com/Nachox07/winget-pkgs.git" "$WORK/winget"
+      "https://github.com/Nachox07/winget-pkgs.git" "$WORK/winget"
     git -C "$WORK/winget" sparse-checkout set manifests/n/Nachox07
     git -C "$WORK/winget" checkout -q -b "$BRANCH"
   fi
@@ -80,11 +87,21 @@ elif [ "$DRY" = 1 ]; then
   git -C "$ROOT" diff --stat -- packaging
   echo "dry run: open a pull request with these files"
 else
+  # The workflow checks out the release tag, so the pull request branch is built on the current
+  # main (not on the tag's history): fetch main and carry over only the files update.sh changed.
   PB="packaging/v$VERSION"
-  git -C "$ROOT" checkout -q -b "$PB"
-  git -C "$ROOT" add packaging
-  commit "$ROOT" "Point packaging at $VERSION"
-  git -C "$ROOT" push -q -f "https://x-access-token:${GH_TOKEN}@github.com/Nachox07/daylit.git" "$PB"
+  git clone -q --depth 1 --branch main "https://github.com/Nachox07/daylit.git" "$WORK/main"
+  git -C "$ROOT" diff --name-only -z -- packaging | while IFS= read -r -d '' f; do
+    cp "$ROOT/$f" "$WORK/main/$f"
+  done
+  git -C "$WORK/main" checkout -q -b "$PB"
+  if git -C "$WORK/main" diff --quiet -- packaging; then
+    echo "packaging/ on main already names $VERSION"
+    exit 0
+  fi
+  git -C "$WORK/main" add packaging
+  commit "$WORK/main" "Point packaging at $VERSION"
+  git -C "$WORK/main" push -q -f origin "$PB"
   [ -n "$(gh pr list -R Nachox07/daylit --head "$PB" --state open --json number -q '.[].number')" ] ||
   gh pr create -R Nachox07/daylit --head "$PB" --base main --title "Point packaging at $VERSION" \
     --body "The release workflow updated the Homebrew cask and winget manifests for v$VERSION and published them. This keeps the copies in packaging/ in step."

@@ -76,7 +76,15 @@ static class Rules {
     /// known position instead of counting as fully open; with none seen yet it counts as open.
     public static double BlindPosition(double reported, double? last) => reported >= 0 ? Math.Min(reported, 100) : last ?? 100;
 
-    public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
+    /// A brightness level as a finite 0–100: out of range is clamped, infinity counts as the nearest end,
+    /// and NaN as 0 (a level that is not a number must never reach the formula).
+    public static double ClampLevel(double v) => double.IsNaN(v) ? 0 : Math.Clamp(v, 0, 100);
+
+    public static int Target(double[] v0, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
+        var v = v0.Select(ClampLevel).ToArray();
+        pos = ClampLevel(pos);
+        if (double.IsNaN(light)) light = 1;   // a light scale that is not a number caps nothing
+        if (double.IsNaN(sun)) sun = 0;
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
         double share = Math.Min(sun, light);
         double x;
@@ -90,8 +98,24 @@ static class Rules {
             x = v[2] + (daytime - v[2]) * share;
             if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
         }
+        if (!double.IsFinite(x)) return (int)Math.Round(v[2], MidpointRounding.AwayFromZero);   // last guard: the night level
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
+
+    /// Automatic mode while Home Assistant does not answer (the sun fallback). With an autoSwitch it keeps the
+    /// last state Home Assistant gave, so an outage never turns Automatic on or off; without a switch, or before
+    /// one was ever seen, the local setting decides.
+    public static bool AutomaticFallback(bool hasSwitch, bool? lastFromHa, bool local) => hasSwitch ? lastFromHa ?? local : local;
+
+    /// Automatic mode on a tick Home Assistant answered. Its switch decides when it gave a value; a switch it gave
+    /// none for (a missing entity, `unavailable`) leaves Automatic as it was, the same as during an outage.
+    public static bool AutomaticNow(bool hasSwitch, bool? fromHa, bool? lastFromHa, bool local) =>
+        fromHa ?? AutomaticFallback(hasSwitch, lastFromHa, local);
+
+    /// The Automatic state saved from Home Assistant counts only for the autoSwitch it was seen on: a different
+    /// entity in the config (or an older save with none recorded) starts again from the local setting.
+    public static bool? StoredAutomatic(bool? value, string? entity, string? configured) =>
+        !string.IsNullOrEmpty(configured) && entity == configured ? value : null;
 
     /// The nightLights level in a monitor's levels in effect (a fourth number, 0 or more); null when it has none.
     public static double? NightLightsLevel(double[] v) => v.Length > 3 && v[3] >= 0 ? (double?)v[3] : null;
@@ -109,7 +133,7 @@ static class Rules {
     /// over 0.3 of the daylight fraction (about half an hour). A daytime one never fades faster than that
     /// half hour from when it was set (`age`, seconds): one set in the last light would otherwise be gone in minutes.
     public static double? OffsetWeight(double sun, double setAt, double? age = null) {
-        const double edge = 0.3, fade = 1800;
+        const double edge = NightOffsetEdge, fade = 1800;
         if (setAt > 0) {
             double w = Math.Min(1, Math.Max(0, sun) / Math.Min(edge, setAt));
             return age is double a && a >= 0 && a < fade ? Math.Max(w, 1 - a / fade) : w;
@@ -117,12 +141,42 @@ static class Rules {
         return sun >= edge ? null : 1 - sun / edge;
     }
 
-    /// An offset from an earlier day, or from a night long over, no longer applies, even when no tick ran
-    /// in between (the PC slept). `dayOf` gives the local calendar day of a Unix time.
-    public static bool OffsetExpired(Hold s, double now, Func<double, int> dayOf) {
+    /// The longest a hand-set offset can live, whatever the sky does (a polar night or day never ends it).
+    public const double OffsetMaxAge = 36 * 3600;
+    /// A daytime offset older than this when the calendar day changes ends even with the sun up
+    /// (a PC that slept through the night wakes into a new day).
+    const double DayOffsetCarryOver = 12 * 3600;
+    /// The daylight fraction where a night offset has faded out completely.
+    public const double NightOffsetEdge = 0.3;
+
+    /// A night offset without a location ends after this long (longer than any night but a polar one).
+    const double NightOffsetFallback = 18 * 3600;
+    /// How often the sun is sampled between setting an offset and now.
+    const double OffsetSampleStep = 600;
+
+    /// An offset that no longer applies, even when no tick ran in between (the PC slept).
+    /// With a location it is decided from what the sun did between `OffsetAt` and `now`, sampled every
+    /// 10 minutes, not from the current tick: one set at night ends once daylight reached the fade edge
+    /// (OffsetWeight) at any point since, so sleeping through a sunrise cannot keep it, while a polar night
+    /// does; one set by day ends with the calendar day if the sun set in between, and only a polar day
+    /// (the sun never went down) carries it over midnight, for at most 12 hours. Without a location
+    /// (possible with Home Assistant as the source) a night offset ends after 18 hours and a day one with
+    /// the calendar day. Every offset ends after 36 hours. `dayOf` gives the local calendar day of a Unix
+    /// time; `sun` is the daylight fraction now.
+    public static bool OffsetExpired(Hold s, double now, double sun, Func<double, int> dayOf, (double Lat, double Lon)? place = null, Tuning? tuning = null) {
         if (s.Offset == null || s.OffsetAt is not double at || now <= 0) return false;
-        if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at);
-        return now - at > 18 * 3600;   // longer than any night
+        double age = now - at;
+        if (age > OffsetMaxAge) return true;
+        bool byDay = (s.OffsetSun ?? 0) > 0, newDay = dayOf(now) != dayOf(at);
+        if (place is not { } p) return byDay ? newDay : age > NightOffsetFallback;
+        var t = tuning ?? new Tuning();
+        double lowest = sun, highest = sun;
+        for (double x = at; x < now; x += OffsetSampleStep) {
+            double f = t.Fraction(Sun.Elevation(DateTimeOffset.FromUnixTimeMilliseconds((long)(x * 1000)), p.Lat, p.Lon));
+            lowest = Math.Min(lowest, f); highest = Math.Max(highest, f);
+        }
+        if (byDay) return newDay && (lowest <= 0 || age > DayOffsetCarryOver);
+        return highest >= NightOffsetEdge;
     }
 
     /// Seconds since the hand-set offset was set; null when unknown.
@@ -130,6 +184,21 @@ static class Rules {
 
     /// The local calendar day of a Unix time.
     public static int LocalDay(double t) => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).LocalDateTime).DayNumber;
+
+    /// Which brightness a tick should trust after it waited (the monitor read, a write to another monitor).
+    /// `atRead` is the level the model held before the wait, `now` what it holds after it. A level that
+    /// moved in between came from the user's hand (slider, keys); it is newer than the reading, so it
+    /// wins. `held`: the slider is in the user's hand, or was just now (the panel's 1.5 s grace).
+    public static bool UserLevelWins(int? atRead, int? now, bool held) => now != null && (held || atRead != now);
+
+    /// The level a tick decides on for one monitor: the model's level when the user set one after the
+    /// reading (see UserLevelWins), else the reading.
+    public static int? LevelToDecideOn(int? read, int? atRead, int? model, bool held) => UserLevelWins(atRead, model, held) ? model : read;
+
+    /// The level to store after a write of `newLevel`; null keeps the current one. A refused write changes
+    /// nothing, and a level the user set while Daylit was writing (or a held slider) is newer than the write.
+    public static int? LevelAfterWrite(int? newLevel, bool ok, int? atStart, int? now, bool held) =>
+        ok && newLevel != null && !UserLevelWins(atStart, now, held) ? newLevel : null;
 
     /// One automatic decision for one monitor (Windows rules).
     /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
@@ -140,7 +209,8 @@ static class Rules {
     ///   fades at dusk and ends at night (OffsetWeight); a new hand-set level replaces it.
     /// - An idle PC (someone may be using the other machine on these monitors) writes nothing automatic.
     public static Step Decide(int c, int target, (double Value, double Changed)? remote, Hold s, bool auto, bool here, double sun, bool touched = true,
-                              bool dragging = false, double now = 0, Func<double, int>? dayOf = null) {
+                              bool dragging = false, double now = 0, Func<double, int>? dayOf = null,
+                              (double Lat, double Lon)? place = null, Tuning? tuning = null) {
         int? write = null, remoteValue = null;
         bool fromRemote = false;
         if (remote is { } r) {
@@ -154,7 +224,7 @@ static class Rules {
             }
         }
         int applied = c;
-        if (here && OffsetExpired(s, now, dayOf ?? LocalDay)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
+        if (here && OffsetExpired(s, now, sun, dayOf ?? LocalDay, place, tuning)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
         if (auto && !fromRemote && here && !dragging) {
             if (s.LastSet is int last && c != last) {
                 if (touched || Math.Abs(c - last) > 1)   // moved by hand since the last tick
@@ -232,6 +302,21 @@ sealed class LookRule {
 
 /// The one Home Assistant template each tick sends to POST /api/template.
 static class HaTemplate {
+    /// The configured entities Home Assistant does not have, as far as an answer shows: the autoSwitch (its
+    /// `auto` came back null) and the sun entity (its `elev` came back null).
+    public static List<string> Missing(HaConfig h, bool elevMissing, bool autoMissing) {
+        var r = new List<string>();
+        if (!string.IsNullOrEmpty(h.AutoSwitch) && autoMissing) r.Add(h.AutoSwitch);
+        if (elevMissing) r.Add(string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!);
+        return r;
+    }
+
+    /// The problem line for those entities, or null when none is missing.
+    public static string? NoValueNote(IReadOnlyList<string> ids) => ids.Count == 0 ? null : "Home Assistant gives no value for " + string.Join(", ", ids) + " (missing or unavailable)";
+
+    /// The problem line: a config problem first (the user fixes the file), else the missing entities.
+    public static string? ProblemLine(string? config, IReadOnlyList<string> missing) => config ?? NoValueNote(missing);
+
     static string Num(string? entity, double fallback) =>
         string.IsNullOrWhiteSpace(entity) ? fallback.ToString(CultureInfo.InvariantCulture)
                                           : $"{{{{ states('{entity}') | float({fallback.ToString(CultureInfo.InvariantCulture)}) }}}}";
@@ -247,7 +332,8 @@ static class HaTemplate {
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
         string sat = h.Lights is { Length: > 0 } l3 ? $"(state_attr('{l3}','hs_color') or [0, 100])[1] | float(100)" : "100";
-        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson }}}}" : "null";
+        // A missing or unavailable entity renders null, not false: a typo or an outage must not look like "Automatic is off". states['…'] is None when missing.
+        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson if states['{a}'] and states['{a}'].state not in ['unavailable', 'unknown'] else 'null' }}}}" : "null";
         string mons_ = string.Join(", ", monitors.Select(e => {
             string set = e?.Set is { Length: > 0 } st
                 ? $"{Num(st, -1)}, {{{{ as_timestamp(states['{st}'].last_changed) if states['{st}'] else 0 }}}}" : "-1, 0";   // states['…']: None when missing; an object id may start with a digit
@@ -258,7 +344,7 @@ static class HaTemplate {
         string lightUnit = h.Light is { Length: > 0 } lu ? $"{{{{ state_attr('{lu}','unit_of_measurement') | tojson }}}}" : "null";   // W, kW, lx…; null when unknown
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
-            {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},
+            {"elev": {{ state_attr('{{{sun}}}','elevation') | float if state_attr('{{{sun}}}','elevation') is number else 'null' }},
              "pos": {{ {{{pos}}} }},
              "lights": {{ {{{lights}}} }},
              "auto": {{{auto}}},
@@ -370,7 +456,8 @@ sealed class SavedHolds {
     /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
     public bool Record(string key, Hold h, double now) {
         if (h.LastSet == null && h.LastTarget == null) return Entries.Remove(key);
-        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset) return false;   // keep "last decided" time
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset
+            && e.OffsetSun == h.OffsetSun && e.OffsetAt == h.OffsetAt) return false;   // keep "last decided" time
         Entries[key] = new Entry(h.LastSet, h.LastTarget, now, h.Offset, h.OffsetSun, h.OffsetAt);
         return true;
     }
@@ -389,6 +476,9 @@ sealed class SavedHolds {
 /// works a few seconds later, so it is retried quickly and only shown once Home Assistant has been
 /// unreachable for a while. A rejected or missing token will not fix itself and shows at once.
 public static class HaErrorRule {
+    /// Whether an HTTP status is a brief outage (502, 503, 504: Home Assistant restarting behind a proxy)
+    /// rather than an answer that will not fix itself (403, 404, 500...).
+    public static bool Transient(int status) => status is 502 or 503 or 504;
     public static readonly double[] RetryDelays = { 2, 5 };
     public const double ShowAfter = 60;
     public static bool ShouldShow(bool transient, double? downSince, double now) =>
