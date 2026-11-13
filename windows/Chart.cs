@@ -77,9 +77,32 @@ static class Chart {
     public static double? DraggedElevation(IReadOnlyList<(double t, double e)> s, double t, bool day, double other,
                                            double? parkedAt = null, double slop = 0.01) {
         if (parkedAt is double p && Math.Abs(t - p) < slop) return null;
-        double v = Math.Round(Elevation(s, t) * 2, MidpointRounding.AwayFromZero) / 2;
-        v = day ? Math.Clamp(v, -18, 60) : Math.Clamp(v, -18, 30);
+        return KeepClear(Elevation(s, t), day, other);
+    }
+
+    /// The range tuning accepts for a handle: the full-day line up to 60°, the night one up to 30°.
+    public const double Lowest = -18;
+    public static double Highest(bool day) => day ? 60 : 30;
+
+    /// Up / Down move a handle by half a degree, Page Up / Page Down by five.
+    public const double SmallStep = 0.5, LargeStep = 5;
+
+    /// An elevation in half-degree steps, in the range tuning accepts and half a degree clear of the
+    /// other handle (the full-day line stays above the night one). Dragging, the keyboard and Narrator
+    /// all save through this.
+    public static double KeepClear(double elevation, bool day, double other) {
+        double v = Math.Clamp(Math.Round(elevation * 2, MidpointRounding.AwayFromZero) / 2, Lowest, Highest(day));
         return day ? Math.Max(v, other + 0.5) : Math.Min(v, other - 0.5);
+    }
+
+    /// What moving a handle by `step` degrees from `value` saves (a key press: ±SmallStep or ±LargeStep).
+    public static double SteppedElevation(double value, double step, bool day, double other) => KeepClear(value + step, day, other);
+
+    /// The handle the keyboard moves to from `active` (of `count`), one to the left (`delta` -1) or right (+1).
+    /// Null past either end: Tab then leaves the chart, Left / Right stay on the end handle.
+    public static int? NextHandle(int active, int count, int delta) {
+        int next = active + delta;
+        return next >= 0 && next < count ? next : null;
     }
 
     /// The levels in effect: [day, blindDown, night], plus a fourth, nightLights, when the monitor has one.
