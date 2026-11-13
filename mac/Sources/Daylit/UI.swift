@@ -35,6 +35,13 @@ struct Panel: View {
                 suggestionCard(s, label: mon.label)
             }
 
+            if m.updateShown, let u = m.update {
+                updateLine(u)
+            } else if let n = m.updateNote {
+                Label(n, systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
             if let p = [m.problem, m.suggestError].compactMap({ $0 }).joined(separator: "\n") as String?, !p.isEmpty {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -74,6 +81,7 @@ struct Panel: View {
             if m.source == .homeAssistant { Button("Home Assistant Token…") { TokenWindow.show(m) } }
             Button("Open Config File…") { m.openConfig() }
             Button("Reload Config") { m.reload() }
+            Button("Check for Updates…") { Task { await m.checkForUpdates(manual: true) } }
             Divider()
             Button("Quit Daylit") { NSApp.terminate(nil) }
         } label: { Image(systemName: "gearshape") }
@@ -142,6 +150,45 @@ struct Panel: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+        .accessibilityElement(children: .contain)
+    }
+
+    /// A newer Daylit (DaylitCore.UpdateCheck): one line, Download (or the brew command), What's new and Not now.
+    /// Release notes are shown as plain text, never as links or Markdown.
+    func updateLine(_ u: UpdateCheck.Available) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label { Text(verbatim: "Daylit \(u.version) is available") } icon: { Image(systemName: "arrow.down.circle") }
+                .font(.caption).lineLimit(1)
+            if m.homebrew {
+                Text(verbatim: UpdateCheck.brewCommand).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            HStack(spacing: 10) {
+                if m.homebrew {
+                    Button("Copy Command") { m.copyBrewCommand() }.help("Copy it, then paste it in Terminal")
+                } else {
+                    Button("Download") { m.downloadUpdate() }.help("Open the release page")
+                }
+                if !u.changes.isEmpty {
+                    Button(m.updateExpanded ? "Hide what's new" : "What's new") { m.updateExpanded.toggle() }
+                        .buttonStyle(.borderless)
+                }
+                Button("Not now") { m.dismissUpdate() }
+                    .buttonStyle(.borderless)
+                    .help("Not for this version; a newer one shows again")
+                Spacer()
+            }
+            .controlSize(.small)
+            if m.updateExpanded {
+                let shown = UpdateCheck.shown(u.changes)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(shown.items.enumerated()), id: \.offset) { _, c in
+                        Text(verbatim: "• " + c).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if shown.more > 0 { Text(verbatim: "and \(shown.more) more") }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+        }
         .accessibilityElement(children: .contain)
     }
 

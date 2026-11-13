@@ -111,6 +111,10 @@ Home Assistant a `homeAssistant` block naming three `input_number` entities (a f
 to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle or Automatic is off). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
 `homeAssistant.push` (experimental, default off) makes Home Assistant tell Daylit when one of those entities changes ([docs/setup.md → Experimental](docs/setup.md#experimental); also Settings → Home Assistant → *Instant updates*); leave it off unless the user asks.
 
+`checkUpdates` (default on) is the daily check for a newer Daylit release (one request to GitHub's public
+releases list, nothing about the user; [docs/setup.md → Updates](docs/setup.md#updates)); `false` turns it
+off, as does Settings → App → *Automatically check for updates*.
+
 Ask the user for: latitude/longitude (city level is enough), the HA URL, and which blind / lights
 entities belong to the room. Don't guess entity IDs.
 
@@ -137,6 +141,8 @@ computer right now, or no token stored yet) and which config entry matched which
   gear menu → *Keyboard shortcuts…*. `⌃⌥⌘D` / `Ctrl+Alt+D` switch light and dark mode (same switch as the
   gear menu item). On macOS the brightness keys also work once the user grants
   Accessibility permission.
+- When a newer release is out the panel says so (*Download*, *What's new*, *Not now*); gear menu →
+  *Check for updates…* checks right away. Daylit never installs anything itself.
 - The gear menu's *Settings…* window lets the user change the source, location, levels, contrast (DDC
   monitors) and Home Assistant entities later without editing JSON; it keeps every other key in the file.
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
@@ -152,7 +158,7 @@ computer right now, or no token stored yet) and which config entry matched which
   built-in screen is never automated (on macOS it gets a manual slider while the lid is open;
   `"builtIn": false` hides it).
 - Log: `%LOCALAPPDATA%\Daylit\daylit.log` (Windows) or `~/Library/Logs/Daylit/daylit.log` (macOS)
-  shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume, suggested levels (`suggest:`) and Home Assistant errors.
+  shows automatic changes (`auto:`), publishes, idle/back, theme switches, battery pause/resume, suggested levels (`suggest:`), update checks (`update:`) and Home Assistant errors.
 
 ## Work on the code
 

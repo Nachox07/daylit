@@ -56,6 +56,7 @@ public struct Config: Decodable {
     public var pauseOnBattery: Bool?    // default for the panel switch (true when missing)
     public var ddcTool: String?
     public var builtIn: Bool?           // macOS: show the built-in screen's slider while the lid is open (default true)
+    public var checkUpdates: Bool?      // ask GitHub once a day whether a newer release exists (default true; UpdateCheck)
     public var homeAssistant: HAConfig?
     public var monitors: [MonitorConfig]?
     public var tuning: Tuning?          // the numbers behind the rules (Tuning.swift); missing = the defaults
@@ -95,7 +96,7 @@ public struct Config: Decodable {
         catch { return (nil, "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
             var safe = Config(pauseOnBattery: c.pauseOnBattery, monitors: c.monitors)   // no ddcTool: it names a program to run
-            safe.builtIn = c.builtIn
+            safe.builtIn = c.builtIn; safe.checkUpdates = c.checkUpdates
             return (safe, err)
         }
         return (c, nil)

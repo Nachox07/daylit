@@ -132,6 +132,15 @@ static class Settings {
         set { if (value != null) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("LightUnit", System.Text.Json.JsonSerializer.Serialize(value)); } }
     }
 
+    /// "Not now" on the update line: the version put off (no line for it, only for a newer one).
+    public static string? UpdateDismissed {
+        get { try { return Registry.CurrentUser.OpenSubKey(Key)?.GetValue("UpdateDismissed") as string; } catch { return null; } }
+        set {
+            try { using var k = Registry.CurrentUser.CreateSubKey(Key); if (value == null) k.DeleteValue("UpdateDismissed", false); else k.SetValue("UpdateDismissed", value, RegistryValueKind.String); }
+            catch (Exception e) { Log.Write("update: could not remember Not now: " + e.Message); }
+        }
+    }
+
     /// "Not now" on a suggestion: per monitor key, no suggestion until then (Unix seconds; JSON).
     public static Dictionary<string, double> SuggestDismissed {
         get {

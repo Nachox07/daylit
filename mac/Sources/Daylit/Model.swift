@@ -26,6 +26,17 @@ import DaylitCore
     @Published var dark = false
     /// "Sync monitors": moving one external monitor moves the others, keeping their offsets.
     @Published var sync = UserDefaults.standard.bool(forKey: "syncMonitors")
+    /// A newer release (DaylitCore.UpdateCheck): whether the panel shows its line, with its What's new list open,
+    /// and what a check from the gear menu found when there is nothing to show ("You're up to date").
+    @Published var update: UpdateCheck.Available?
+    @Published var updateShown = false
+    @Published var updateExpanded = false
+    @Published var updateNote: String?
+    /// Installed with Homebrew: the line shows the brew command instead of Download.
+    var homebrew = UpdateCheck.isHomebrew(bundlePath: Bundle.main.bundlePath)
+    var updateLastCheck: Date?
+    var updateLastError: String?, updateLoggedAt: Date?
+    var updateNoteClear: Task<Void, Never>?
     @Published var live: LiveInputs?     // the last tick's blind, lights, clouds and hand-set distances, for the Settings chart
     var syncOffsets: SyncOffsets = {
         guard let d = UserDefaults.standard.data(forKey: "syncOffsets"), let o = try? JSONDecoder().decode(SyncOffsets.self, from: d) else { return SyncOffsets() }
@@ -106,6 +117,7 @@ import DaylitCore
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in self.screensChanged() }
         }
+        startUpdateChecks()
     }
 
     // MARK: setup
@@ -141,6 +153,7 @@ import DaylitCore
         }
         redetect()
         syncPush(force: true)   // a reload rebuilds the entity list and resubscribes
+        refreshUpdateLine()     // checkUpdates turned off hides the line
     }
 
     /// Opens or closes the push socket for the current config, source, pause, Automatic and monitors (PushRule.wanted).

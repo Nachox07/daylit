@@ -17,7 +17,8 @@ binary into the app bundle with its Info.plist and signature.
 
 - `Sources/DaylitCore/`: the decisions, with no AppKit: `Config`, `Sun`, `Rules` (brightness
   target, hand-set hold, idle, the Home Assistant "set" helper, light/dark), `HATemplate`, `Suggest`
-  (suggested levels from repeated hand changes; `windows/Suggest.cs` is its twin).
+  (suggested levels from repeated hand changes; `windows/Suggest.cs` is its twin), `Update` (whether a newer
+  release is out and what changed; `windows/Update.cs` is its twin).
 - `Sources/Daylit/`: the app. `Model.swift` runs the tick, `Displays.swift` monitor I/O,
   `Sources.swift` Home Assistant calls and the keychain, `Keys.swift` brightness keys and
   shortcuts, `UI.swift` the panel, on-screen indicator and shortcuts window, `Look.swift`,

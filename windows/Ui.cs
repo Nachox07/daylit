@@ -52,6 +52,9 @@ sealed class Flyout : Window {
     readonly Grid autoRow;
     readonly Border suggestCard;      // a change of levels Daylit noticed (Suggest.cs), shown only while one is pending
     readonly TextBlock suggestText;
+    readonly StackPanel updateBox;     // "Daylit X.Y.Z is available" (Update.cs), shown only while a newer version waits
+    readonly TextBlock updateText, updateNotes, updateNote;
+    readonly Button whatsNew;
     readonly List<Border> cards = new();
     readonly List<(Mon m, Slider s, TextBlock pct, TextBlock note, Border card, Button member)> rowViews = new();
     Button? link;
@@ -123,6 +126,23 @@ sealed class Flyout : Window {
         suggestCard.Margin = new Thickness(0, 12, 0, 0);
         suggestCard.Visibility = Visibility.Collapsed;
         root.Children.Add(suggestCard);
+
+        // A newer Daylit: one line, Download (the release page), What's new and Not now. Release notes are plain text.
+        updateText = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
+        var download = new Button { Content = "Download", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 6, 0), ToolTip = "Open the release page" };
+        download.Click += (_, _) => app.DownloadUpdate();
+        whatsNew = new Button { Content = "What's new", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 6, 0) };
+        whatsNew.Click += (_, _) => app.ToggleUpdateNotes();
+        var later = new Button { Content = "Not now", FontSize = 12, Padding = new Thickness(10, 3, 10, 3), ToolTip = "Not for this version; a newer one shows again" };
+        later.Click += (_, _) => app.DismissUpdate();
+        updateNotes = Small(""); updateNotes.Margin = new Thickness(0, 8, 0, 0);
+        updateBox = new StackPanel { Margin = new Thickness(2, 12, 2, 0), Visibility = Visibility.Collapsed, Children = {
+            updateText,
+            new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), Children = { download, whatsNew, later } },
+            updateNotes } };
+        root.Children.Add(updateBox);
+        updateNote = Small(""); updateNote.Margin = new Thickness(2, 10, 2, 0); updateNote.Visibility = Visibility.Collapsed;
+        root.Children.Add(updateNote);
 
         error = Small(""); error.Margin = new Thickness(2, 10, 2, 0);
         root.Children.Add(error);
@@ -205,6 +225,7 @@ sealed class Flyout : Window {
         if (app.Source == Source.HomeAssistant) m.Items.Add(Item("Home Assistant token…", app.AskToken));
         m.Items.Add(Item("Open config file", app.OpenConfig));
         m.Items.Add(Item("Reload config", app.Reload));
+        m.Items.Add(Item("Check for updates…", () => _ = app.CheckForUpdates(manual: true)));
         m.Items.Add(new Separator());
         m.Items.Add(Item("Quit Daylit", app.Quit));
         m.IsOpen = true;
@@ -360,6 +381,16 @@ sealed class Flyout : Window {
             var sgMon = sg is { } pending ? app.Mons.FirstOrDefault(x => x.Key == pending.Monitor) : null;
             suggestCard.Visibility = sg != null && sgMon != null ? Visibility.Visible : Visibility.Collapsed;
             suggestText.Text = sg != null && sgMon != null ? sg.Sentence(sgMon.Label) : "";
+            var up = app.UpdateShown ? app.Update : null;
+            updateBox.Visibility = up != null ? Visibility.Visible : Visibility.Collapsed;
+            updateText.Text = up != null ? $"Daylit {up.Version} is available" : "";
+            whatsNew.Visibility = up is { Changes.Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+            whatsNew.Content = app.UpdateExpanded ? "Hide what's new" : "What's new";
+            var (items, more) = UpdateCheck.Shown(up?.Changes ?? []);
+            updateNotes.Text = string.Join("\n", items.Select(c => "• " + c)) + (more > 0 ? $"\nand {more} more" : "");
+            updateNotes.Visibility = up != null && app.UpdateExpanded && items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            updateNote.Text = up == null ? app.UpdateNote ?? "" : "";
+            updateNote.Visibility = updateNote.Text == "" ? Visibility.Collapsed : Visibility.Visible;
             string problem = string.Join("\n", new[] { app.Error, app.SuggestError }.Where(t => !string.IsNullOrEmpty(t)));   // an Apply that failed stays until the next suggestion action
             error.Text = problem;
             error.Visibility = problem == "" ? Visibility.Collapsed : Visibility.Visible;
