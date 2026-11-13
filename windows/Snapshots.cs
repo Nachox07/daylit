@@ -34,6 +34,11 @@ static class Snapshots {
                 if (name.EndsWith("-partial")) controller.SnapshotLeave(list[^1]);   // the last monitor out of the group
                 if (name == "panel-one-suggestion")   // made-up evidence, the same scene as the Mac's
                     controller.Suggestion = new Suggestion(list[0].Key, [new LevelChange(Level.BlindDown, 78, 61)], 14, true, 13, 5);
+                if (name == "panel-update") {   // made-up release notes, the same scene as the Mac's
+                    controller.Update = new UpdateCheck.Available("1.6.0", "https://github.com/Nachox07/daylit/releases/tag/v1.6.0",
+                        ["Tell the user when a new version is out", "Mac: steadier DDC writes after wake", "Windows: Settings remembers its size"]);
+                    controller.UpdateShown = controller.UpdateExpanded = true;
+                }
                 var flyout = new Flyout(controller);
                 var root = (FrameworkElement)flyout.Content;
                 flyout.Content = null;
@@ -102,6 +107,7 @@ static class Snapshots {
         yield return ("panel-three-partial", sun, () => [.. Two(), Fake("LG 27UK850", 60)], true, "Sun · 21.7° above the horizon");
         yield return ("panel-one-manual", ha, () => new() { Fake("LG UltraFine 5K", 60, manual: true) }, false, "Home Assistant · sun 100% · blind 56%");
         yield return ("panel-one-suggestion", ha, () => new() { Fake("Monitor", 64) }, false, "Home Assistant · sun 100% · blind 35%");
+        yield return ("panel-update", sun, Two, false, "Sun · 21.7° above the horizon");
         yield return ("panel-empty", "{}", () => new(), false, "");
     }
 

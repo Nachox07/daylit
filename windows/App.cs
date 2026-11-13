@@ -111,6 +111,7 @@ sealed partial class Controller {
         menu.Items.Add("Reload config", null, (_, _) => Reload());
         menu.Items.Add("Keyboard shortcuts…", null, (_, _) => EditShortcuts());
         menu.Items.Add(token);
+        menu.Items.Add("Check for updates…", null, (_, _) => { ShowPanel(); _ = CheckForUpdates(manual: true); });
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
         menu.Opening += (_, _) => token.Visible = Source == Source.HomeAssistant;
@@ -134,6 +135,7 @@ sealed partial class Controller {
                               () => Win.OnBattery, () => PushRule.DaylightLimit(Win.OnBattery, Cfg.Tuned));
         push.HealthChanged += StartTimers;
         StartTimers();
+        StartUpdateChecks();
         _ = Tick("start");
         if (Program.ShowSignal is { } sig)
             new Thread(() => { while (sig.WaitOne()) ui.BeginInvoke(ShowPanel); }) { IsBackground = true, Name = "show signal" }.Start();
@@ -159,6 +161,7 @@ sealed partial class Controller {
 
     public void Reload() {
         Load();
+        RefreshUpdateLine();   // checkUpdates turned off hides the line
         panel.Rebuild();
         forcePush = true;   // a reload rebuilds the entity list and resubscribes (StartTimers → SyncPush, once)
         StartTimers();

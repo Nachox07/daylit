@@ -32,6 +32,7 @@ sealed class SettingsWindow : Window {
     readonly TextBlock lightStatus = Hint("");
     readonly CheckBox pushBox = new() { Content = "Instant updates", Margin = new Thickness(0, 2, 0, 2) };
     bool? pushLoaded;   // what the file said, so an explicit false stays false
+    readonly CheckBox checkUpdatesBox = new() { Content = "Automatically check for updates", Margin = new Thickness(0, 2, 0, 2) };
     readonly Button test = new() { Content = "Test connection" };
     readonly TextBlock tokenState = Hint("");
     string tokenName = "daylit-home-assistant";
@@ -115,6 +116,7 @@ sealed class SettingsWindow : Window {
             Card("Today's sun", themeCurve, Hint("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")),
             Card(null, new Expander { Header = "Exact values", Content = TuningRows(TuningField.Appearance) }));
         var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
+            Card("Updates", checkUpdatesBox, Hint("Once a day Daylit asks GitHub whether a newer version is out and shows it in the panel. Nothing about you or your setup is sent. Check for updates… in the gear menu works either way.")),
             Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")));
 
         panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));
@@ -450,6 +452,7 @@ sealed class SettingsWindow : Window {
         ShowTokenState(c.TokenName);
         haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? ""; daylightSensor.Text = h?.Light ?? "";
         pushLoaded = h?.Push; pushBox.IsChecked = h?.Push == true;
+        checkUpdatesBox.IsChecked = c.CheckUpdates ?? true;
         var set = TuningField.SetValues(c.Tuning);
         loadedTune = set;
         foreach (var (id, r) in tuneRows) r.box.Text = set.TryGetValue(id, out var v) ? Fmt(v) : "";
@@ -575,7 +578,8 @@ sealed class SettingsWindow : Window {
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon, mons,
             haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) {
             Light = daylightSensor.Text, PushEditable = SourceTag == "homeAssistant",
-            Push = pushBox.IsChecked == true ? true : pushLoaded == false ? (bool?)false : null };
+            Push = pushBox.IsChecked == true ? true : pushLoaded == false ? (bool?)false : null,
+            CheckUpdatesEditable = true, CheckUpdates = checkUpdatesBox.IsChecked == true ? null : false };
         try {
             string? now = File.Exists(path) ? File.ReadAllText(path) : null;
             if (now != opened) {
