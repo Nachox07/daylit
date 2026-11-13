@@ -156,6 +156,7 @@ struct SettingsView: View {
     @State private var error: String? = nil
     @State private var note: String? = nil
     @State private var testing = false
+    @State private var tokenStored = false
     @State private var locating = false
     let close: () -> Void
     var file: URL? = nil                     // snapshots pass a made-up file
@@ -164,6 +165,8 @@ struct SettingsView: View {
     var height: CGFloat = 600
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     nonisolated(unsafe) static var fixedNow: Date?
+    /// Snapshots: a made-up token state, so the keychain of the machine that renders them does not matter.
+    nonisolated(unsafe) static var fixedTokenStored: Bool?
     static var now: Date { fixedNow ?? Date() }
     @ObservedObject var locator: Locator   // made by the caller: CI's older Swift rejects a main-actor @State default
 
@@ -198,6 +201,9 @@ struct SettingsView: View {
         .ignoresSafeArea(edges: .top)
         .frame(width: 760, height: height)
         .onAppear(perform: load)
+        .onReceive(NotificationCenter.default.publisher(for: .daylitTokenSaved)) { _ in
+            tokenStored = Self.fixedTokenStored ?? HAClient.tokenStored(m.config.homeAssistant?.tokenName ?? "daylit-home-assistant")
+        }
         .onChange(of: source) { _, s in if s != "homeAssistant" && current == .homeAssistant { pane = .automatic } }
     }
 
@@ -322,6 +328,8 @@ struct SettingsView: View {
                     Button { TokenWindow.show(m) } label: { Label("Token…", systemImage: "key") }
                     Spacer()
                 }
+                Text(tokenStored ? "Token: stored" : "Token: not stored. Use Token… to paste one.")
+                    .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Connection") }
             Section {
                 entity("Blind", "blinds.vertical.open", $cover, "cover.office_blind")
@@ -485,7 +493,7 @@ struct SettingsView: View {
     static func fmt(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
 
     func entity(_ title: String, _ icon: String, _ v: Binding<String>, _ example: String) -> some View {
-        TextField(text: v, prompt: Text(example)) { Row(title, icon) }
+        TextField(text: v, prompt: Text("e.g. " + example)) { Row(title, icon) }
     }
 
     var sourceHint: String {
@@ -510,12 +518,18 @@ struct SettingsView: View {
         return (a, b)
     }
 
-    /// What the levels give right now with the blind open and the lights off: a preview, nothing is set.
+    /// The live reading the preview uses: none in snapshots, and none before the first tick.
+    var previewLive: LiveInputs? { Self.fixedNow == nil ? m.live : nil }
+
+    /// What the levels give right now, as the app would set them: with the typed Lights on level, and the blind and
+    /// room lights as the last tick saw them (blind open and lights off before a first tick). Nothing is set.
     func rightNow(_ d: MonitorDraft) -> Int? {
         guard let l = coords else { return nil }
+        let live = previewLive
+        let lit = live?.lightsUsed[d.id] ?? live?.lights ?? false
         return target(day: d.day, blindDown: d.blindDown, night: d.night,
-                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: 100, lights: false, tuning: m.config.tuned,
-                      light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1)   // with today's clouds; snapshots stay clear
+                      elev: solarElevation(latitude: l.0, longitude: l.1, at: Self.now), pos: live?.pos ?? 100, lights: lit, tuning: m.config.tuned,
+                      light: Self.fixedNow == nil ? m.lightNow ?? 1 : 1, nightLights: nightLightsValue(d))   // with today's clouds; snapshots stay clear
     }
 
     /// The "Lights on" row shows only with a lights entity: without one the lights count as off.
@@ -530,7 +544,9 @@ struct SettingsView: View {
     static let nightLightsHelp = "After sunset with the room lights on. Empty keeps Night plus the room-lights boost."
 
     func caption(_ d: MonitorDraft) -> String {
-        var s = coords == nil ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save."
+        var s = coords == nil ? "Set a location to see the level right now."
+            : previewLive == nil ? "Right now is a preview with the blind open; nothing changes until you save."
+            : "Right now is a preview with the blind and lights as they are now; nothing changes until you save."
         if showsNightLights { s += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost." }
         if d.haLevels { s += " Home Assistant helpers set these levels; these apply only when it cannot be reached." }
         if d.contrastApplies { s += " Contrast is set when the monitor is detected; empty leaves it to the monitor." }
@@ -540,6 +556,7 @@ struct SettingsView: View {
     func load() {
         opened = ConfigLocation.open(at: path)
         let (c, _) = Config.load(from: path)
+        tokenStored = Self.fixedTokenStored ?? HAClient.tokenStored(c.homeAssistant?.tokenName ?? "daylit-home-assistant")
         let (src, _) = c.resolvedSource()
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }

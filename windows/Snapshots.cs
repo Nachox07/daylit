@@ -41,6 +41,7 @@ static class Snapshots {
                 flyout.Close();
             }
             File.WriteAllText(tmp, SettingsJson);
+            SettingsWindow.FixedTokenStored = true;
             SettingsWindow.FixedNow = DateTimeOffset.FromUnixTimeSeconds(1_781_870_400);   // 2026-06-19 12:00 UTC
             foreach (var pane in new[] { "displays", "automatic", "homeAssistant", "appearance", "app" }) {
                 var settings = new SettingsWindow(new Controller(Config.Load(tmp).cfg, [Fake("Studio Display", 72, hdr: true), Fake("Dell U2723QE", 48)], ""), tmp, pane);
@@ -84,6 +85,7 @@ static class Snapshots {
         yield return ("curve-parked", Scene(Date("2026-12-21T12:00:00Z"), lat: 80));
         yield return ("curve-no-blind", Scene(Date("2026-06-19T15:00:00Z"), blind: false, l: new LiveInputs(Pos: null, Light: 0.8, Offsets: plusSix)));
         yield return ("curve-dusk", Scene(dusk, l: new LiveInputs(Pos: 0, Lights: true)));
+        yield return ("curve-automatic-off", Scene(Date("2026-06-19T15:00:00Z"), l: new LiveInputs(Pos: 40, Light: 0.8, Applying: false, SetHelper: true)));
     }
 
     static Mon Fake(string label, int level, bool hdr = false, bool manual = false) =>
