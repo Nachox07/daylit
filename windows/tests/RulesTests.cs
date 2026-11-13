@@ -24,6 +24,23 @@ public class SunTests {
     public void DaylightFraction(double elev, double expected) => Assert.Equal(expected, Sun.Fraction(elev), 1e-9);
 }
 
+public class UserLevelWinsTests {
+    [Fact] public void ALevelSetByHandDuringTheWaitBeatsTheOlderReading() => Assert.True(Rules.UserLevelWins(40, 52, false));
+    [Fact] public void AnUnchangedLevelKeepsTheReading() => Assert.False(Rules.UserLevelWins(40, 40, false));
+    [Fact] public void ADraggedSliderIsNeverOverriddenByAReading() {
+        Assert.True(Rules.UserLevelWins(40, 40, true));
+        Assert.True(Rules.UserLevelWins(40, 63, true));
+    }
+    [Fact] public void NothingToTrustWithoutALevel() => Assert.False(Rules.UserLevelWins(null, null, true));
+    [Fact] public void AHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
+        var hold = new Hold(null, 40, 40, null, null, null, null);
+        int c = Rules.UserLevelWins(40, 52, false) ? 52 : 40;
+        var step = Rules.Decide(c, 40, null, hold, auto: true, here: true, sun: 1, touched: true);
+        Assert.Equal(12, step.State.Offset);
+        Assert.Null(step.Write);
+    }
+}
+
 public class SunSpanTests {
     /// A day's elevations every 10 minutes from local midnight, as the sun curve samples them.
     static List<(double t, double e)> Day(double lat, double lon, string start) {

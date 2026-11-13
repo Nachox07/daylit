@@ -625,6 +625,9 @@ import DaylitCore
             if let v = cur[i], !dragging.contains(mons[i].id) { mons[i].level = Double(v) }
         }
 
+        // What the model held right after the read: a level that differs after the Home Assistant wait was set by hand.
+        let atRead: [Int?] = mons.map { Int($0.level) }
+
         guard source != .off else { detail = ""; problem = configProblem; if live != nil { live = nil }; return }
         // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
         guard !mons.isEmpty else { detail = ""; if live != nil { live = nil }; return }
@@ -651,8 +654,10 @@ import DaylitCore
         var linkedNow: [String: Int] = [:]   // linked followers: the level they land on (for the Settings chart)
         let now = Date().timeIntervalSince1970
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
-            guard let c0 = cur[i] else { continue }
+            guard var c0 = cur[i] else { continue }
             let m = mons[i]
+            // A slider or key change during the waits above is newer than the reading: decide on it (touched stays set until then).
+            if userLevelWins(atRead: atRead[i], now: Int(m.level), held: dragging.contains(m.id)) { c0 = Int(m.level) }
             var state = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, remoteSeen: m.remoteSeen, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt, remoteValue: m.remoteValue)
             let clearedAt = offsetCleared[m.uuid]
             var want = ownTarget(m)
@@ -675,7 +680,12 @@ import DaylitCore
             if let v = step.write {
                 if step.remote == nil && !m.writeFailing { Log.write("auto: \(m.label) \(c0)% → \(v)%") }
                 ok = await write(m, v)
-                guard gen == generation else { return }
+                guard gen == generation else {
+                    // Displays changed during the write: record what was written on the live monitor, or the next
+                    // tick reads the new level against the old lastSet and invents an offset.
+                    commitAfterWrite(uuid: m.uuid, state: step.state.afterWrite(ok: ok, before: state), clearedAt: clearedAt)
+                    return
+                }
                 // Logged once when it starts and once when it ends, not every tick while it lasts.
                 if ok == mons[i].writeFailing {
                     Log.write(ok ? "display: \(m.label) takes brightness changes again"
@@ -744,6 +754,16 @@ import DaylitCore
         detail = here || !auto ? inp.line : "Paused — this Mac is idle"
         log("tick: \(detail) · auto=\(auto)")
         await updateSuggestion(inp)
+    }
+
+    /// Stores a decision on the monitor with this UUID after the monitor list was rebuilt under a write.
+    func commitAfterWrite(uuid: String, state: HoldState, clearedAt: Int?) {
+        guard let j = mons.firstIndex(where: { $0.uuid == uuid }) else { return }
+        var st = state
+        if offsetCleared[uuid] != clearedAt { st = Suggest.afterApply(st); recorder.drop(uuid) }
+        mons[j].lastSet = st.lastSet; mons[j].lastTarget = st.lastTarget; mons[j].remoteSeen = st.remoteSeen; mons[j].remoteValue = st.remoteValue
+        mons[j].offset = st.offset; mons[j].offsetSun = st.offsetSun; mons[j].offsetAt = st.offsetAt
+        saveHolds()
     }
 
     func saveHolds() {

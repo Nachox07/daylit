@@ -540,6 +540,7 @@ sealed partial class Controller {
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
         await ApplyContrast(mons);
+        var beforeRead = mons.Select(m => m.Cur).ToArray();
         var cur = await Task.Run(() => mons.Select(m => { try { return m.Read(); } catch { return (int?)null; } }).ToArray());
         for (int i = 0; i < mons.Length; i++) {
             var r = cur[i];
@@ -547,6 +548,8 @@ sealed partial class Controller {
                 mons[i].Reads = mons[i].Reads.AfterRead(r != null);
                 r = mons[i].Reads.Current(r, mons[i].Cur ?? 50);   // write-only: the slider is the record of its level
             }
+            // A slider drag or key press during the read (or just before it, while the monitor may still show the old level) is newer than the reading.
+            if (Rules.UserLevelWins(beforeRead[i], mons[i].Cur, mons[i].Dragging || (DateTime.UtcNow - mons[i].UserTouched).TotalSeconds < 1.5)) continue;
             mons[i].Cur = r;
         }
         Error = ConfigError;
@@ -680,7 +683,9 @@ sealed partial class Controller {
                 corrections.Add(settled); SaveCorrections(); suggestDirty = true;
             }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
-            m.Cur = ok ? step.Current : c; m.Manual = step.Manual && !appliedMeanwhile;
+            // Not while the slider is held, or when a hand change landed during the write: that level is newer.
+            if (!Rules.UserLevelWins(c, m.Cur, m.Dragging)) m.Cur = ok ? step.Current : c;
+            m.Manual = step.Manual && !appliedMeanwhile;
             int applied = ok ? step.Applied : c;
             if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead
             if ((here || remote) && !haDown && Source == Source.HomeAssistant && (m.Published != applied || m.PublishedManual != m.Manual || m.PublishedLight != Tenths(s.LightRatio)) &&

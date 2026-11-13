@@ -254,6 +254,15 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
     return step
 }
 
+/// Which brightness a tick should trust after it waited (the Home Assistant read, a write to another
+/// monitor). `atRead` is the level the model held when the monitor was read, `now` what it holds after
+/// the wait. A level that moved in between came from the user's hand (slider, keys); it is newer than
+/// the reading, so it wins and the tick decides on it. `held`: the slider is in the user's hand.
+public func userLevelWins(atRead: Int?, now: Int?, held: Bool) -> Bool {
+    guard now != nil else { return false }
+    return held || atRead != now
+}
+
 /// Light mode when daylight comes in (sun up, blind open) or the room lights are bright and white;
 /// dark otherwise. Each condition has a gap between its on and off thresholds so it does not flip
 /// back and forth; in the gap the previous answer stays.

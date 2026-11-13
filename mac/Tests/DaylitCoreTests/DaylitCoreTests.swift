@@ -121,6 +121,29 @@ final class TargetTests: XCTestCase {
     }
 }
 
+final class UserLevelWinsTests: XCTestCase {
+    func testALevelSetByHandDuringTheWaitBeatsTheOlderReading() {
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 52, held: false))   // a key press while Home Assistant answered
+    }
+    func testAnUnchangedLevelKeepsTheReading() {
+        XCTAssertFalse(userLevelWins(atRead: 40, now: 40, held: false))
+    }
+    func testADraggedSliderIsNeverOverriddenByAReading() {
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 40, held: true))
+        XCTAssertTrue(userLevelWins(atRead: 40, now: 63, held: true))
+    }
+    func testNothingToTrustWithoutALevel() {
+        XCTAssertFalse(userLevelWins(atRead: nil, now: nil, held: true))
+    }
+    func testAHandChangeDuringTheWaitBecomesAnOffsetInsteadOfBeingOverwritten() {
+        let st = HoldState(lastSet: 40, lastTarget: 40)
+        let c = userLevelWins(atRead: 40, now: 52, held: false) ? 52 : 40
+        let s = decide(current: c, want: 40, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1, touched: true)
+        XCTAssertEqual(s.state.offset, 12)
+        XCTAssertNil(s.write)
+    }
+}
+
 final class DecideTests: XCTestCase {
     func step(_ c: Int, want: Int, remote: RemoteSet? = nil, state: HoldState = HoldState(),
               here: Bool = true, auto: Bool = true, dragging: Bool = false, sun: Double = 1, touched: Bool = true) -> Step {

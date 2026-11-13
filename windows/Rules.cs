@@ -158,6 +158,12 @@ static class Rules {
     /// The local calendar day of a Unix time.
     public static int LocalDay(double t) => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).LocalDateTime).DayNumber;
 
+    /// Which brightness a tick should trust after it waited (the monitor read, a write to another monitor).
+    /// `atRead` is the level the model held before the wait, `now` what it holds after it. A level that
+    /// moved in between came from the user's hand (slider, keys); it is newer than the reading, so it
+    /// wins. `held`: the slider is in the user's hand, or was just now (the panel's 1.5 s grace).
+    public static bool UserLevelWins(int? atRead, int? now, bool held) => now != null && (held || atRead != now);
+
     /// One automatic decision for one monitor (Windows rules).
     /// - A change of the HA "set" helper applies once, even when this PC is idle, then is followed like a
     ///   hand-set level. The value seen on the first look is not a command, nor is the same value again
