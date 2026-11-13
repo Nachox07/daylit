@@ -122,6 +122,7 @@ in the same menu. On macOS Daylit also notices the change within a few seconds.
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20; a value outside that range is a config problem, and a Home Assistant value above 100 counts as 100), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
+| `checkUpdates` | `false` stops the daily check for a newer version and its line in the panel (default `true`; also Settings → App, [details](#updates)). |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
 | `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only). Only Homebrew's `m1ddc` is run: `/opt/homebrew/bin/m1ddc` or `/usr/local/bin/m1ddc`, or the place one of those links points to under the Homebrew `Cellar`. Any other value (a bare `m1ddc` too: the app started at login has a shorter `PATH` than a terminal) is ignored, with a note in the panel, in `--check-config` and in the log. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
@@ -366,6 +367,28 @@ Assistant; Save applies it at once), or set `push: true` in the config file:
   compare the time with the next `auto:` line in the log.
 
 To stop it, turn the switch off, or remove the key or set it to `false`.
+
+## Updates
+
+Daylit does not update itself; it tells you when a new version is out.
+
+- **What is sent.** A minute after start and then once a day, one request to
+  `https://api.github.com/repos/Nachox07/daylit/releases?per_page=20`, GitHub's public list of releases.
+  Nothing about you or your setup goes with it: the User-Agent is `Daylit/<version>`, and there are no
+  cookies. Drafts and prereleases are skipped. A build from source (version `0.0.0`) never checks.
+- **The line.** With a newer version the panel shows "Daylit X.Y.Z is available" with **Download** (opens
+  the release page), **What's new** and **Not now**. What's new lists the changes of every release newer
+  than yours, newest first, so skipping versions shows everything (the first 8, then "and N more"); they
+  come from each release's *What's Changed* notes, shown as plain text. A Mac app installed with Homebrew
+  shows `brew upgrade --cask daylit` and **Copy Command** instead of Download.
+- **Not now** hides that version on this computer until a newer one comes out.
+- **Check for updates…** in the gear menu (on Windows also the tray menu) checks right away and says
+  "You're up to date", or shows the line, even for a version put off with Not now.
+- **Turning it off.** Settings → App → *Automatically check for updates*, or `"checkUpdates": false` in the
+  config: no automatic request and no line. Check for updates… still works.
+- **When it fails** (offline, GitHub's rate limit), nothing shows in the panel; the log gets an
+  `update: check failed` line, once and then every 10 minutes while it keeps failing, and Daylit tries
+  again within the hour.
 
 ## Permissions (macOS)
 

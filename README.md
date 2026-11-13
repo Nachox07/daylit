@@ -61,6 +61,12 @@ silicon). The first open still needs **Open Anyway** in System Settings → Priv
   [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
   (`winget install Microsoft.DotNet.DesktopRuntime.10`).
 
+**New versions.** Once a day Daylit asks GitHub's public releases list whether a newer version is out; the
+request carries nothing about you, only `Daylit/<version>` as its User-Agent. When there is one, the panel
+shows it with what changed, **Download** (the release page; with Homebrew, `brew upgrade --cask daylit`)
+and **Not now**. Turn it off in Settings → App → *Automatically check for updates*, or with
+`"checkUpdates": false` in the config; gear menu → **Check for updates…** still works ([details](docs/setup.md#updates)).
+
 **Or build it yourself**, if you prefer not to run unsigned downloads:
 
 ```sh
