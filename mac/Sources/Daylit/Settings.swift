@@ -152,6 +152,8 @@ struct SettingsView: View {
     @State private var daylightSensor = ""
     @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
     @State private var themeRoom = true
+    @State private var pushOn = false
+    @State private var pushLoaded: Bool? = nil   // what the file said, so an explicit false stays false
     @State private var opened: ConfigLocation.Opened = .file(nil)
     @State private var error: String? = nil
     @State private var note: String? = nil
@@ -340,6 +342,11 @@ struct SettingsView: View {
                 Text("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle(isOn: $pushOn) { Row("Instant updates", "bolt") }
+                Text("Home Assistant tells Daylit when the blind, lights or a level changes, so the screen follows in about a second. Experimental.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Updates") }
             Section {
                 entity("Daylight sensor", "cloud.sun", $daylightSensor, "sensor.solar_power")
                 if let s = m.lightStatus { Text(s).font(.caption).foregroundStyle(.secondary) }
@@ -562,6 +569,7 @@ struct SettingsView: View {
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
         haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
+        pushLoaded = h?.push; pushOn = h?.push ?? false
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
         themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
@@ -612,6 +620,8 @@ struct SettingsView: View {
                             monitors: mons,
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
         e.light = daylightSensor
+        e.pushEditable = source == "homeAssistant"
+        e.push = pushOn ? true : (pushLoaded == false ? false : nil)
         e.tuning = values
         e.themeRoom = themeRoom
         return e

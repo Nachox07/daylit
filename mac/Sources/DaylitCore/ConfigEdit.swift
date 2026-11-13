@@ -70,6 +70,10 @@ public struct SettingsEdit: Equatable {
     public var monitors: [Monitor]
     public var haURL, autoSwitch, sun, cover, lights: String
     public var light = ""                     // homeAssistant.light: the daylight sensor
+    /// The window shows the Instant updates switch. When false, `homeAssistant.push` in the file is kept as it is.
+    public var pushEditable = false
+    /// homeAssistant.push (experimental); nil removes the key (off is the default), false is written as false.
+    public var push: Bool? = nil
     /// Tuning values keyed "group.key"; a known key missing here is removed (back to its default).
     public var tuning: [String: Double] = [:]
     /// tuning.theme.room; nil or true removes the key (true is the default).
@@ -109,6 +113,7 @@ public enum ConfigPatch {
             let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
             ha[k] = t.isEmpty ? nil : t
         }
+        if e.pushEditable { ha["push"] = e.push }
         root["homeAssistant"] = ha.isEmpty ? nil : ha
 
         if let raw = root["monitors"], !(raw is NSNull), !(raw is [[String: Any]]) {

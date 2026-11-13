@@ -298,3 +298,43 @@ final class PushAuthTimeoutTests: XCTestCase {
         XCTAssertFalse(PushRule.authTimedOut(elapsed: 60, authenticated: true))
     }
 }
+
+final class PushSettingsEditTests: XCTestCase {
+    func ha(_ e: SettingsEdit, _ original: String?) throws -> [String: Any] {
+        let out = try ConfigPatch.apply(e, to: original.map { Data($0.utf8) })
+        let root = try JSONSerialization.jsonObject(with: out) as! [String: Any]
+        return root["homeAssistant"] as? [String: Any] ?? [:]
+    }
+    func edit(push: Bool?, editable: Bool = true) -> SettingsEdit {
+        var e = SettingsEdit(source: "homeAssistant", haURL: "http://homeassistant.local:8123")
+        e.pushEditable = editable; e.push = push
+        return e
+    }
+    func file(_ extra: String) -> String { template.replacingOccurrences(of: "PUSH", with: extra) }
+    let template = #"{ "futureKey": 1, "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc"PUSH } }"#
+
+    func testTurningPushOnWritesTrueAndKeepsTheRest() throws {
+        let h = try ha(edit(push: true), file(""))
+        XCTAssertEqual(h["push"] as? Bool, true)
+        XCTAssertEqual(h["tokenName"] as? String, "kc")
+    }
+    func testTurningPushOffRemovesTheKey() throws {
+        XCTAssertNil(try ha(edit(push: nil), file(#", "push": true"#))["push"])
+    }
+    func testAnExplicitFalseStaysFalse() throws {
+        XCTAssertEqual(try ha(edit(push: false), file(#", "push": false"#))["push"] as? Bool, false)
+    }
+    func testAbsentStaysAbsent() throws {
+        XCTAssertNil(try ha(edit(push: nil), file(""))["push"])
+        XCTAssertNil(try ha(edit(push: nil), nil)["push"])
+    }
+    func testPushIsKeptWhenTheWindowDoesNotShowTheSwitch() throws {
+        XCTAssertEqual(try ha(edit(push: nil, editable: false), file(#", "push": true"#))["push"] as? Bool, true)
+    }
+    func testASavedPushReadsBackAsOn() throws {
+        let out = try ConfigPatch.apply(edit(push: true), to: nil)
+        let u = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try out.write(to: u)
+        XCTAssertEqual(Config.load(from: u).0.homeAssistant?.push, true)
+    }
+}
