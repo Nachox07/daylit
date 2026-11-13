@@ -86,7 +86,7 @@ import DaylitCore
         conn += 1
         let c = conn, name = t.tokenName
         Task {
-            // Runs /usr/bin/security: off the main thread. `stored` tells "no token" from a failed read.
+            // A keychain read (and, once, a migration through /usr/bin/security): off the main thread. `stored` tells "no token" from a failed read.
             let (token, stored) = await Task.detached { () -> (String?, Bool) in
                 if let t = HAClient.token(name) { return (t, true) }
                 return (nil, HAClient.tokenStored(name))

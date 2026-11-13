@@ -9,29 +9,16 @@ enum HAClient {
     private static func cached(_ name: String) -> String? { cacheLock.lock(); defer { cacheLock.unlock() }; return tokenCache[name] }
     private static func cache(_ name: String, _ value: String?) { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache[name] = value }
     static func clearTokenCache() { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache = [:] }
+    /// The token from the keychain (TokenStore), cached until the config or the token changes.
     static func token(_ name: String) -> String? {
         if let t = cached(name) { return t }
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", name, "-w"]
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let s, !s.isEmpty else { return nil }
+        guard let s = TokenStore.read(name) else { return nil }
         cache(name, s)
         return s
     }
 
-    /// Whether a token is stored, without reading it (security exits 0 when the item exists).
-    static func tokenStored(_ name: String) -> Bool {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", name]
-        p.standardOutput = Pipe(); p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return false }
-        p.waitUntilExit()
-        return p.terminationStatus == 0
-    }
+    /// Whether a token is stored, without reading it.
+    static func tokenStored(_ name: String) -> Bool { TokenStore.stored(name) }
 
     /// Transient (see `isTransient`): a connection that fails, or a gateway answer (502, 503, 504). Any other
     /// `.http` is an answer Home Assistant gave (403, 404, 500...), which will not fix itself in a minute.

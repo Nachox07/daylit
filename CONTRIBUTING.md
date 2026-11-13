@@ -15,12 +15,18 @@ open ~/Applications/Daylit.app
 A Swift package (`mac/Package.swift`, no Xcode project). `build.sh` runs `swift build` and wraps the
 binary into the app bundle with its Info.plist and signature.
 
+The token's keychain item trusts only the app that saved it, matched by its signature. A build signed
+ad-hoc (no `DAYLIT_SIGN_IDENTITY` and no Apple Development identity) has a new signature every time, so
+the keychain asks for the token after each rebuild: answer *Always Allow*, or test against a separate
+`tokenName`. Don't make the item trust other programs to avoid the prompt.
+
 - `Sources/DaylitCore/`: the decisions, with no AppKit: `Config`, `Sun`, `Rules` (brightness
   target, hand-set hold, idle, the Home Assistant "set" helper, light/dark), `HATemplate`, `Suggest`
   (suggested levels from repeated hand changes; `windows/Suggest.cs` is its twin), `Update` (whether a newer
   release is out and what changed; `windows/Update.cs` is its twin).
 - `Sources/Daylit/`: the app. `Model.swift` runs the tick, `Displays.swift` monitor I/O,
-  `Sources.swift` Home Assistant calls and the keychain, `Keys.swift` brightness keys and
+  `Sources.swift` Home Assistant calls, `Token.swift` the token's
+  keychain item and dialog, `Keys.swift` brightness keys and
   shortcuts, `UI.swift` the panel, on-screen indicator and shortcuts window, `Look.swift`,
   `Cli.swift`, `Log.swift`, `App.swift`.
 

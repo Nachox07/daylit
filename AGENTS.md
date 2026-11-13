@@ -136,7 +136,8 @@ computer right now, or no token stored yet) and which config entry matched which
 
 - Home Assistant: the app asks for a long-lived token (HA profile → Security) and the user pastes it.
   Windows keeps it in Credential Manager, macOS in the keychain. On macOS the user can also store it
-  from Terminal: `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
+  from Terminal: `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts);
+  Daylit then moves it to a keychain item only Daylit can read.
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. `⌃⌥⌘D` / `Ctrl+Alt+D` switch light and dark mode (same switch as the
   gear menu item). On macOS the brightness keys also work once the user grants
