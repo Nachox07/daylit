@@ -667,7 +667,8 @@ import DaylitCore
                 state.lastSet = nil; state.offset = nil; state.offsetSun = nil; state.offsetAt = nil
             }
             let step = decide(current: c0, want: want, remote: RemoteSet(row: inp.levels[m.uuid]), state: state,
-                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now)
+                              here: here, auto: auto, dragging: dragging.contains(m.id), sun: sun, touched: m.touched, now: now,
+                              place: config.location.map { ($0.latitude, $0.longitude) }, tuning: config.tuned)
             if let b = base, follower, let v = step.remote { syncOffsets.move(m.uuid, level: v, base: b); saveSync() }
             if !dragging.contains(m.id) { mons[i].touched = false }
             if let v = step.remote, !m.writeFailing { Log.write("remote: \(m.label) \(c0)% → \(v)% from Home Assistant") }
@@ -790,7 +791,7 @@ import DaylitCore
             guard let ha = config.homeAssistant else { return nil }
             var result = await HAClient.state(ha, mons)
             for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
-                guard case .failure(.unreachable) = result else { break }
+                guard case .failure(let failure) = result, failure.isTransient else { break }
                 if haDownSince == nil { Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))") }   // once, not every tick of an outage
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 result = await HAClient.state(ha, mons)
@@ -855,7 +856,7 @@ import DaylitCore
                 }
                 lastHAError = message
                 if haDownSince == nil { haDownSince = Date() }
-                let transient = f == .unreachable
+                let transient = f.isTransient
                 let show = HAErrorRule.shouldShow(transient: transient, downSince: haDownSince!.timeIntervalSince1970,
                                                   now: Date().timeIntervalSince1970)
                 problem = show ? message : configProblem

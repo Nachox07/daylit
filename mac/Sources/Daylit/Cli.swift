@@ -55,6 +55,7 @@ import DaylitCore
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { continue }
             let builtIn = CGDisplayIsBuiltin(id) != 0
             let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
+            if uuid.isEmpty && !builtIn { continue }   // like the app: everything is keyed by the UUID
             let entry = cfg.monitor(for: s.localizedName)
             var control = "none", level: Int? = nil
             if builtIn { control = "native (manual slider only; automatic mode leaves it to macOS)"; level = Native.get(id) }

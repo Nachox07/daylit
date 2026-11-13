@@ -641,7 +641,8 @@ sealed partial class Controller {
             bool dragging = m.Dragging;   // the slider is in the user's hand
             double tickNow = Now;         // the same time for Decide and for the suggestion samples below
             int clearedAt = offsetCleared.GetValueOrDefault(m.Key);   // see ApplySuggestion
-            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, tickNow);
+            var step = Rules.Decide(c, target, s.Remote.ElementAtOrDefault(i), hold, AutoOn, here, sun, m.Touched, dragging, tickNow,
+                                   place: Cfg.Location is { } tickLoc ? (tickLoc.Latitude, tickLoc.Longitude) : null, tuning: Cfg.Tuned);
             if (groupBase is int gb && follower && step.Remote is int rv) { syncOffsets.Move(m.Key, rv, gb); Settings.SyncOffsets = syncOffsets; }
             if (!dragging) m.Touched = false;
             bool remote = step.Remote != null;
