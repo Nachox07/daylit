@@ -13,109 +13,120 @@ import DaylitCore
 /// Older Daylit versions, and `security add-generic-password` from Terminal, made items that trust
 /// /usr/bin/security instead. Reading one from here would ask the user, so the first read of such an item goes
 /// through `security` once (no question for an item an older Daylit saved; one, naming `security`, for an item
-/// added from Terminal), then the item is replaced by one only Daylit can read. Daylit's own items carry a marker
-/// in the generic attribute, which can be read without the secret, so telling the two apart never asks.
+/// added from Terminal), then the item is replaced by one only Daylit can read: the new item is saved first, the old
+/// one deleted after (DaylitCore.TokenItems.replace), so the token is always in the keychain. Daylit's own items
+/// carry a marker in the generic attribute, which can be read without the secret, so telling the two apart never asks.
 enum TokenStore {
     static let account = "homeassistant"
-    /// Set on items Daylit created itself (kSecAttrGeneric): read in-process, never through `security`.
-    private static let marker = Data("daylit-app-only-1".utf8)
-    /// One read (and migration) at a time: the REST tick and the push client can ask at once.
+    /// One read, save or migration at a time: the REST tick and the push client can ask at once.
     private static let lock = NSLock()
-
-    /// The item's attributes, never its secret: whether it exists, its account, and whether Daylit made it.
-    private static func attributes(_ service: String) -> (account: String, ours: Bool)? {
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                kSecMatchLimit as String: kSecMatchLimitOne, kSecReturnAttributes as String: true]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let a = out as? [String: Any] else { return nil }
-        return ((a[kSecAttrAccount as String] as? String) ?? account, (a[kSecAttrGeneric as String] as? Data) == marker)
-    }
+    /// Once per launch: the move away from /usr/bin/security, and a token that could not be moved (DaylitCore.TokenReads).
+    nonisolated(unsafe) private static var reads = TokenReads()
+    private static let keychain = SystemKeychain()
 
     /// Whether a token is stored, without reading it (attributes only: never asks, never touches the secret).
-    static func stored(_ service: String) -> Bool { attributes(service) != nil }
+    static func stored(_ service: String) -> Bool { !keychain.items(service: service).isEmpty }
 
-    /// The token, or nil (none stored, or the read was refused). Migrates an old item on the way.
+    /// The token, or nil (none stored, or the read was refused). Moves an old item on the first read of a launch.
     static func read(_ service: String) -> String? {
         lock.lock(); defer { lock.unlock() }
-        guard let item = attributes(service) else { return nil }
-        if item.ours {
-            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                    kSecAttrAccount as String: item.account, kSecMatchLimit as String: kSecMatchLimitOne,
-                                    kSecReturnData as String: true]
-            var out: CFTypeRef?
-            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
-            return clean(String(data: d, encoding: .utf8))
-        }
-        guard let token = readWithSecurityTool(service) else { return nil }
-        migrate(token, service: service, account: item.account)
-        return token
+        return reads.read(service: service, in: keychain) { Log.write($0) }
     }
 
     /// Saves (or replaces) the token. Returns an error message, or nil.
     static func save(_ token: String, service: String) -> String? {
         lock.lock(); defer { lock.unlock() }
-        let data = Data(token.utf8)
-        if let item = attributes(service) {
-            if item.ours {
-                let find: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                           kSecAttrAccount as String: item.account]
-                let st = SecItemUpdate(find as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-                return st == errSecSuccess ? nil : "Could not update the keychain item (\(st))"
-            }
-            // An old item trusts /usr/bin/security: replace it rather than keep its access list.
-            guard delete(service: service, account: item.account) else { return "Could not replace the old keychain item" }
+        defer { reads.saved(service: service) }
+        guard let item = TokenItems.pick(keychain.items(service: service)) else {
+            return keychain.addOwn(service: service, account: account, token: token) ? nil : "Could not save to the keychain"
         }
-        let st = add(data, service: service, account: account)
-        return st == errSecSuccess ? nil : "Could not save to the keychain (\(st))"
+        if item.ours {
+            let st = keychain.updateOwn(service: service, account: item.account, token: token)
+            return st == errSecSuccess ? nil : "Could not update the keychain item (\(st))"
+        }
+        // An old item trusts /usr/bin/security: replace it rather than keep its access list. The old one goes
+        // only once the new one is saved.
+        switch TokenItems.replace(item, with: token, service: service, in: keychain) {
+        case .replaced, .replacedUnderTemporaryAccount: Log.write(TokenReads.movedLine); return nil
+        case .keptOld(let why): return "Could not replace the old keychain item (\(why))"
+        }
+    }
+}
+
+/// TokenKeychain on the login keychain. Daylit's items have no custom access list (so only Daylit can read them)
+/// and carry a marker in the generic attribute; old items are read and deleted through /usr/bin/security, which
+/// they trust, so moving them asks no question for an item an older Daylit saved.
+struct SystemKeychain: TokenKeychain {
+    private static let marker = Data("daylit-app-only-1".utf8)
+
+    private func base(_ service: String, _ account: String? = nil) -> [String: Any] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+        if let account { q[kSecAttrAccount as String] = account }
+        return q
     }
 
-    private static func add(_ data: Data, service: String, account: String) -> OSStatus {
+    func items(service: String) -> [TokenItem] {
+        var q = base(service)
+        q[kSecMatchLimit as String] = kSecMatchLimitAll; q[kSecReturnAttributes as String] = true
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess else { return [] }
+        let list = (out as? [[String: Any]]) ?? ((out as? [String: Any]).map { [$0] } ?? [])
+        return list.map { a in
+            TokenItem(account: (a[kSecAttrAccount as String] as? String) ?? TokenStore.account,
+                      ours: (a[kSecAttrGeneric as String] as? Data) == Self.marker)
+        }
+    }
+
+    func readOwn(service: String, account: String) -> String? {
+        var q = base(service, account)
+        q[kSecMatchLimit as String] = kSecMatchLimitOne; q[kSecReturnData as String] = true
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
+        return Self.clean(String(data: d, encoding: .utf8))
+    }
+
+    /// Only for an item made before this version. The secret comes back on a pipe; it is never logged or put on a command line.
+    func readLegacy(service: String, account: String) -> String? {
+        let (ok, data) = Self.security(["find-generic-password", "-s", service, "-a", account, "-w"])
+        return ok ? Self.clean(String(data: data, encoding: .utf8)) : nil
+    }
+
+    func addOwn(service: String, account: String, token: String) -> Bool {
         // No kSecAttrAccess: the item's access list is this app only.
-        let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                  kSecAttrAccount as String: account, kSecAttrLabel as String: service,
-                                  kSecAttrGeneric as String: marker, kSecValueData as String: data]
-        return SecItemAdd(add as CFDictionary, nil)
+        var q = base(service, account)
+        q[kSecAttrLabel as String] = service; q[kSecAttrGeneric as String] = Self.marker; q[kSecValueData as String] = Data(token.utf8)
+        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
     }
 
-    /// Replaces an item that trusts /usr/bin/security with one only Daylit can read. On a failure the old item
-    /// stays (it is never deleted before the token is in hand) and the next start tries again.
-    private static func migrate(_ token: String, service: String, account: String) {
-        guard delete(service: service, account: account) else {
-            Log.write("token: could not move it to an app-only keychain item (the old item stays); trying again at the next start")
-            return
-        }
-        let st = add(Data(token.utf8), service: service, account: account)
-        if st == errSecSuccess { Log.write("token: moved to an app-only keychain item") }
-        else { Log.write("token: could not save the app-only keychain item (\(st)); paste the token again with Home Assistant Token… after a restart") }
+    func updateOwn(service: String, account: String, token: String) -> OSStatus {
+        SecItemUpdate(base(service, account) as CFDictionary, [kSecValueData as String: Data(token.utf8)] as CFDictionary)
     }
 
-    /// Deletes an old item. Its access list trusts /usr/bin/security, so that tool deletes it without a question;
-    /// the Security framework is the fallback (it may ask, as the item does not trust this app).
-    private static func delete(service: String, account: String) -> Bool {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["delete-generic-password", "-s", service, "-a", account]
-        p.standardOutput = Pipe(); p.standardError = Pipe()
-        if (try? p.run()) != nil {
-            p.waitUntilExit()
-            if p.terminationStatus == 0 { return true }
-        }
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                kSecAttrAccount as String: account]
-        let st = SecItemDelete(q as CFDictionary)
+    func deleteOwn(service: String, account: String) -> Bool {
+        let st = SecItemDelete(base(service, account) as CFDictionary)
         return st == errSecSuccess || st == errSecItemNotFound
     }
 
-    /// Only for an item made before this version: its access list trusts /usr/bin/security, not this app.
-    /// The secret comes back on a pipe; it is never logged or put on a command line.
-    private static func readWithSecurityTool(_ service: String) -> String? {
+    /// The old item trusts /usr/bin/security, so that tool deletes it without a question; the Security framework is
+    /// the fallback (it may ask, as the item does not trust this app).
+    func deleteLegacy(service: String, account: String) -> Bool {
+        if Self.security(["delete-generic-password", "-s", service, "-a", account]).0 { return true }
+        let st = SecItemDelete(base(service, account) as CFDictionary)
+        return st == errSecSuccess || st == errSecItemNotFound
+    }
+
+    func renameOwn(service: String, from: String, to: String) -> Bool {
+        SecItemUpdate(base(service, from) as CFDictionary, [kSecAttrAccount as String: to] as CFDictionary) == errSecSuccess
+    }
+
+    private static func security(_ args: [String]) -> (Bool, Data) {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", service, "-w"]
+        p.arguments = args
         let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return nil }
+        guard (try? p.run()) != nil else { return (false, Data()) }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
-        return clean(String(data: data, encoding: .utf8))
+        return (p.terminationStatus == 0, data)
     }
 
     private static func clean(_ s: String?) -> String? {
