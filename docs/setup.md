@@ -64,9 +64,8 @@ Example, day 95, blind closed 62, night 60, lights on 80: a cloudy morning (dayl
 the blind 40% open gives 68, 58% open 71, the blind open with daylight at 55% gives 79, and a dark evening
 with the lights on gives 80. Without *Lights on* nothing changes. With Home Assistant down, a monitor with
 *Lights on* keeps the last lights state Home Assistant gave (others count the lights as off, as before).
-Suggestions do not learn from changes made while the lights are on and the sun is not fully up on such a
-monitor, and changing *Lights on* makes that monitor's older suggestion samples stale, so its evidence
-starts afresh.
+[Suggestions](#suggested-levels) learn *Lights on* from your changes with the lights on, and changing
+*Lights on* makes that monitor's older suggestion samples stale, so its evidence starts afresh.
 
 ### Suggested levels
 
@@ -77,20 +76,27 @@ When you keep correcting a monitor the same way, the panel offers new levels:
 - A change counts once it has held 5 minutes. Not counted: the Home Assistant `set` helper, a linked
   monitor following another, an idle or paused computer, the sun standing in while Home Assistant is
   down, the room-lights boost, a write to the monitor that failed, and levels at 0 or 100.
-- A level is offered only with changes on at least 3 days in the situation where it counts most (blind
-  down: daylight with the blind mostly closed; day: mostly open; night: the evening), when it moves by at
-  least 5, and when the new level would have been at least 3 points closer to what you chose, on average.
+- A level is offered only with changes on at least 3 days in the situation where it counts most, when it
+  moves by at least 5, and when the new level would have been at least 3 points closer to what you chose,
+  on average. The situations: *blind down*, daylight with the blind mostly closed; *day*, mostly open (each
+  needs 55% or more of the weight); *night*, when the room is dim: the evening, or a cloudy morning with
+  daylight counted at about half or less; *Lights on* (monitors that have it), the lights on as the sun goes
+  down and after dark. Night and *Lights on* need the largest share and at least 45%: with the lights on at
+  dusk the two split what daylight leaves, so neither would reach 55%.
+- On a monitor without *Lights on* whose room lights come from Home Assistant, a lower *night* comes with
+  a new *Lights on* level at today's night + the lights boost, in the same Apply: *Set night 60 → 54,
+  lights on 65 (new)?* Without it the lower night would also lower your lit evenings, which sit 5 above
+  night; with it a lit evening stays where it is. The pair is scored with the *Lights on* rule and must
+  also come 3 points closer to your changes, else the lower night is offered alone, as before; a higher
+  night is always offered alone.
 - **Apply** sets the level where it lives: its `input_number` in Home Assistant (rounded to the helper's
-  step), otherwise `config.json`. A `config.json` with comments is not edited; set the level in
+  step), otherwise `config.json` (`nightLights` for *Lights on*, like the others). A `config.json` with comments is not edited; set the level in
   Settings instead. Your hand-set distance is cleared at the same time, so it is not added twice.
   **Not now** hides that monitor's suggestions for 7 days.
 - The changes stay on this computer for 14 days (macOS `~/Library/Application Support/Daylit/corrections.json`,
   Windows `%LOCALAPPDATA%\Daylit\corrections.json`); nothing goes to Home Assistant or iCloud. When a
   level changes (Apply, Settings, a Home Assistant helper), it starts again from new changes.
 - The log shows `suggest:` lines.
-- Known gap: on a cloudy morning with the blind partly open, the blend of day and blind down lands
-  near the night level whatever the light, so no level explains the change and there is no suggestion
-  (issue #40).
 
 **Short winter days and the far north.** When today's sun never reaches a handle's height, there is no
 time to put it on: it rests on the day's highest (or lowest) point with a note such as *No full
