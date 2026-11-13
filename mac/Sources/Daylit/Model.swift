@@ -738,7 +738,7 @@ import DaylitCore
         let leaderLabel = leader.map { mons[$0].label } ?? ""
         let next = LiveInputs(elev: inp.elev, pos: inp.hasBlind ? inp.pos : nil, lights: inp.lights, light: inp.light, levels: inp.levels,
                               offsets: offs, linked: linkedNow, leader: leaderLabel, applying: auto && here,
-                              setHelper: source == .homeAssistant && mons.contains { !($0.ha?.set ?? "").trimmingCharacters(in: .whitespaces).isEmpty },
+                              setHelper: source == .homeAssistant && inp.fromHA && mons.contains { !($0.ha?.set ?? "").trimmingCharacters(in: .whitespaces).isEmpty },
                               lightsUsed: Dictionary(mons.map { ($0.uuid, lightsFor($0)) }, uniquingKeysWith: { a, _ in a }))
         if live != next { live = next }
         if here { updateLook(inp) }   // an idle Mac leaves the appearance alone too

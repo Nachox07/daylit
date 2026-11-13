@@ -278,9 +278,9 @@ config reload or turning the feature on, a reading inside a gap keeps the mode t
 shows; only a reading past a threshold switches it.
 
 - Windows: it switches the apps theme (`AppsUseLightTheme`) only. The taskbar and Start theme
-  (`SystemUsesLightTheme`) stays as you set it in Settings → Personalization → Colors, and so does
-  the "is it dark now" check. If the wallpaper is one of Windows 11's stock light/dark pair, it is
-  swapped too; a custom wallpaper is never touched.
+  (`SystemUsesLightTheme`) stays as you set it in Settings → Personalization → Colors. Daylit's own
+  "is it dark now" check reads `AppsUseLightTheme` as well. If the wallpaper is one of Windows 11's
+  stock light/dark pair, it is swapped too; a custom wallpaper is never touched.
 - macOS: it switches the system appearance through System Events, so the first switch asks for the
   Automation permission.
 

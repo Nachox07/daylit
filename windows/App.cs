@@ -704,14 +704,14 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < raw.Length; i++) fresh[mons[i].Key] = raw[i];
             haLevels = fresh;
         }
-        bool setHelper = Source == Source.HomeAssistant && mons.Any(m => !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Set));
+        bool setHelper = Source == Source.HomeAssistant && !haDown && mons.Any(m => !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Set));
         Live = new LiveInputs(s.Elev, s.HasBlind ? s.Pos : null, s.Lights, light, haLevels, offs, linkedNow,
                               li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed,
                               SetHelper: setHelper);
         LiveChanged?.Invoke();
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
-        Subtitle = !AutoOn ? "Off — sliders and hotkeys" + (setHelper ? ", and the set helper" : "")
+        Subtitle = !AutoOn ? "Off — sliders and hotkeys" + (setHelper ? ", and the set helper" : " only")
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where

@@ -33,7 +33,12 @@ sealed class SunCurve : FrameworkElement {
         Focusable = true;
         FocusVisualStyle = null;   // the active handle gets its own ring in OnRender
         System.Windows.Automation.AutomationProperties.SetName(this, "Today's sun");
-        GotKeyboardFocus += (_, _) => InvalidateVisual();
+        // Arriving by keyboard starts on the first handle (Tab) or the last (Shift+Tab); a click picks its own.
+        GotKeyboardFocus += (_, e) => {
+            if (e.OldFocus != null && Mouse.LeftButton != MouseButtonState.Pressed && markers.Count > 0)
+                active = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? markers.Count - 1 : 0;
+            InvalidateVisual();
+        };
         LostKeyboardFocus += (_, _) => InvalidateVisual();
     }
 
@@ -58,9 +63,10 @@ sealed class SunCurve : FrameworkElement {
 
     void Select(int index) {
         string before = ActiveName;
+        double beforeValue = ActiveValue;
         active = Math.Clamp(index, 0, Math.Max(markers.Count - 1, 0));
         InvalidateVisual();
-        (UIElementAutomationPeer.FromElement(this) as SunCurvePeer)?.SelectionChanged(before, ActiveName);
+        (UIElementAutomationPeer.FromElement(this) as SunCurvePeer)?.SelectionChanged(before, ActiveName, beforeValue);
     }
 
     // Tab walks the handles first, then leaves the curve.
@@ -213,14 +219,17 @@ sealed class SunCurvePeer : FrameworkElementAutomationPeer, System.Windows.Autom
     public double Minimum => SunCurve.Lowest;
     public double LargeChange => 5;
     public double SmallChange => 0.5;
-    public void SetValue(double value) => curve.SetActive(value);
+    public void SetValue(double value) {
+        if (double.IsNaN(value) || value < Minimum || value > Maximum) throw new ArgumentOutOfRangeException(nameof(value));
+        curve.SetActive(value);
+    }
 
     internal void ValueChanged(double before, double after) {
         if (before != after)
             RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, before, after);
     }
-    internal void SelectionChanged(string before, string after) {
+    internal void SelectionChanged(string before, string after, double beforeValue) {
         RaisePropertyChangedEvent(System.Windows.Automation.AutomationElementIdentifiers.NameProperty, before, after);
-        RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, 0.0, curve.ActiveValue);
+        RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, beforeValue, curve.ActiveValue);
     }
 }

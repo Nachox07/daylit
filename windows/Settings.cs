@@ -32,6 +32,7 @@ sealed class SettingsWindow : Window {
     readonly TextBlock lightStatus = Hint("");
     readonly Button test = new() { Content = "Test connection" };
     readonly TextBlock tokenState = Hint("");
+    string tokenName = "daylit-home-assistant";
     CheckBox? lookBox;
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
@@ -79,7 +80,7 @@ sealed class SettingsWindow : Window {
                                 Content = TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")) }));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
         token.Click += (_, _) => AskToken();
-        var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token), tokenState),
+        var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123", example: false), Row(test, token), tokenState),
             Card("Room", Field("Blind", cover, "cover.office_blind"), Field("Lights", lights, "light.office"),
                  Field("Automatic switch", autoSwitch, "input_boolean.daylit_auto"), Field("Sun", sun, "sun.sun"),
                  Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")),
@@ -93,6 +94,7 @@ sealed class SettingsWindow : Window {
         // The chart's "right now" follows each tick while the window is open.
         void ShowLive() => (dayCurve.Content as BrightnessChart)?.Update();
         app.LiveChanged += ShowLive;
+        Activated += (_, _) => ShowTokenState(tokenName);   // the tray's token dialog may have saved one meanwhile
         Closed += (_, _) => app.LiveChanged -= ShowLive;
         var look = new CheckBox { Content = "Light or dark mode from daylight", IsChecked = Settings.AutoLook, Margin = new Thickness(0, 2, 0, 2) };
         look.Click += (_, _) => app.SetLook(look.IsChecked == true);
@@ -342,7 +344,7 @@ sealed class SettingsWindow : Window {
         return outer;
     }
 
-    static FrameworkElement Field(string label, Control input, string? placeholder = null) {
+    static FrameworkElement Field(string label, Control input, string? placeholder = null, bool example = true) {
         var g = new Grid { Margin = new Thickness(0, 4, 0, 4) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -352,8 +354,11 @@ sealed class SettingsWindow : Window {
             t.ToolTip = "For example " + placeholder;
             System.Windows.Automation.AutomationProperties.SetHelpText(t, "For example " + placeholder);
             // The example shows in grey while the box is empty, so it does not read as a value.
-            var hint = new TextBlock { Text = "e.g. " + placeholder, Opacity = 0.45, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center,
-                                       Margin = new Thickness(7, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+            var hint = new HiddenText { Text = example ? "e.g. " + placeholder : placeholder, Opacity = 0.45, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center,
+                                        TextTrimming = TextTrimming.CharacterEllipsis };
+            // Line the grey text up with what the user types (the box's padding and border, from the theme).
+            void Align() => hint.Margin = new Thickness(t.Padding.Left + t.BorderThickness.Left, 0, t.Padding.Right, 0);
+            Align(); t.Loaded += (_, _) => Align();
             t.TextChanged += (_, _) => hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
             cell = new Grid { Children = { t, hint } };
@@ -511,7 +516,7 @@ sealed class SettingsWindow : Window {
             var tick = FixedNow == null ? app.Live : null;
             bool lit = tick?.LightsUsed is { } used && used.TryGetValue(r.mon.Key, out var usedLit) ? usedLit : tick?.Lights ?? false;
             var levels = NightLightsValue(r.nightLights, r.nightLightsLoaded) is double nl ? new[] { r.day.Value, r.blind.Value, r.night.Value, nl } : new[] { r.day.Value, r.blind.Value, r.night.Value };
-            r.now.Text = elev is double el ? $"{Rules.Target(levels, tick?.Pos ?? 100, lit, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
+            r.now.Text = elev is double el ? $"{Rules.Target(levels, tick?.Pos ?? 100, lit, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, el < app.Cfg.Tuned.LightsBoostSunBelow, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
             var text = elev == null ? "Set a location to see the level right now."
                      : tick == null ? "Right now is a preview with the blind open; nothing changes until you save."
                      : "Right now is a preview with the blind and lights as they are now; nothing changes until you save.";
@@ -630,8 +635,10 @@ sealed class SettingsWindow : Window {
     }
 
     /// Whether a token is stored, never the token itself.
-    void ShowTokenState(string name) =>
+    void ShowTokenState(string name) {
+        tokenName = name;
         tokenState.Text = (FixedTokenStored ?? Cred.Stored(name)) ? "Token: stored" : "Token: not stored. Use Token… to paste one.";
+    }
 
     void AskToken() {
         var (c, _) = Config.Load(path);
@@ -657,4 +664,9 @@ sealed class SettingsWindow : Window {
         if (missing.Count == 0) Say("Connected to Home Assistant.", false);
         else Say("Connected, but not found or unavailable: " + string.Join(", ", missing), true);
     }
+}
+
+/// Grey example text over an empty box: Narrator reads the box's own name and help text instead.
+sealed class HiddenText : TextBlock {
+    protected override System.Windows.Automation.Peers.AutomationPeer? OnCreateAutomationPeer() => null;
 }
