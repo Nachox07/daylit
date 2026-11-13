@@ -704,12 +704,14 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < raw.Length; i++) fresh[mons[i].Key] = raw[i];
             haLevels = fresh;
         }
+        bool setHelper = Source == Source.HomeAssistant && mons.Any(m => !string.IsNullOrWhiteSpace(m.Spec?.HomeAssistant?.Set));
         Live = new LiveInputs(s.Elev, s.HasBlind ? s.Pos : null, s.Lights, light, haLevels, offs, linkedNow,
-                              li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed);
+                              li >= 0 ? mons[li].Label : "", AutoOn && here, LightsUsed: lightsUsed,
+                              SetHelper: setHelper);
         LiveChanged?.Invoke();
 
         string where = s.Elev >= 0 ? $"{s.Elev:0.0}° above the horizon" : $"{-s.Elev:0.0}° below the horizon";
-        Subtitle = !AutoOn ? "Off — sliders and hotkeys only"
+        Subtitle = !AutoOn ? "Off — sliders and hotkeys" + (setHelper ? ", and the set helper" : "")
                  : !here ? "Paused — this PC is idle"
                  : haDown ? "Sun · " + where   // the error line under it says Home Assistant is unreachable
                  : Source == Source.Sun ? "Sun · " + where
@@ -727,7 +729,7 @@ sealed partial class Controller {
         if (!Settings.AutoLook) { lookDark = null; look.Reset(); return; }
         bool dark = look.WantDark(s.Elev, s.Pos, s.HasBlind, !sunOnly && s.Lights, s.Bri, s.Sat, Cfg.Tuned, lookDark == null ? Theme.Dark : null);
         if (dark != lookDark) {
-            if (!Look.Shows(dark)) {   // already showing it (apps, taskbar, stock wallpaper): nothing to switch
+            if (!Look.Shows(dark)) {   // already showing it (apps, stock wallpaper): nothing to switch
                 Log.Write("theme: " + (dark ? "dark" : "light"));
                 Look.SetDark(dark);
                 tray.Icon = Theme.SunIcon();

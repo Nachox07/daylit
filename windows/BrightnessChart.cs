@@ -37,7 +37,8 @@ sealed class BrightnessChart : StackPanel {
     readonly List<(ToggleButton button, string id)> segments = new();
     readonly TextBlock decidesTitle = new() { FontSize = 12, FontWeight = FontWeights.SemiBold };
     readonly WrapPanel chips = new() { Margin = new Thickness(0, 6, 0, 0) };
-    readonly TextBlock idle = new() { Text = "Automatic is off or this PC is idle: the screen stays where it is until it takes over again.",
+    const string IdleText = "Automatic is off or this PC is idle: the screen stays where it is until it takes over again.";
+    readonly TextBlock idle = new() { Text = IdleText,
                                       TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
 
     /// `pick`: the monitor to show first (the window keeps it across rebuilds); `picked` reports a new choice.
@@ -128,6 +129,7 @@ sealed class BrightnessChart : StackPanel {
         chips.Children.Clear();
         decidesTitle.Text = live() == null ? "How Daylit decides (preview, blind open)" : "How Daylit decides, right now";
         idle.Foreground = Palette.Secondary;
+        idle.Text = IdleText + (live()?.SetHelper == true ? " A change to the Home Assistant set helper still applies." : "");
         idle.Visibility = live()?.Applying == false ? Visibility.Visible : Visibility.Collapsed;
         if (Mon is not { } m) return;
         var d = Decide(m);

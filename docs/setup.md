@@ -153,6 +153,7 @@ into another computer right now) and which config entry matched which monitor.
      `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
    - Windows: the app asks on first start and saves it in Credential Manager. Right-click the tray
      icon → *Home Assistant token…* to change it.
+   Settings → *Home Assistant* shows whether a token is stored ("Token: stored"), never the token.
 4. In the config, set `homeAssistant.url` and, per monitor, a `homeAssistant` block:
 
 ```json
@@ -171,7 +172,7 @@ into another computer right now) and which config entry matched which monitor.
 - `sensor` is published by Daylit with what it applied (`target`, `manual`, `offset` (the hand-set distance), `daylight`,
   `light` (how clear the sky is, 0–1, with a daylight sensor), `blind`, `lights`, `source` attributes), so you can graph it.
 - `set` is optional: changing that helper sets the monitor right away, even when the computer is
-  idle (dim it from your phone). It then counts as a level set by hand.
+  idle or Automatic is off (dim it from your phone). It then counts as a level set by hand.
 
 With an `http://` URL the token travels unencrypted on your local network; use your `https://`
 address if you have one. On macOS, plain `http://` works for local addresses only (an IP, `*.local`
@@ -276,8 +277,10 @@ and forth, and a manual switch stays until the automatic decision next changes. 
 config reload or turning the feature on, a reading inside a gap keeps the mode the computer already
 shows; only a reading past a threshold switches it.
 
-- Windows: if the wallpaper is one of Windows 11's stock light/dark pair, it is swapped too; a
-  custom wallpaper is never touched.
+- Windows: it switches the apps theme (`AppsUseLightTheme`) only. The taskbar and Start theme
+  (`SystemUsesLightTheme`) stays as you set it in Settings → Personalization → Colors, and so does
+  the "is it dark now" check. If the wallpaper is one of Windows 11's stock light/dark pair, it is
+  swapped too; a custom wallpaper is never touched.
 - macOS: it switches the system appearance through System Events, so the first switch asks for the
   Automation permission.
 

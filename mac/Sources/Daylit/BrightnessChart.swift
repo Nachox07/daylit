@@ -16,9 +16,10 @@ struct LiveInputs: Equatable {
     var linked: [String: Int] = [:]   // linked monitors that follow another: the level they land on
     var leader = ""                   // the monitor they follow
     var applying = true               // false: Automatic is off or this Mac is idle, so nothing is being set
+    var setHelper = false             // a monitor has a Home Assistant "set" helper, which still applies while idle or off
     var lightsUsed: [String: Bool] = [:]   // the room lights each monitor's target used (the sun fallback keeps them for nightLights)
     static func == (a: LiveInputs, b: LiveInputs) -> Bool {
-        a.lightsUsed == b.lightsUsed && a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
+        a.lightsUsed == b.lightsUsed && a.elev == b.elev && a.linked == b.linked && a.leader == b.leader && a.applying == b.applying && a.setHelper == b.setHelper && a.pos == b.pos && a.lights == b.lights && a.light == b.light && a.levels == b.levels
             && a.offsets.mapValues { "\($0.value) \($0.weight)" } == b.offsets.mapValues { "\($0.value) \($0.weight)" }
     }
 }
@@ -280,7 +281,7 @@ struct BrightnessChart: View {
                 }
             }
             if live?.applying == false {
-                Text("Automatic is off or this Mac is idle: the screen stays where it is until it takes over again.")
+                Text("Automatic is off or this Mac is idle: the screen stays where it is until it takes over again." + (live?.setHelper == true ? " A change to the Home Assistant set helper still applies." : ""))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Text("Each handle is one sun height, so its morning and evening times move together and shift through the year. A level you set by hand keeps its distance until dusk.")

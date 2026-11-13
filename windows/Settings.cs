@@ -31,6 +31,7 @@ sealed class SettingsWindow : Window {
     readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new(), daylightSensor = new();
     readonly TextBlock lightStatus = Hint("");
     readonly Button test = new() { Content = "Test connection" };
+    readonly TextBlock tokenState = Hint("");
     CheckBox? lookBox;
     readonly StackPanel monitors = new();
     readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
@@ -47,6 +48,8 @@ sealed class SettingsWindow : Window {
     readonly string path;
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     public static DateTimeOffset? FixedNow;
+    /// Snapshots: a made-up token state, so the machine that renders them does not matter.
+    public static bool? FixedTokenStored;
 
     /// `path` is the config file to edit; snapshots pass a made-up one.
     public SettingsWindow(Controller app, string? path = null, string? pane = null) {
@@ -76,7 +79,7 @@ sealed class SettingsWindow : Window {
                                 Content = TuningRows(TuningField.Tuning.Where(f => f.Group == "brightness")) }));
         var token = new Button { Content = "Token…", Margin = new Thickness(8, 0, 0, 0) };
         token.Click += (_, _) => AskToken();
-        var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token)),
+        var haPane = Pane(Card("Connection", Field("URL", haUrl, "http://homeassistant.local:8123"), Row(test, token), tokenState),
             Card("Room", Field("Blind", cover, "cover.office_blind"), Field("Lights", lights, "light.office"),
                  Field("Automatic switch", autoSwitch, "input_boolean.daylit_auto"), Field("Sun", sun, "sun.sun"),
                  Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")),
@@ -344,14 +347,22 @@ sealed class SettingsWindow : Window {
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         var l = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        FrameworkElement cell = input;
         if (input is TextBox t && placeholder != null) {
             t.ToolTip = "For example " + placeholder;
             System.Windows.Automation.AutomationProperties.SetHelpText(t, "For example " + placeholder);
+            // The example shows in grey while the box is empty, so it does not read as a value.
+            var hint = new TextBlock { Text = "e.g. " + placeholder, Opacity = 0.45, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center,
+                                       Margin = new Thickness(7, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+            System.Windows.Automation.AutomationProperties.SetAccessibilityView(hint, System.Windows.Automation.Peers.AccessibilityView.Raw);
+            t.TextChanged += (_, _) => hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+            hint.Visibility = t.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+            cell = new Grid { Children = { t, hint } };
         }
         System.Windows.Automation.AutomationProperties.SetName(input, label);
-        input.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(input, 1);
-        g.Children.Add(l); g.Children.Add(input);
+        cell.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(cell, 1);
+        g.Children.Add(l); g.Children.Add(cell);
         return g;
     }
 
@@ -431,6 +442,7 @@ sealed class SettingsWindow : Window {
         lat.Text = c.Location?.Latitude.ToString("0.00", CultureInfo.InvariantCulture) ?? "";
         lon.Text = c.Location?.Longitude.ToString("0.00", CultureInfo.InvariantCulture) ?? "";
         var h = c.HomeAssistant;
+        ShowTokenState(c.TokenName);
         haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? ""; daylightSensor.Text = h?.Light ?? "";
         var set = TuningField.SetValues(c.Tuning);
         loadedTune = set;
@@ -459,7 +471,7 @@ sealed class SettingsWindow : Window {
             // Contrast goes over DDC/CI only: no box for a monitor in HDR (SDR white level).
             TextBox? contrast = m.D.Hdr ? null : new TextBox { Text = spec?.Contrast is double ct ? Fmt(ct) : "" };
             var nightLights = new TextBox { Text = spec?.NightLights is double nlv ? Fmt(nlv) : "" };
-            nightLights.TextChanged += (_, _) => RebuildCurves();   // "How Daylit decides" uses it
+            nightLights.TextChanged += (_, _) => Refresh();   // "How Daylit decides" and "Right now" use it
             var nightLightsRow = OptionalNumber("Lights on", nightLights, NightLightsHelp);
             rows.Add((m, label, day, blind, night, now, caption, haLevels, contrast, nightLights, nightLightsRow, contrast?.Text ?? "", nightLights.Text));
             var card = new List<UIElement> { Field("Name", label), Level("Day", day), Level("Blind closed", blind), Level("Night", night), nightLightsRow };
@@ -495,8 +507,15 @@ sealed class SettingsWindow : Window {
         sunNow.Text = elev is double e ? $"Sun now {e:0.0}°" : "";
         foreach (var r in rows) {
             r.nightLightsRow.Visibility = ShowsNightLights ? Visibility.Visible : Visibility.Collapsed;
-            r.now.Text = elev is double el ? $"{Rules.Target([r.day.Value, r.blind.Value, r.night.Value], 100, false, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
-            var text = elev == null ? "Set a location to see the level right now." : "Right now is a preview with the blind open; nothing changes until you save.";
+            // As the app would set it: the typed Lights on level, and the blind and room lights as the last tick saw them
+            // (blind open and lights off before a first tick; snapshots always draw that).
+            var tick = FixedNow == null ? app.Live : null;
+            bool lit = tick?.LightsUsed is { } used && used.TryGetValue(r.mon.Key, out var usedLit) ? usedLit : tick?.Lights ?? false;
+            var levels = NightLightsValue(r.nightLights, r.nightLightsLoaded) is double nl ? new[] { r.day.Value, r.blind.Value, r.night.Value, nl } : new[] { r.day.Value, r.blind.Value, r.night.Value };
+            r.now.Text = elev is double el ? $"{Rules.Target(levels, tick?.Pos ?? 100, lit, app.Cfg.Tuned.Fraction(el), app.Cfg.Tuned, light: FixedNow == null ? app.LightNow : 1)}%" : "–";   // with today's clouds; snapshots stay clear
+            var text = elev == null ? "Set a location to see the level right now."
+                     : tick == null ? "Right now is a preview with the blind open; nothing changes until you save."
+                     : "Right now is a preview with the blind and lights as they are now; nothing changes until you save.";
             if (ShowsNightLights) text += " Lights on: after sunset with the room lights on; empty keeps Night plus the room-lights boost.";
             if (r.haLevels) text += " Home Assistant helpers set these levels; these apply only when it cannot be reached.";
             if (r.contrast != null) text += " Contrast is set when the monitor is detected; empty leaves it to the monitor.";
@@ -611,11 +630,15 @@ sealed class SettingsWindow : Window {
         }
     }
 
+    /// Whether a token is stored, never the token itself.
+    void ShowTokenState(string name) =>
+        tokenState.Text = (FixedTokenStored ?? Cred.Stored(name)) ? "Token: stored" : "Token: not stored. Use Token… to paste one.";
+
     void AskToken() {
         var (c, _) = Config.Load(path);
         var t = TokenDialog.Ask(c.TokenName);
         if (t == null) return;
-        if (Cred.Write(c.TokenName, "homeassistant", t)) { HAClient.Token = t; Say("Token saved.", false); }
+        if (Cred.Write(c.TokenName, "homeassistant", t)) { HAClient.Token = t; ShowTokenState(c.TokenName); Say("Token saved.", false); }
         else Say("Windows could not save the token in Credential Manager.", true);
     }
 

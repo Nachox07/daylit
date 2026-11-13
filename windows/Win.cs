@@ -198,14 +198,15 @@ static class Look {
     [DllImport("user32", CharSet = CharSet.Unicode)]
     static extern IntPtr SendMessageTimeoutW(IntPtr h, uint msg, IntPtr w, string l, uint flags, uint timeout, out IntPtr r);
 
-    /// Whether Windows already shows this mode: apps, taskbar and (a stock) wallpaper.
+    /// Whether Windows already shows this mode: apps and (a stock) wallpaper. The taskbar and Start theme
+    /// (SystemUsesLightTheme) is the user's own choice and is never touched.
     public static bool Shows(bool dark) {
         using var k = Registry.CurrentUser.OpenSubKey(Pers);
         return ThemeIs(k, dark) && WallpaperToSet(dark) == null;
     }
     static bool ThemeIs(RegistryKey? k, bool dark) {
         int v = dark ? 0 : 1;
-        return k?.GetValue("AppsUseLightTheme") is int a && a == v && k.GetValue("SystemUsesLightTheme") is int b && b == v;
+        return k?.GetValue("AppsUseLightTheme") is int a && a == v;
     }
 
     public static void SetDark(bool dark) {
@@ -214,7 +215,6 @@ static class Look {
         int v = dark ? 0 : 1;
         if (ThemeIs(k, dark)) return;
         k.SetValue("AppsUseLightTheme", v, RegistryValueKind.DWord);
-        k.SetValue("SystemUsesLightTheme", v, RegistryValueKind.DWord);
         SendMessageTimeoutW((IntPtr)0xFFFF, 0x1A /* WM_SETTINGCHANGE */, IntPtr.Zero, "ImmersiveColorSet", 2, 1000, out _);
     }
 
