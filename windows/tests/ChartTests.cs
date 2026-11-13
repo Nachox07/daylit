@@ -61,6 +61,44 @@ public class ChartTests {
     }
 
     [Fact]
+    public void ArrowKeysMoveAHandleHalfADegreeAndPageKeysFive() {
+        Assert.Equal(12.5, Chart.SteppedElevation(12, Chart.SmallStep, day: true, other: -3));
+        Assert.Equal(7.0, Chart.SteppedElevation(12, -Chart.LargeStep, day: true, other: -3));
+        Assert.Equal(-3.5, Chart.SteppedElevation(-3, -Chart.SmallStep, day: false, other: 12));
+        Assert.Equal(2.0, Chart.SteppedElevation(-3, Chart.LargeStep, day: false, other: 12));
+        // A value typed off the half-degree grid lands back on it.
+        Assert.Equal(12.5, Chart.SteppedElevation(12.2, Chart.SmallStep, day: true, other: -3));
+    }
+
+    [Fact]
+    public void AKeyPressStopsAtTheOtherHandleAndAtTheEndsOfTheRange() {
+        Assert.Equal(2.5, Chart.SteppedElevation(4, -Chart.LargeStep, day: true, other: 2));    // full day stays above night
+        Assert.Equal(11.5, Chart.SteppedElevation(11.5, Chart.SmallStep, day: false, other: 12)); // night stays below full day
+        Assert.Equal(60.0, Chart.SteppedElevation(58, Chart.LargeStep, day: true, other: -3));
+        Assert.Equal(30.0, Chart.SteppedElevation(28, Chart.LargeStep, day: false, other: 45));
+        Assert.Equal(-18.0, Chart.SteppedElevation(-16, -Chart.LargeStep, day: false, other: 12));
+    }
+
+    [Fact]
+    public void AKeyPressSavesWhatADragToTheSameHeightWould() {
+        var s = Day("2026-06-19T12:00:00Z", 51.48);
+        foreach (double t in new[] { 0.1, 0.25, 0.3, 0.5, 0.8 }) {
+            double e = Chart.Elevation(s, t);
+            Assert.Equal(Chart.DraggedElevation(s, t, day: true, other: -3), Chart.SteppedElevation(e, 0, day: true, other: -3));
+            Assert.Equal(Chart.DraggedElevation(s, t, day: false, other: 12), Chart.SteppedElevation(e, 0, day: false, other: 12));
+        }
+    }
+
+    [Fact]
+    public void LeftAndRightWalkTheHandlesAndStopAtTheEnds() {
+        Assert.Equal(1, Chart.NextHandle(0, 2, +1));
+        Assert.Equal(0, Chart.NextHandle(1, 2, -1));
+        Assert.Null(Chart.NextHandle(1, 2, +1));   // past the last: Tab leaves the chart
+        Assert.Null(Chart.NextHandle(0, 2, -1));   // before the first: Shift+Tab leaves it
+        Assert.Null(Chart.NextHandle(0, 0, +1));
+    }
+
+    [Fact]
     public void ClockChangeDaysAre23And25HoursLong() {
         var london = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
         var spring = Chart.DayBounds(At("2026-03-29T12:00:00Z"), london);

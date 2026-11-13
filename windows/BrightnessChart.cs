@@ -1,9 +1,12 @@
 // Settings → Automatic: how bright a monitor gets through today. Time across, brightness up; one line
 // with the blind open and one with it closed; two handles, each one sun height (Chart.cs), with both of
 // its crossings draggable sideways; and "How Daylit decides, right now". Snapshots draw it from fixed
-// state. Same as the Mac's BrightnessChart.
+// state. Same as the Mac's BrightnessChart. The keyboard moves the handles too: Left / Right (or Tab) pick
+// one, Up / Down move its sun height by half a degree (Page Up / Page Down by five), and Narrator reads
+// each as a slider. Both go through the same clamping and save as a drag (Chart.KeepClear, `set`).
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
@@ -32,6 +35,7 @@ sealed class BrightnessChart : StackPanel {
     readonly List<(double t, double e)> samples;
     string? pick;
     string? dragging;
+    string? keyed;   // the handle the keyboard is on while the chart has focus: its label shows the degrees
 
     readonly Plot plot;
     readonly List<(ToggleButton button, string id)> segments = new();
@@ -145,10 +149,12 @@ sealed class BrightnessChart : StackPanel {
         }
     }
 
-    /// The handle labels: the times today, or why there are none.
-    string Title(bool isDay, HandlePlace p, Tuning t) {
+    /// The handle labels: the times today, or why there are none. `degrees` false leaves out the
+    /// " · sun 12° up" a dragged or keyboard-picked handle shows (Narrator reads the degrees first).
+    string Title(bool isDay, HandlePlace p, Tuning t, bool degrees = true) {
         double value = isDay ? t.SunDay : t.SunNight;
-        string degrees = dragging == (isDay ? SunDayId : SunNightId) ? $" · sun {Fmt(value)}° up" : "";
+        string id = isDay ? SunDayId : SunNightId;
+        string shown = degrees && (dragging ?? keyed) == id ? $" · sun {Fmt(value)}° up" : "";
         if (p.Parked) {
             string v = Fmt(value);
             return (isDay, p.SunAbove) switch {
@@ -158,8 +164,8 @@ sealed class BrightnessChart : StackPanel {
                 (false, true) => $"No night level today: the sun stays above {v}°",
             };
         }
-        return isDay ? "Full brightness today " + Sun.SpanLabel(Sun.Spans(samples, value), Clock) + degrees
-                     : "Night level today: " + Sun.SpanLabel(Sun.Spans(samples, value, below: true), Clock) + degrees;
+        return isDay ? "Full brightness today " + Sun.SpanLabel(Sun.Spans(samples, value), Clock) + shown
+                     : "Night level today: " + Sun.SpanLabel(Sun.Spans(samples, value, below: true), Clock) + shown;
     }
 
     /// The drawn part: axis labels, the chart with its handles, the hours under it and the legend.
@@ -169,13 +175,90 @@ sealed class BrightnessChart : StackPanel {
         readonly List<(bool isDay, HandlePlace place, Rect r)> grips = new();
         HandlePlace? held;   // where the dragged handle was when the drag started (a parked one stays put until it leaves)
         bool heldDay;
+        int active;          // the handle the keyboard and Narrator act on: 0 full brightness, 1 night level
+        const int Handles = 2;
 
         public Plot(BrightnessChart c) {
             this.c = c;
             Height = ChartH + HoursH + LegendH;
             Cursor = Cursors.Arrow;
+            Focusable = true;
+            FocusVisualStyle = null;   // the active handle gets its own ring in OnRender
             System.Windows.Automation.AutomationProperties.SetName(this, "Brightness through today");
+            // Arriving by keyboard starts on the first handle (Tab) or the last (Shift+Tab); a click picks its own.
+            GotKeyboardFocus += (_, e) => {
+                if (e.OldFocus != null && Mouse.LeftButton != MouseButtonState.Pressed)
+                    active = (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? Handles - 1 : 0;
+                c.keyed = ActiveId;
+                c.Update();
+            };
+            LostKeyboardFocus += (_, _) => { c.keyed = null; c.Update(); };
         }
+
+        // MARK: keyboard and Narrator
+
+        bool ActiveDay => active == 0;
+        string ActiveId => ActiveDay ? SunDayId : SunNightId;
+        internal string ActiveName => ActiveDay ? "Full brightness" : "Night level";
+        internal double ActiveValue => ActiveDay ? c.tuning().SunDay : c.tuning().SunNight;
+        internal double ActiveMaximum => Chart.Highest(ActiveDay);
+        /// Its sun height and what it means today: "12 degrees, Full brightness today 06:52 – 21:14".
+        internal string ActiveStatus {
+            get {
+                var t = c.tuning();
+                return $"{Fmt(ActiveValue)} degrees, {c.Title(ActiveDay, Chart.Place(c.samples, ActiveValue), t, degrees: false)}";
+            }
+        }
+
+        /// Saves a sun height for the active handle the way a drag does: Chart.KeepClear, then `set` and a redraw.
+        internal void SetActive(double value) {
+            var t = c.tuning();
+            double before = ActiveValue;
+            c.set(ActiveId, Chart.KeepClear(value, ActiveDay, ActiveDay ? t.SunNight : t.SunDay));
+            c.Update();
+            (UIElementAutomationPeer.FromElement(this) as PlotPeer)?.ValueChanged(before, ActiveValue);
+        }
+
+        void Move(double step) {
+            var t = c.tuning();
+            SetActive(Chart.SteppedElevation(ActiveValue, step, ActiveDay, ActiveDay ? t.SunNight : t.SunDay));
+        }
+
+        void Select(int index) {
+            string before = ActiveName;
+            double beforeValue = ActiveValue, beforeMax = ActiveMaximum;
+            active = Math.Clamp(index, 0, Handles - 1);
+            if (IsKeyboardFocused) c.keyed = ActiveId;
+            c.Update();
+            (UIElementAutomationPeer.FromElement(this) as PlotPeer)?.SelectionChanged(before, beforeValue, beforeMax);
+        }
+
+        // Tab walks the handles first, then leaves the chart.
+        protected override void OnPreviewKeyDown(KeyEventArgs e) {
+            if (e.Key == Key.Tab && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 &&
+                Chart.NextHandle(active, Handles, (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? -1 : 1) is int next) {
+                Select(next); e.Handled = true; return;
+            }
+            base.OnPreviewKeyDown(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e) {
+            if (c.Mon == null) { base.OnKeyDown(e); return; }
+            switch (e.Key) {
+                case Key.Up: Move(Chart.SmallStep); break;
+                case Key.Down: Move(-Chart.SmallStep); break;
+                case Key.PageUp: Move(Chart.LargeStep); break;
+                case Key.PageDown: Move(-Chart.LargeStep); break;
+                case Key.Left: Select(Chart.NextHandle(active, Handles, -1) ?? active); break;
+                case Key.Right: Select(Chart.NextHandle(active, Handles, 1) ?? active); break;
+                default: base.OnKeyDown(e); return;
+            }
+            e.Handled = true;
+        }
+
+        protected override void OnMouseDown(MouseButtonEventArgs e) { Focus(); base.OnMouseDown(e); }
+
+        protected override AutomationPeer OnCreateAutomationPeer() => new PlotPeer(this);
 
         static double X0 => AxisW + Gap;
 
@@ -253,6 +336,8 @@ sealed class BrightnessChart : StackPanel {
                     for (int k = -1; k <= 1; k++) dc.DrawRectangle(Brushes.White, null, new Rect(r.X + 3, sp.row + k * 3.7 - 0.6, 6, 1.2));
                     var hit = r; hit.Inflate(8, 8);
                     grips.Add((sp.isDay, p, hit));
+                    if (IsKeyboardFocused && i == active)
+                        dc.DrawRoundedRectangle(null, new Pen(Palette.Text, 2), new Rect(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), 9, 9);
                 }
                 var label = Text(c.Title(sp.isDay, p, t), 12, Palette.Text, FontWeights.Medium);
                 double half = label.Width / 2 + 11;   // the pill stays inside the chart, whatever its text
@@ -290,6 +375,9 @@ sealed class BrightnessChart : StackPanel {
             var p = e.GetPosition(this);
             var hit = grips.LastOrDefault(g => g.r.Contains(p));
             if (hit.r.IsEmpty || hit.r.Width == 0) return;
+            active = hit.isDay ? 0 : 1;
+            Focus();
+            c.keyed = ActiveId;
             held = hit.place; heldDay = hit.isDay;
             c.dragging = hit.isDay ? SunDayId : SunNightId;
             CaptureMouse(); e.Handled = true;
@@ -326,5 +414,39 @@ sealed class BrightnessChart : StackPanel {
 
         protected override Size MeasureOverride(Size available) =>
             new(double.IsInfinity(available.Width) ? 600 : available.Width, Height);
+    }
+
+    /// Narrator reads the chart as a slider on the active handle: its name, its sun height in degrees and today's times.
+    sealed class PlotPeer : FrameworkElementAutomationPeer, System.Windows.Automation.Provider.IRangeValueProvider {
+        readonly Plot plot;
+        public PlotPeer(Plot plot) : base(plot) { this.plot = plot; }
+
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Slider;
+        protected override string GetClassNameCore() => "BrightnessChart";
+        protected override string GetNameCore() => plot.ActiveName + ", brightness through today";
+        protected override string GetItemStatusCore() => plot.ActiveStatus;
+        public override object? GetPattern(PatternInterface pattern) =>
+            pattern == PatternInterface.RangeValue ? this : base.GetPattern(pattern);
+
+        public double Value => plot.ActiveValue;
+        public bool IsReadOnly => false;
+        public double Maximum => plot.ActiveMaximum;
+        public double Minimum => Chart.Lowest;
+        public double LargeChange => Chart.LargeStep;
+        public double SmallChange => Chart.SmallStep;
+        public void SetValue(double value) {
+            if (double.IsNaN(value) || value < Minimum || value > Maximum) throw new ArgumentOutOfRangeException(nameof(value));
+            plot.SetActive(value);
+        }
+
+        internal void ValueChanged(double before, double after) {
+            if (before != after)
+                RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, before, after);
+        }
+        internal void SelectionChanged(string before, double beforeValue, double beforeMax) {
+            RaisePropertyChangedEvent(System.Windows.Automation.AutomationElementIdentifiers.NameProperty, before + ", brightness through today", GetNameCore());
+            RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.MaximumProperty, beforeMax, Maximum);
+            RaisePropertyChangedEvent(System.Windows.Automation.RangeValuePatternIdentifiers.ValueProperty, beforeValue, Value);
+        }
     }
 }
