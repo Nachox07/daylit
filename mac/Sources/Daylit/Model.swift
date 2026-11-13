@@ -146,7 +146,7 @@ import DaylitCore
         generation += 1
         let old = Dictionary(mons.map { ($0.uuid, $0) }, uniquingKeysWith: { a, _ in a })
         mons = externalScreens().map { s in
-            let cfg = config.monitors?.first { s.name.localizedCaseInsensitiveContains($0.match) }
+            let cfg = config.monitor(for: s.name)
             let control: Control
             let nativeOK = Native.usable(s.id)
             switch cfg?.control {
@@ -252,7 +252,7 @@ import DaylitCore
         wasHere = here
         guard source != .off else { return }
         let interval: Double = Power.onBattery ? config.tuned.batteryPollSeconds : config.tuned.pollSeconds
-        if Date().timeIntervalSince(lastTick) >= interval { refresh() }
+        if tickDue(elapsed: Date().timeIntervalSince(lastTick), interval: interval) { refresh() }
     }
 
     /// A level set by hand (slider or keys). With sync on, the other monitors follow with their offsets.
@@ -527,7 +527,7 @@ import DaylitCore
         if key != lightRefFor { lightRef = LightReference(); lightRefAt = nil; lightRefFor = key }
         // Hourly while there is no reference, or only hours of it since a unit change; then daily.
         let young = unit.historyDays(10, now: Date().timeIntervalSince1970) < 1
-        if let at = lightRefAt, Date().timeIntervalSince(at) < (lightRef.isEmpty || young ? 3600 : 86400) { return }
+        if let at = lightRefAt, !lightHistoryDue(elapsed: Date().timeIntervalSince(at), hasReference: !lightRef.isEmpty, young: young) { return }
         lightRefBusy = true; defer { lightRefBusy = false }
         lightRefAt = Date()
         switch await HAClient.history(ha, e, days: unit.historyDays(10, now: Date().timeIntervalSince1970)) {
@@ -539,11 +539,11 @@ import DaylitCore
                       (fresh.isEmpty ? " (not enough history, trying again in an hour)" : ""))
             if !fresh.isEmpty { lightRef = fresh }
             else if lightRef.isEmpty { lightStatus = "Not enough history in Home Assistant yet: trying again in an hour." }
-            else { retryLightSoon() }   // an odd answer does not replace a good reference
+            else { retryLightSoon(young) }   // an odd answer does not replace a good reference
         case .failure:
             Log.write("light: could not read its history (\(HAClient.lastCause ?? "no answer")), trying again in an hour")
             if lightRef.isEmpty { lightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour." }
-            retryLightSoon()
+            retryLightSoon(young)
         }
     }
 
@@ -559,7 +559,9 @@ import DaylitCore
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
-    func retryLightSoon() { lightRefAt = Date().addingTimeInterval(3600 - 86400) }
+    func retryLightSoon(_ young: Bool) {
+        lightRefAt = Date(timeIntervalSince1970: lightRetryStamp(now: Date().timeIntervalSince1970, hasReference: !lightRef.isEmpty, young: young))
+    }
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     func stepLight(toward goal: Double) -> Double {
@@ -741,10 +743,7 @@ import DaylitCore
         let before = holds, now = Date().timeIntervalSince1970
         for m in mons {
             let st = HoldState(lastSet: m.lastSet, lastTarget: m.lastTarget, offset: m.offset, offsetSun: m.offsetSun, offsetAt: m.offsetAt)
-            // Re-save only when the state changed, so the timestamp means "last decided", not "last tick".
-            if holds.entries[m.uuid].map({ $0.lastSet == st.lastSet && $0.lastTarget == st.lastTarget && $0.offset == st.offset }) != true {
-                holds.record(key: m.uuid, state: st, now: now)
-            }
+            holds.record(key: m.uuid, state: st, now: now)   // re-saves only when the state changed
         }
         if holds != before, let d = try? JSONEncoder().encode(holds) { UserDefaults.standard.set(d, forKey: "holds") }
     }

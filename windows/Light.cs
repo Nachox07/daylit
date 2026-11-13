@@ -6,6 +6,20 @@ using System.Text.Json;
 
 namespace Daylit;
 
+/// When the light sensor's history is read again. Same rules as mac/ (DaylitCore/Rules.swift).
+static class LightHistoryRule {
+    /// Due again: `elapsed` seconds since it was last tried. Hourly while there is no reference (or only hours
+    /// of it), daily otherwise; a clock set back counts as due.
+    public static bool Due(double elapsed, bool hasReference, bool young) =>
+        elapsed < 0 || elapsed >= (hasReference && !young ? 86400 : 3600);
+
+    /// The time to store as "last tried" so the history is due again in an hour. With a reference in use the
+    /// wait is a day, so the stamp is moved back by the difference; otherwise the wait already is an hour
+    /// and the stamp is now (moving it back there made the retry fire on every tick).
+    public static double RetryStamp(double now, bool hasReference, bool young) =>
+        hasReference && !young ? now + 3600 - 86400 : now;
+}
+
 /// One history reading: the sun's elevation and direction at that moment, and the value.
 record struct LightSample(double Elev, bool Morning, double Value);
 

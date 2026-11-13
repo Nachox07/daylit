@@ -7,6 +7,9 @@ import DaylitCore
 
 struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
 
+/// Displays already reported as skipped, so the log says it once.
+@MainActor private var skippedNoUUID = Set<CGDirectDisplayID>()
+
 /// External displays only: the built-in screen keeps its own brightness handling.
 @MainActor func externalScreens() -> [Screen] {
     if ProcessInfo.processInfo.environment["DAYLIT_DEBUG_NO_DISPLAYS"] == "1" { return [] }   // tests: the empty state
@@ -14,6 +17,11 @@ struct Screen { let id: CGDirectDisplayID; let uuid: String; let name: String }
         guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
               CGDisplayIsBuiltin(id) == 0 else { return nil }
         let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? ""
+        // Everything is keyed by the UUID (holds, sync, DDC): several displays without one would share the key "".
+        guard !uuid.isEmpty else {
+            if skippedNoUUID.insert(id).inserted { Log.write("display \"\(s.localizedName)\" id=\(id) has no UUID: skipped") }
+            return nil
+        }
         return (id, uuid, s.localizedName)
     }
     return found.enumerated().map { i, d in Screen(id: d.0, uuid: d.1, name: DisplayName.label(d.2, index: i)) }

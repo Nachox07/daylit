@@ -109,7 +109,7 @@ static class Rules {
     /// over 0.3 of the daylight fraction (about half an hour). A daytime one never fades faster than that
     /// half hour from when it was set (`age`, seconds): one set in the last light would otherwise be gone in minutes.
     public static double? OffsetWeight(double sun, double setAt, double? age = null) {
-        const double edge = 0.3, fade = 1800;
+        const double edge = NightOffsetEdge, fade = 1800;
         if (setAt > 0) {
             double w = Math.Min(1, Math.Max(0, sun) / Math.Min(edge, setAt));
             return age is double a && a >= 0 && a < fade ? Math.Max(w, 1 - a / fade) : w;
@@ -117,12 +117,25 @@ static class Rules {
         return sun >= edge ? null : 1 - sun / edge;
     }
 
-    /// An offset from an earlier day, or from a night long over, no longer applies, even when no tick ran
-    /// in between (the PC slept). `dayOf` gives the local calendar day of a Unix time.
-    public static bool OffsetExpired(Hold s, double now, Func<double, int> dayOf) {
+    /// The longest a hand-set offset can live, whatever the sky does (a polar night or day never ends it).
+    public const double OffsetMaxAge = 36 * 3600;
+    /// A daytime offset older than this when the calendar day changes ends even with the sun up
+    /// (a PC that slept through the night wakes into a new day).
+    const double DayOffsetCarryOver = 12 * 3600;
+    /// The daylight fraction where a night offset has faded out completely.
+    public const double NightOffsetEdge = 0.3;
+
+    /// An offset that no longer applies, even when no tick ran in between (the PC slept).
+    /// One set at night ends when daylight next passes the fade edge (OffsetWeight), not after a fixed time,
+    /// so a long polar night keeps it. One set by day ends with the calendar day once the sun is down; while
+    /// the sun is still up (polar day) it carries over midnight for at most 12 hours. Every offset ends after
+    /// 36 hours. `dayOf` gives the local calendar day of a Unix time; `sun` is the daylight fraction now.
+    public static bool OffsetExpired(Hold s, double now, double sun, Func<double, int> dayOf) {
         if (s.Offset == null || s.OffsetAt is not double at || now <= 0) return false;
-        if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at);
-        return now - at > 18 * 3600;   // longer than any night
+        double age = now - at;
+        if (age > OffsetMaxAge) return true;
+        if ((s.OffsetSun ?? 0) > 0) return dayOf(now) != dayOf(at) && (sun <= 0 || age > DayOffsetCarryOver);
+        return sun >= NightOffsetEdge;
     }
 
     /// Seconds since the hand-set offset was set; null when unknown.
@@ -154,7 +167,7 @@ static class Rules {
             }
         }
         int applied = c;
-        if (here && OffsetExpired(s, now, dayOf ?? LocalDay)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
+        if (here && OffsetExpired(s, now, sun, dayOf ?? LocalDay)) s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
         if (auto && !fromRemote && here && !dragging) {
             if (s.LastSet is int last && c != last) {
                 if (touched || Math.Abs(c - last) > 1)   // moved by hand since the last tick
@@ -370,7 +383,8 @@ sealed class SavedHolds {
     /// Records a monitor's state; one with nothing to remember is removed. Returns whether it changed.
     public bool Record(string key, Hold h, double now) {
         if (h.LastSet == null && h.LastTarget == null) return Entries.Remove(key);
-        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset) return false;   // keep "last decided" time
+        if (Entries.TryGetValue(key, out var e) && e.LastSet == h.LastSet && e.LastTarget == h.LastTarget && e.Offset == h.Offset
+            && e.OffsetSun == h.OffsetSun && e.OffsetAt == h.OffsetAt) return false;   // keep "last decided" time
         Entries[key] = new Entry(h.LastSet, h.LastTarget, now, h.Offset, h.OffsetSun, h.OffsetAt);
         return true;
     }
