@@ -548,7 +548,7 @@ struct SettingsView: View {
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
         themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
-            let cfg = c.monitors?.first { mon.name.localizedCaseInsensitiveContains($0.match) }
+            let cfg = c.monitor(for: mon.name)
             let ha = cfg?.homeAssistant
             return MonitorDraft(id: mon.uuid, name: mon.name, label: cfg?.label ?? mon.name,
                                 day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20,

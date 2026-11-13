@@ -435,7 +435,7 @@ sealed partial class Controller {
         if (key != lightRefFor) { lightRef = new(); lightRefAt = null; lightRefFor = key; }
         // Hourly while there is no reference, or only hours of it since a unit change; then daily.
         bool young = unit.HistoryDays(10, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0) < 1;
-        if (lightRefAt is DateTime at && (DateTime.UtcNow - at).TotalSeconds < (lightRef.IsEmpty || young ? 3600 : 86400)) return;
+        if (lightRefAt is DateTime at && !LightHistoryRule.Due((DateTime.UtcNow - at).TotalSeconds, !lightRef.IsEmpty, young)) return;
         lightRefBusy = true;
         try {
             lightRefAt = DateTime.UtcNow;
@@ -448,13 +448,13 @@ sealed partial class Controller {
                           (fresh.IsEmpty ? " (not enough history, trying again in an hour)" : ""));
                 if (!fresh.IsEmpty) lightRef = fresh;
                 else if (lightRef.IsEmpty) LightStatus = "Not enough history in Home Assistant yet: trying again in an hour.";
-                else RetryLightSoon();   // an odd answer does not replace a good reference
+                else RetryLightSoon(young);   // an odd answer does not replace a good reference
             } else {
                 Log.Write($"light: could not read its history ({cause ?? "no answer"}), trying again in an hour");
                 if (lightRef.IsEmpty) LightStatus = "Could not read the sensor's history from Home Assistant: trying again in an hour.";
-                RetryLightSoon();
+                RetryLightSoon(young);
             }
-        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(); }
+        } catch (Exception e) { Log.Write("light: " + e.Message); RetryLightSoon(young); }
         finally { lightRefBusy = false; }
     }
 
@@ -469,7 +469,8 @@ sealed partial class Controller {
     }
 
     /// Try the history again in an hour, keeping the reference in use until then.
-    void RetryLightSoon() => lightRefAt = DateTime.UtcNow.AddSeconds(3600 - 86400);
+    void RetryLightSoon(bool young) =>
+        lightRefAt = DateTime.UtcNow.AddSeconds(LightHistoryRule.RetryStamp(0, !lightRef.IsEmpty, young));
 
     /// One step of the light scale toward `goal`, smoothed so a passing cloud does not jump the monitors.
     double StepLight(double goal) {

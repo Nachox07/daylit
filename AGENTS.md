@@ -141,7 +141,7 @@ computer right now, or no token stored yet) and which config entry matched which
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are
   in the panel's gear menu; the panel itself only has the monitor sliders, the link (sync) button
   and *Automatic*. A level set by hand keeps its distance from the
-  automatic one until sunset, and survives a restart (for up to 12 hours). Repeated hand changes in the
+  automatic one until sunset (one set at night: until sunrise; at most 36 hours), and survives a restart (for up to 12 hours). Repeated hand changes in the
   same situation make the panel offer a new level (*Apply* / *Not now*, [docs/setup.md → Suggested
   levels](docs/setup.md#suggested-levels)); the samples stay on that machine in `corrections.json`.
 - "Pause on battery" (laptops only, on by default; config `pauseOnBattery`): no automatic work on

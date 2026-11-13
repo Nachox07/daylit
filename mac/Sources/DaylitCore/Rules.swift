@@ -111,6 +111,9 @@ public struct Step: Equatable {
     public var level: Int?           // new value for the slider
 }
 
+/// The daylight fraction where a night offset has faded out completely.
+public let nightOffsetEdge = 0.3
+
 /// How much of a hand-set offset applies (0…1) for the sun now, or nil once it is over.
 /// One set by day fades out as the sun goes down and has no effect at night; it ends with the day
 /// (offsetExpired), so tomorrow starts clean. One set at night ends as the sun comes up. Either way the
@@ -118,7 +121,7 @@ public struct Step: Equatable {
 /// A daytime one never fades faster than that half hour from when it was set (`age`, seconds): one set
 /// in the last light would otherwise be gone in minutes.
 public func offsetWeight(sun: Double, setAt: Double, age: Double? = nil) -> Double? {
-    let edge = 0.3, fade = 1800.0
+    let edge = nightOffsetEdge, fade = 1800.0
     if setAt > 0 {
         let w = min(1, max(0, sun) / min(edge, setAt))
         guard let a = age, a >= 0, a < fade else { return w }
@@ -128,12 +131,40 @@ public func offsetWeight(sun: Double, setAt: Double, age: Double? = nil) -> Doub
     return 1 - sun / edge
 }
 
-/// An offset from an earlier day, or from a night long over, no longer applies, even when no tick ran
-/// in between (the computer slept). `dayOf` gives the local calendar day of a Unix time.
-public func offsetExpired(_ s: HoldState, now: Double, dayOf: (Double) -> Int) -> Bool {
+/// Whether the next tick is due: `elapsed` seconds since the last one. A negative `elapsed` means the
+/// clock was set back past the last tick, which must not hold ticks off until wall time catches up.
+public func tickDue(elapsed: Double, interval: Double) -> Bool { elapsed < 0 || elapsed >= interval }
+
+/// Whether the light sensor's history is due again: `elapsed` seconds since it was last tried. Hourly while
+/// there is no reference (or only hours of it), daily otherwise; a clock set back counts as due.
+public func lightHistoryDue(elapsed: Double, hasReference: Bool, young: Bool) -> Bool {
+    elapsed < 0 || elapsed >= (hasReference && !young ? 86400 : 3600)
+}
+
+/// The time to store as "last tried" so the history is due again in an hour. With a reference in use the
+/// wait is a day, so the stamp is moved back by the difference; otherwise the wait already is an hour
+/// and the stamp is now (moving it back there made the retry fire on every tick).
+public func lightRetryStamp(now: Double, hasReference: Bool, young: Bool) -> Double {
+    hasReference && !young ? now + 3600 - 86400 : now
+}
+
+/// The longest a hand-set offset can live, whatever the sky does (a polar night or day never ends it).
+public let offsetMaxAge = 36.0 * 3600
+/// A daytime offset that is still older than this when the calendar day changes ends even with the sun up
+/// (a computer that slept through the night wakes into a new day).
+let dayOffsetCarryOver = 12.0 * 3600
+
+/// An offset that no longer applies, even when no tick ran in between (the computer slept).
+/// One set at night ends when daylight next passes the fade edge (offsetWeight), not after a fixed time,
+/// so a long polar night keeps it. One set by day ends with the calendar day once the sun is down; while
+/// the sun is still up (polar day) it carries over midnight for at most 12 hours. Every offset ends after
+/// 36 hours. `dayOf` gives the local calendar day of a Unix time; `sun` is the daylight fraction now.
+public func offsetExpired(_ s: HoldState, now: Double, sun: Double, dayOf: (Double) -> Int) -> Bool {
     guard s.offset != nil, let at = s.offsetAt, now > 0 else { return false }
-    if (s.offsetSun ?? 0) > 0 { return dayOf(now) != dayOf(at) }
-    return now - at > 18 * 3600   // longer than any night
+    let age = now - at
+    if age > offsetMaxAge { return true }
+    if (s.offsetSun ?? 0) > 0 { return dayOf(now) != dayOf(at) && (sun <= 0 || age > dayOffsetCarryOver) }
+    return sun >= nightOffsetEdge
 }
 
 /// Seconds since the hand-set offset was set; nil when unknown.
@@ -177,7 +208,7 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         }
     }
     if !here && !fromRemote { step.state = s; step.skip = true; return step }
-    if offsetExpired(s, now: now, dayOf: dayOf) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
+    if offsetExpired(s, now: now, sun: sun, dayOf: dayOf) { s.offset = nil; s.offsetSun = nil; s.offsetAt = nil }
 
     var applied = c
     if auto && !fromRemote && !dragging {
@@ -383,10 +414,16 @@ public struct SavedHolds: Equatable, Codable {
     public var entries: [String: Entry]
     public init(entries: [String: Entry] = [:]) { self.entries = entries }
 
-    /// Records a monitor's state; one with nothing to remember is removed.
-    public mutating func record(key: String, state: HoldState, now: Double) {
-        if state.lastSet == nil && state.lastTarget == nil { entries[key] = nil; return }
+    /// Records a monitor's state; one with nothing to remember is removed. A state equal to the stored one
+    /// (offset, when it was set and in which sun included) is not stored again, so the time means "last
+    /// decided", not "last tick". Returns whether anything changed.
+    @discardableResult
+    public mutating func record(key: String, state: HoldState, now: Double) -> Bool {
+        if state.lastSet == nil && state.lastTarget == nil { return entries.removeValue(forKey: key) != nil }
+        if let e = entries[key], e.lastSet == state.lastSet, e.lastTarget == state.lastTarget, e.offset == state.offset,
+           e.offsetSun == state.offsetSun, e.offsetAt == state.offsetAt { return false }
         entries[key] = Entry(lastSet: state.lastSet, lastTarget: state.lastTarget, offset: state.offset, offsetSun: state.offsetSun, offsetAt: state.offsetAt, saved: now)
+        return true
     }
     /// The state to start a monitor with after a restart, or nil when there is none or it is too old.
     public func restore(key: String, now: Double, maxAge: Double = Self.maxAge) -> HoldState? {

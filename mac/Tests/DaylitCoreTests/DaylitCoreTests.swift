@@ -240,13 +240,41 @@ final class DecideTests: XCTestCase {
         let h = SavedHolds(entries: ["m": .init(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, saved: 1000)])
         XCTAssertEqual(h.restore(key: "m", now: 2000)?.offsetAt, 1000)
     }
-    func testANightDistanceEndsAfterALongSleep() {
+    func testANightDistanceLastsAsLongAsItStaysDark() {
         let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
-        XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
-                               now: at(101, 6), dayOf: utcDay).state.offset)     // the same night, past midnight
-        XCTAssertNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
-                            now: at(101, 20), dayOf: utcDay).state.offset)       // the next evening
+        for (day, hour) in [(101, 6.0), (101, 20.0)] {   // a polar night: still dark the next evening
+            XCTAssertNotNil(decide(current: 30, want: 50, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 0,
+                                   now: at(day, hour), dayOf: utcDay).state.offset)
+        }
     }
+    func testANightDistanceEndsWhenDaylightPassesTheFadeEdgeEvenAfterASleep() {
+        let st = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 23))
+        XCTAssertFalse(offsetExpired(st, now: at(101, 5), sun: 0.29, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(st, now: at(101, 5), sun: 0.3, dayOf: utcDay))
+    }
+    func testEveryDistanceEndsAfterThirtySixHours() {
+        let night = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 0, offsetAt: at(100, 0))
+        XCTAssertFalse(offsetExpired(night, now: at(100, 0) + offsetMaxAge, sun: 0, dayOf: utcDay))
+        XCTAssertTrue(offsetExpired(night, now: at(100, 0) + offsetMaxAge + 1, sun: 0, dayOf: utcDay))
+        let day = HoldState(lastSet: 30, lastTarget: 50, offset: -20, offsetSun: 1, offsetAt: at(100, 12))
+        XCTAssertTrue(offsetExpired(day, now: at(100, 12) + offsetMaxAge + 1, sun: 1, dayOf: { _ in 7 }))
+    }
+    func testADaytimeDistanceCarriesPastMidnightWhileTheSunIsStillUp() {
+        let st = HoldState(lastSet: 50, lastTarget: 70, offset: -20, offsetSun: 0.8, offsetAt: at(100, 20))
+        XCTAssertFalse(offsetExpired(st, now: at(101, 1), sun: 0.1, dayOf: utcDay))   // polar day, new calendar day
+        XCTAssertTrue(offsetExpired(st, now: at(101, 1), sun: 0, dayOf: utcDay))      // a normal midnight
+        XCTAssertFalse(offsetExpired(st, now: at(100, 23), sun: 0, dayOf: utcDay))    // same day: the fade handles it
+    }
+    func testASavedHoldIsRewrittenWhenOnlyTheOffsetTimeChanges() {
+        var saved = SavedHolds()
+        let a = HoldState(lastSet: 40, lastTarget: 70, offset: -30, offsetSun: 1, offsetAt: 900)
+        XCTAssertTrue(saved.record(key: "A", state: a, now: 1000))
+        XCTAssertFalse(saved.record(key: "A", state: a, now: 1100))                   // nothing changed
+        var again = a; again.offsetAt = 1050; again.offsetSun = 0.5                    // same offset, held again
+        XCTAssertTrue(saved.record(key: "A", state: again, now: 1100))
+        XCTAssertEqual(saved.restore(key: "A", now: 1200), again)
+    }
+
     func testALevelSetInTheLastLightFadesOverHalfAnHour() {
         // Replays an evening: the user turned the screen 30 up with little light left.
         var st = HoldState(lastSet: 55, lastTarget: 55)
@@ -935,5 +963,65 @@ final class TuningTests: XCTestCase {
         XCTAssertNotNil(try check(#"{"tuning":{"theme":{"lightSunAbove":0,"darkSunBelow":2}}}"#))
         XCTAssertNotNil(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#))
         XCTAssertEqual(try check(#"{"tuning":{"timing":{"pollSeconds":1}}}"#), "config.json: tuning.timing.pollSeconds must be 5–3600")
+    }
+}
+
+final class AuditLogicTests: XCTestCase {
+    func testTheLongestMatchingEntryWinsAndTheOrderDoesNotMatter() {
+        let name = "Dell AW3821DW"
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["Dell", "AW3821DW"]), 1)
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["AW3821DW", "Dell"]), 0)
+        XCTAssertEqual(MonitorMatch.best(name: name, matches: ["Dell", "Dell"]), 0)    // equal: the first
+    }
+    func testAMatchIsTrimmedCaseInsensitiveAndNeverEmpty() {
+        XCTAssertEqual(MonitorMatch.best(name: "Dell AW3821DW", matches: ["  aw3821dw "]), 0)
+        XCTAssertNil(MonitorMatch.best(name: "Dell AW3821DW", matches: ["", "   "]))
+        XCTAssertNil(MonitorMatch.best(name: "Dell AW3821DW", matches: ["LG"]))
+        XCTAssertEqual(MonitorMatch.best(name: "Dell AW3821DW", matches: ["   ", "Dell "]), 1)
+    }
+    func testTheConfigFindsTheEntryByTheLongestMatch() throws {
+        let c = try JSONDecoder().decode(Config.self, from: Data(#"{"monitors":[{"match":"Dell","day":10},{"match":"AW3821DW","day":90}]}"#.utf8))
+        XCTAssertEqual(c.monitor(for: "Dell AW3821DW")?.day, 90)
+        XCTAssertEqual(c.monitor(for: "Dell U2723QE")?.day, 10)
+        XCTAssertNil(c.monitor(for: "LG"))
+    }
+    func testSavingChoosesTheLongestMatchingEntry() throws {
+        let original = #"{ "monitors": [ { "match": "Dell", "day": 10 }, { "match": "AW3821DW", "day": 20 } ] }"#
+        let e = SettingsEdit(source: "off", monitors: [.init(name: "Dell AW3821DW", suggestedMatch: "AW3821DW", label: "", day: 77, blindDown: 40, night: 20)])
+        let out = try JSONSerialization.jsonObject(with: ConfigPatch.apply(e, to: Data(original.utf8))) as! [String: Any]
+        let list = out["monitors"] as! [[String: Any]]
+        XCTAssertEqual(list[0]["day"] as? Int, 10)
+        XCTAssertEqual(list[1]["day"] as? Int, 77)
+        let applied = try JSONSerialization.jsonObject(with: ConfigPatch.setLevels(["day": 55], display: "Dell AW3821DW", suggestedMatch: "AW3821DW", in: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((applied["monitors"] as! [[String: Any]])[1]["day"] as? Int, 55)
+    }
+    func testANullMonitorsListIsAsAbsentForSaveAndApply() throws {
+        let original = #"{ "source": "off", "monitors": null }"#
+        let e = SettingsEdit(source: "off", monitors: [.init(name: "DELL U2723QE", suggestedMatch: "U2723QE", label: "", day: 80, blindDown: 45, night: 15)])
+        let saved = try JSONSerialization.jsonObject(with: ConfigPatch.apply(e, to: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((saved["monitors"] as! [[String: Any]]).count, 1)
+        let applied = try JSONSerialization.jsonObject(with: ConfigPatch.setLevels(["day": 55], display: "DELL U2723QE", suggestedMatch: "U2723QE", in: Data(original.utf8))) as! [String: Any]
+        XCTAssertEqual((applied["monitors"] as! [[String: Any]])[0]["day"] as? Int, 55)
+        XCTAssertThrowsError(try ConfigPatch.apply(e, to: Data(#"{"monitors": 5}"#.utf8)))   // a wrong type still stops
+    }
+    func testAClockSetBackDoesNotHoldTicksOff() {
+        XCTAssertFalse(tickDue(elapsed: 10, interval: 30))
+        XCTAssertTrue(tickDue(elapsed: 30, interval: 30))
+        XCTAssertTrue(tickDue(elapsed: -3600, interval: 30))   // lastTick is in the future
+    }
+    func testTheLightHistoryWaitsAnHourWithoutAReferenceAndADayWithOne() {
+        XCTAssertFalse(lightHistoryDue(elapsed: 3599, hasReference: false, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: 3600, hasReference: false, young: false))
+        XCTAssertFalse(lightHistoryDue(elapsed: 3599, hasReference: true, young: true))
+        XCTAssertFalse(lightHistoryDue(elapsed: 3600, hasReference: true, young: false))
+        XCTAssertTrue(lightHistoryDue(elapsed: 86400, hasReference: true, young: false))
+    }
+    func testARetryStampMakesTheHistoryDueInAnHourNotOnTheNextTick() {
+        let now = 1_000_000.0
+        for (has, young) in [(false, false), (true, true), (true, false), (false, true)] {
+            let stamp = lightRetryStamp(now: now, hasReference: has, young: young)
+            XCTAssertFalse(lightHistoryDue(elapsed: now + 30 - stamp, hasReference: has, young: young), "30 s later, \(has) \(young)")
+            XCTAssertTrue(lightHistoryDue(elapsed: now + 3600 - stamp, hasReference: has, young: young), "an hour later, \(has) \(young)")
+        }
     }
 }

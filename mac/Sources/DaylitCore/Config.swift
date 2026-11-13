@@ -178,7 +178,28 @@ public struct Config: Decodable {
 
 public enum Source { case off, sun, homeAssistant }
 
+/// Which config entry a connected display belongs to: the longest `match` (trimmed, case-insensitive,
+/// contained in the display's name) wins, so a "Dell" entry does not take the "Dell AW3821DW" that has its
+/// own entry. An empty match never matches; on equal length the first entry wins.
+public enum MonitorMatch {
+    public static func best(name: String, matches: [String]) -> Int? {
+        var best: (index: Int, length: Int)?
+        for (i, m) in matches.enumerated() {
+            let t = m.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, name.localizedCaseInsensitiveContains(t), t.count > (best?.length ?? 0) else { continue }
+            best = (i, t.count)
+        }
+        return best?.index
+    }
+}
+
 extension Config {
+    /// The entry for a connected display (see MonitorMatch).
+    public func monitor(for name: String) -> MonitorConfig? {
+        guard let list = monitors, let i = MonitorMatch.best(name: name, matches: list.map(\.match)) else { return nil }
+        return list[i]
+    }
+
     /// The source to use, plus a problem to show when the config asks for something it cannot do.
     public func resolvedSource() -> (Source, String?) {
         let hasHA = !(homeAssistant?.url ?? "").isEmpty

@@ -187,6 +187,21 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
     public string Light { get; init; } = "";
 }
 
+/// Which config entry a connected monitor belongs to: the longest `Match` (trimmed, case-insensitive, contained
+/// in the monitor's name) wins, so a "Dell" entry does not take the "Dell AW3821DW" that has its own entry.
+/// An empty match never matches; on equal length the first entry wins. Same rule as mac/ (DaylitCore/Config.swift).
+static class MonitorMatch {
+    public static int? Best(string name, IEnumerable<string?> matches) {
+        int? best = null; int length = 0, i = 0;
+        foreach (var m in matches) {
+            var t = m?.Trim();
+            if (!string.IsNullOrEmpty(t) && name.Contains(t, StringComparison.OrdinalIgnoreCase) && t.Length > length) { best = i; length = t.Length; }
+            i++;
+        }
+        return best;
+    }
+}
+
 static class ConfigPatch {
     static readonly JsonDocumentOptions Read = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
@@ -234,9 +249,7 @@ static class ConfigPatch {
         root.Remove("monitors");
         var claimed = new HashSet<JsonObject>();   // an entry matching two connected monitors takes the first one's levels only
         foreach (var m in e.Monitors) {
-            var entry = list.OfType<JsonObject>().FirstOrDefault(o =>
-                o["match"]?.GetValueKind() == JsonValueKind.String && o["match"]!.GetValue<string>().Trim() is { Length: > 0 } match &&
-                m.Name.Contains(match, StringComparison.OrdinalIgnoreCase));
+            var entry = BestEntry(list, m.Name);
             if (entry != null && !claimed.Add(entry)) continue;
             if (entry == null) { entry = new JsonObject { ["match"] = m.SuggestedMatch }; list.Add(entry); claimed.Add(entry); }
             var label = m.Label.Trim();
@@ -278,6 +291,12 @@ static class ConfigPatch {
         return text;
     }
 
+    /// The entry of `monitors` for a connected monitor's name (see MonitorMatch).
+    static JsonObject? BestEntry(JsonArray list, string name) {
+        var entries = list.OfType<JsonObject>().ToList();
+        return MonitorMatch.Best(name, entries.Select(o => o["match"]?.GetValueKind() == JsonValueKind.String ? o["match"]!.GetValue<string>() : null)) is int i ? entries[i] : null;
+    }
+
     /// The file with some of one monitor's local levels changed (keys "day", "blindDown", "night"; whole numbers,
     /// clamped to 0–100) and everything else kept, as a suggestion's Apply needs. The entry is found as Apply finds
     /// it (its match is part of `display`, the monitor's name); without one, an entry with `suggestedMatch` is added.
@@ -289,9 +308,7 @@ static class ConfigPatch {
             throw new InvalidDataException("monitors must be a list of objects; fix it with Open config file");
         var list = root["monitors"] as JsonArray ?? new JsonArray();
         root.Remove("monitors");
-        var entry = list.OfType<JsonObject>().FirstOrDefault(o =>
-            o["match"]?.GetValueKind() == JsonValueKind.String && o["match"]!.GetValue<string>().Trim() is { Length: > 0 } match &&
-            display.Contains(match, StringComparison.OrdinalIgnoreCase));
+        var entry = BestEntry(list, display);
         if (entry == null) { entry = new JsonObject { ["match"] = suggestedMatch }; list.Add(entry); }
         foreach (var (k, v) in levels)
             if (k is "day" or "blindDown" or "night") entry[k] = Math.Clamp(v, 0, 100);

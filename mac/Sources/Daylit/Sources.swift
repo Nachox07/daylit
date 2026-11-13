@@ -28,7 +28,9 @@ enum HAClient {
         return p.terminationStatus == 0
     }
 
-    enum Failure: Error { case noToken, rejected, unreachable, badAnswer }
+    /// `.unreachable` is the only transient one (a connection that fails); `.http` is an answer Home Assistant
+    /// gave (403, 404, 5xx...), which will not fix itself in a minute, so it shows at once.
+    enum Failure: Error, Equatable { case noToken, rejected, unreachable, http(Int), badAnswer }
     /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
     nonisolated(unsafe) static var lastCause: String?
 
@@ -55,7 +57,7 @@ enum HAClient {
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { tokenCache[name] = nil; lastCause = "HTTP 401"; return .failure(.rejected) }
-        if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.unreachable) }
+        if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.http(code)) }
         lastCause = nil
         return .success(d)
     }
@@ -96,6 +98,7 @@ enum HAClient {
         case .noToken: return "No Home Assistant token in the keychain (\"\(ha.tokenName ?? "daylit-home-assistant")\", gear menu → Home Assistant Token…)"
         case .rejected: return "Home Assistant rejected the token"
         case .unreachable: return "Cannot reach Home Assistant"
+        case .http(let code): return "Home Assistant answered \(code)"
         case .badAnswer: return "Unexpected answer from Home Assistant (check the entity ids)"
         }
     }
