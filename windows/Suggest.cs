@@ -6,18 +6,22 @@ using System.Text.Json;
 
 namespace Daylit;
 
-/// The three levels of a monitor, in the order Rules.Target and the config use them.
-enum Level { Day = 0, BlindDown = 1, Night = 2 }
+/// The levels of a monitor, in the order Rules.Target and the config use them: day, blind down, night and the
+/// optional lights-on night level (nightLights).
+enum Level { Day = 0, BlindDown = 1, Night = 2, NightLights = 3 }
 
 static class LevelText {
-    public static readonly Level[] All = [Level.Day, Level.BlindDown, Level.Night];
+    public static readonly Level[] All = [Level.Day, Level.BlindDown, Level.Night, Level.NightLights];
     /// As the panel says it.
-    public static string Name(this Level l) => l switch { Level.Day => "day", Level.BlindDown => "blind down", _ => "night" };
-    /// The config key: monitors[].day / blindDown / night.
-    public static string Key(this Level l) => l switch { Level.Day => "day", Level.BlindDown => "blindDown", _ => "night" };
+    public static string Name(this Level l) => l switch {
+        Level.Day => "day", Level.BlindDown => "blind down", Level.Night => "night", _ => "lights on" };
+    /// The config key: monitors[].day / blindDown / night / nightLights.
+    public static string Key(this Level l) => l switch {
+        Level.Day => "day", Level.BlindDown => "blindDown", Level.Night => "night", _ => "nightLights" };
     /// When this level is the one that counts most.
     public static string Situation(this Level l) => l switch {
-        Level.Day => "with the blind open", Level.BlindDown => "with the blind partly or fully down", _ => "in the evening" };
+        Level.Day => "with the blind open", Level.BlindDown => "with the blind partly or fully down",
+        Level.Night => "when the room is dim", _ => "with the lights on" };
 }
 
 /// One deliberate correction by hand. Monitor: the monitor's key (the same key the hold state uses); Chosen: the
@@ -32,21 +36,41 @@ sealed record Sample(string Monitor, int Chosen, int Auto, double S, double P, d
 }
 
 static partial class Suggest {
-    /// A level "carries most of the weight" in a sample from this weight (0.55, so a blind exactly 40% open still counts).
+    /// Day or blind down "carries most of the weight" in a sample from this weight (0.55, so a blind exactly 40% open still counts).
     public const double Dominant = 0.55;
+    /// Night or the lights-on level carries most of the weight when its weight is the largest of the four and at
+    /// least this much (with the lights on at dusk the two share what daylight leaves, so neither reaches 0.55).
+    public const double DimDominant = 0.45;
     /// A level is a candidate only with dominant samples on this many local days.
     public const int MinDays = 3;
 
     /// How much each level counts in the target for a sample: [day, blindDown, night], summing to 1.
     public static double[] Weights(double s, double p) => [s * p, s * (1 - p), 1 - s];
 
-    /// Whether `level` carries most of the weight in this sample.
-    public static bool Dominates(Sample x, Level level) => Weights(x.S, x.P)[(int)level] >= Dominant - 1e-9;
+    /// How much each level counts in the target for a sample: [day, blindDown, night, nightLights], summing to 1.
+    /// With a nightLights level and the lights on, what daylight leaves is split between night (sun high) and
+    /// nightLights (sun down): [s·p, s·(1−p), (1−s)·sun, (1−s)·(1−sun)], sun the elevation's own daylight
+    /// fraction (no cloud cap). Otherwise [s·p, s·(1−p), 1−s, 0].
+    public static double[] Weights(Sample x, bool nightLights, Tuning? t = null) {
+        var w = Weights(x.S, x.P);
+        if (!nightLights || !x.Lights) return [w[0], w[1], w[2], 0];
+        double sun = (t ?? new Tuning()).Fraction(x.Elev);
+        return [w[0], w[1], w[2] * sun, w[2] * (1 - sun)];
+    }
+
+    /// Whether `level` carries most of the weight in this sample (with the levels the sample was taken with).
+    public static bool Dominates(Sample x, Level level, Tuning? t = null) {
+        var w = Weights(x, Rules.NightLightsLevel(x.Levels) != null, t);
+        double v = w[(int)level];
+        if (level is Level.Day or Level.BlindDown) return v >= Dominant - 1e-9;
+        // A tie for the largest weight counts for neither.
+        return v >= DimDominant - 1e-9 && Enumerable.Range(0, w.Length).All(k => k == (int)level || v > w[k] + 1e-9);
+    }
 
     /// The levels the samples can tell apart: dominant samples on at least MinDays different local days.
-    public static List<Level> Candidates(IReadOnlyList<Sample> samples, Func<double, int>? dayOf = null) {
+    public static List<Level> Candidates(IReadOnlyList<Sample> samples, Func<double, int>? dayOf = null, Tuning? t = null) {
         Func<double, int> day = dayOf ?? Rules.LocalDay;
-        return LevelText.All.Where(l => samples.Where(x => Dominates(x, l)).Select(x => day(x.At)).Distinct().Count() >= MinDays).ToList();
+        return LevelText.All.Where(l => samples.Where(x => Dominates(x, l, t)).Select(x => day(x.At)).Distinct().Count() >= MinDays).ToList();
     }
 }
 
@@ -54,17 +78,20 @@ static partial class Suggest {
     /// Least squares for the candidate levels, the others held at their current values, with a pull of
     /// weight 1 toward the current value (as one extra sample at the current level):
     ///     minimise Σ (chosen − x·L)² + Σ_candidates (L_k − current_k)²
-    /// Returns all three levels, each fitted one clamped to 0–100 (not rounded: see RoundToStep).
-    public static double[] Fit(IReadOnlyList<Sample> samples, double[] levels, IReadOnlyList<Level> candidates) {
-        int[] c = candidates.Select(l => (int)l).ToArray();
+    /// The weights come from `levels` (four with nightLights), not from the levels each sample was taken with.
+    /// Returns all the levels, each fitted one clamped to 0–100 (not rounded: see RoundToStep).
+    public static double[] Fit(IReadOnlyList<Sample> samples, double[] levels, IReadOnlyList<Level> candidates, Tuning? t = null) {
+        bool hasNl = Rules.NightLightsLevel(levels) != null;
+        // nightLights can only be fitted on a monitor that has one.
+        int[] c = candidates.Select(l => (int)l).Where(k => k < 3 || hasNl).ToArray();
         int n = c.Length;
-        if (n == 0 || levels.Length < 3) return (double[])levels.Clone();   // a fourth level (nightLights) is kept as it is
+        if (n == 0 || levels.Length is < 3 or > 4) return (double[])levels.Clone();
         var a = new double[n, n];
         var b = new double[n];
         foreach (var x in samples) {
-            var w = Weights(x.S, x.P);
+            var w = Weights(x, hasNl, t);
             double y = x.Chosen;
-            for (int k = 0; k < 3; k++) if (!c.Contains(k)) y -= w[k] * levels[k];
+            for (int k = 0; k < levels.Length; k++) if (!c.Contains(k)) y -= w[k] * levels[k];
             for (int i = 0; i < n; i++) {
                 b[i] += w[c[i]] * y;
                 for (int j = 0; j < n; j++) a[i, j] += w[c[i]] * w[c[j]];
@@ -137,8 +164,9 @@ static partial class Suggest {
     }
 }
 
-/// One level to change: from its current value to the proposed one.
-readonly record struct LevelChange(Level Level, double From, double To);
+/// One level to change: from its current value to the proposed one. Added: the monitor has no such level yet
+/// (only nightLights): Apply adds it at To, and From is the same value (what the lights give now).
+readonly record struct LevelChange(Level Level, double From, double To, bool Added = false);
 
 /// What the panel offers for one monitor. Monitor: its key; Changes: the main level (the one that moves most)
 /// first; Amount: how far the user moves it, the mean of chosen − auto where the main level dominates, rounded,
@@ -150,8 +178,9 @@ sealed record Suggestion(string Monitor, IReadOnlyList<LevelChange> Changes, int
     public override int GetHashCode() => HashCode.Combine(Monitor, Amount, Lower, Samples, Days);
 
     public Level Main => Changes[0].Level;
-    /// "blind down 78 → 62, day 100 → 95"
-    public string ChangeText => string.Join(", ", Changes.Select(ch => $"{ch.Level.Name()} {Fmt(ch.From)} → {Fmt(ch.To)}"));
+    /// "blind down 78 → 62, day 100 → 95"; an added level reads "lights on 80 (new)".
+    public string ChangeText => string.Join(", ", Changes.Select(ch =>
+        ch.Added ? $"{ch.Level.Name()} {Fmt(ch.To)} (new)" : $"{ch.Level.Name()} {Fmt(ch.From)} → {Fmt(ch.To)}"));
     /// The panel line: "You lower Monitor by about 12 with the blind partly or fully down. Set blind down 78 → 62?"
     public string Sentence(string label) => $"You {(Lower ? "lower" : "raise")} {label} by about {Amount} {Main.Situation()}. Set {ChangeText}?";
     /// "suggest: Monitor blind down 78 → 62 (12 changes on 4 days)"
@@ -188,30 +217,37 @@ static partial class Suggest {
 
     /// The change to offer for one monitor, or null.
     /// all: every recorded sample (other monitors' and stale ones are ignored here); levels: the monitor's
-    /// [day, blindDown, night] now; steps: per level, what it can be stored as, null = it comes from Home
-    /// Assistant and is unavailable now; dismissedUntil: "Not now" was clicked, nothing until this time.
+    /// [day, blindDown, night] now, plus nightLights when it has one; steps: per level [day, blindDown, night,
+    /// nightLights], what it can be stored as, null = it comes from Home Assistant and is unavailable now (for a
+    /// monitor without nightLights, a fourth step means one may be added: the room lights come from Home Assistant;
+    /// three steps = never); dismissedUntil: "Not now" was clicked, nothing until this time.
     public static Suggestion? SuggestionFor(string monitor, IReadOnlyList<Sample> all, double[] levels, NumberStep?[] steps, double now,
                                             double? dismissedUntil, Tuning? t = null, Func<double, int>? dayOf = null) {
         if (dismissedUntil is double d && now < d) return null;
-        if (levels.Length is < 3 or > 4 || steps.Length != 3) return null;
+        if (levels.Length is < 3 or > 4 || steps.Length is < 3 or > 4) return null;
         t ??= new Tuning();
         Func<double, int> day = dayOf ?? Rules.LocalDay;
         var mine = DropOld(all, now).Where(x => x.Monitor == monitor && SameLevels(x.Levels, levels)).ToList();
-        var cand = Candidates(mine, day).Where(l => steps[(int)l] != null).ToList();
+        var cand = Candidates(mine, day, t).Where(l => (int)l < steps.Length && steps[(int)l] != null).ToList();
         if (cand.Count == 0) return null;
-        var fitted = Fit(mine, levels, cand);
-        var proposed = (double[])levels.Clone();
-        var changes = new List<LevelChange>();
-        foreach (var l in cand) {
-            if (RoundToStep(fitted[(int)l], steps[(int)l]!.Value) is not double v) continue;
-            if (Math.Abs(v - levels[(int)l]) >= MinMove - 1e-9) {
-                proposed[(int)l] = v;
-                changes.Add(new LevelChange(l, levels[(int)l], v));
+        var (baseLevels, baseChanges) = Proposal(mine, levels, cand, steps, t);
+        (double[] Levels, List<LevelChange> Changes)? picked = null;
+        // Lowering night on a monitor without nightLights would lower its lit evenings too (the boost sits on top of
+        // night). Offer the pair instead: add nightLights where the lights put it today (night + the boost) and
+        // lower night, refitted and scored with the four-level rule. A lit evening stays where it is.
+        if (Rules.NightLightsLevel(levels) == null && levels.Length == 3 && steps.Length == 4 && steps[3] is { } nlStep
+            && baseChanges.Any(ch => ch.Level == Level.Night && ch.To < ch.From)
+            && RoundToStep(levels[2] + t.LightsBoost, nlStep) is double start) {
+            double[] four = [.. levels, start];
+            var pair = Proposal(mine, four, cand.Where(l => l != Level.NightLights).ToList(), steps, t);
+            if (pair.Changes.Any(ch => ch.Level == Level.Night && ch.To < ch.From)) {
+                pair.Changes.Add(new LevelChange(Level.NightLights, start, start, true));
+                if (Gain(mine, levels, pair.Levels, t) >= MinGain - 1e-9) picked = pair;
             }
         }
-        if (changes.Count == 0) return null;
-        double gain = MeanAbsError(mine, levels, t) - MeanAbsError(mine, proposed, t);
-        if (gain < MinGain - 1e-9) return null;
+        if (picked == null && baseChanges.Count > 0 && Gain(mine, levels, baseLevels, t) >= MinGain - 1e-9) picked = (baseLevels, baseChanges);
+        if (picked is not { } chosen) return null;
+        var changes = chosen.Changes;
         var main = changes[0];   // the one that moves most; the first of them on a tie
         foreach (var ch in changes) if (Math.Abs(ch.To - ch.From) > Math.Abs(main.To - main.From)) main = ch;
         var mainLevel = main.Level;
@@ -219,12 +255,33 @@ static partial class Suggest {
         ordered.AddRange(changes.Where(ch => ch.Level != mainLevel));
         // The sentence follows the change: only the samples that pull the same way as the proposal count for the amount.
         bool lower = main.To < main.From;
-        var agree = mine.Where(x => Dominates(x, mainLevel) && (lower ? x.Chosen < x.Auto : x.Chosen > x.Auto)).ToList();
+        var agree = mine.Where(x => Dominates(x, mainLevel, t) && (lower ? x.Chosen < x.Auto : x.Chosen > x.Auto)).ToList();
         if (agree.Count == 0) return null;
         double mean = agree.Sum(x => (double)Math.Abs(x.Chosen - x.Auto)) / agree.Count;
         return new Suggestion(monitor, ordered, (int)Math.Round(mean, MidpointRounding.AwayFromZero), lower,
                               mine.Count, mine.Select(x => day(x.At)).Distinct().Count());
     }
+
+    /// The fitted candidates rounded to their steps, keeping those that move at least MinMove: the levels they give
+    /// (`levels` with those replaced) and the changes, in candidate order.
+    static (double[] Levels, List<LevelChange> Changes) Proposal(IReadOnlyList<Sample> samples, double[] levels, IReadOnlyList<Level> candidates,
+                                                                 NumberStep?[] steps, Tuning t) {
+        var fitted = Fit(samples, levels, candidates, t);
+        var proposed = (double[])levels.Clone();
+        var changes = new List<LevelChange>();
+        foreach (var l in candidates) {
+            if ((int)l >= levels.Length || steps[(int)l] is not { } st || RoundToStep(fitted[(int)l], st) is not double v) continue;
+            if (Math.Abs(v - levels[(int)l]) >= MinMove - 1e-9) {
+                proposed[(int)l] = v;
+                changes.Add(new LevelChange(l, levels[(int)l], v));
+            }
+        }
+        return (proposed, changes);
+    }
+
+    /// How much the mean absolute error falls from `from` to `to` (each scored with its own rule: three or four levels).
+    static double Gain(IReadOnlyList<Sample> samples, double[] from, double[] to, Tuning t) =>
+        MeanAbsError(samples, from, t) - MeanAbsError(samples, to, t);
 }
 
 /// Why a tick's hand change is not a sample (each of these hides what the user really wanted).
@@ -274,14 +331,12 @@ static partial class Suggest {
 
     /// The sample for a tick where Decide recorded a new hand-set level, or null when it may not be recorded:
     /// see SampleContext, the lights boost deciding the target, or chosen / auto at 0 or 100 (the clamp hides
-    /// the true wish). pos is the blind position 0–100 (100 without a blind), light the cloud cap (1 without a sensor).
+    /// the true wish). A monitor with nightLights records its lit evenings too: the four-level weights explain them. pos is the blind position 0–100 (100 without a blind), light the cloud cap (1 without a sensor).
     public static Sample? MakeSample(string monitor, int chosen, int auto, double elev, double pos, bool lights, double light,
                                      double[] levels, Tuning t, double now, SampleContext context) {
         if (context.Follower || context.WriteFailed || context.Idle || context.Paused || context.SunFallback) return null;
         if (levels.Length is < 3 or > 4 || !levels.All(double.IsFinite) || !double.IsFinite(elev) || !double.IsFinite(pos) || !double.IsFinite(light) ||
             chosen < 1 || chosen > 99 || auto < 1 || auto > 99) return null;
-        // With nightLights, lights on and the sun not fully up, the four-level rule decides: the three-level fit would be wrong.
-        if (Rules.NightLightsLevel(levels) != null && lights && t.Fraction(elev) < 1) return null;
         if (BoostDecides(levels, elev, pos, lights, t, light)) return null;
         return new Sample(monitor, chosen, auto, Math.Min(t.Fraction(elev), light), Math.Clamp(pos, 0, 100) / 100, elev, lights, levels, now);
     }

@@ -40,19 +40,16 @@ extension Daylit {
     /// The monitor's input_number for a level, when the source is Home Assistant and one is configured.
     func haEntity(_ l: Level, of m: Mon) -> String? {
         guard source == .homeAssistant, let h = m.ha else { return nil }
-        return [h.day, h.blindDown, h.night][l.rawValue].flatMap { Config.isEntityId($0) ? $0 : nil }
+        return [h.day, h.blindDown, h.night, h.nightLights][l.rawValue].flatMap { Config.isEntityId($0) ? $0 : nil }
     }
 
     /// Whether some of the monitor's levels should come from Home Assistant but are not available this tick:
     /// Home Assistant is down (the sun stands in), or a configured helper reads below 0. Samples recorded
     /// with Home Assistant's levels must not be judged stale against local ones then.
     func haLevelsUnavailable(of m: Mon, _ inp: Inputs) -> Bool {
+        // The nightLights helper is part of the levels snapshot too (row index 3).
         for l in Level.allCases where haEntity(l, of: m) != nil {
             guard inp.fromHA, let row = inp.levels[m.uuid], row.count > l.rawValue, row[l.rawValue] >= 0 else { return true }
-        }
-        // The nightLights helper is part of the levels snapshot too (row index 3).
-        if source == .homeAssistant, let e = m.ha?.nightLights, Config.isEntityId(e) {
-            guard inp.fromHA, let row = inp.levels[m.uuid], row.count > 3, row[3] >= 0 else { return true }
         }
         return false
     }
@@ -101,10 +98,15 @@ extension Daylit {
             guard let lv = current[m.uuid] else { continue }
             // Steps are only needed for the levels the samples can tell apart (the others are never proposed).
             let mine = Suggest.dropOld(kept, now: now).filter { $0.monitor == m.uuid && Suggest.sameLevels($0.levels, lv) }
-            let cand = Suggest.candidates(mine)
+            let cand = Suggest.candidates(mine, tuning: config.tuned)
+            // A monitor without nightLights may be offered one beside a lower night, but only when the room lights
+            // come from Home Assistant: without them the level would never be used.
+            let canAddNightLights = nightLightsLevel(lv) == nil && source == .homeAssistant
+                && (config.homeAssistant?.lights).map(Config.isEntityId) == true && cand.contains(.night)
             var steps: [NumberStep?] = []
             for l in Level.allCases {
-                if !cand.contains(l) { steps.append(.whole); continue }
+                if l == .nightLights && nightLightsLevel(lv) == nil && !canAddNightLights { steps.append(nil); continue }
+                if !cand.contains(l) && !(l == .nightLights && canAddNightLights) { steps.append(.whole); continue }
                 let r = await step(for: l, of: m, inp)
                 if r.retry { suggestDirty = true }   // Home Assistant did not answer: work it out again next tick
                 steps.append(r.step)
