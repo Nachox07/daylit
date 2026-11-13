@@ -108,7 +108,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          cat > notes.md <<'NOTES'
+          # What changed: the merged pull requests since the previous release, grouped by
+          # .github/release.yml. Then the install steps, the same for every release.
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -q .body > notes.md
+          cat >> notes.md <<'NOTES'
+
           ## Install
 
           **macOS 14+** (Apple silicon and Intel): unzip `Daylit-mac-*.zip` and move `Daylit.app` to
