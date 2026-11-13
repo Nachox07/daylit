@@ -30,6 +30,8 @@ sealed class SettingsWindow : Window {
     readonly Button locate = new() { Content = "Locate me" };
     readonly TextBox haUrl = new(), cover = new(), lights = new(), autoSwitch = new(), sun = new(), daylightSensor = new();
     readonly TextBlock lightStatus = Hint("");
+    readonly CheckBox pushBox = new() { Content = "Instant updates", Margin = new Thickness(0, 2, 0, 2) };
+    bool? pushLoaded;   // what the file said, so an explicit false stays false
     readonly Button test = new() { Content = "Test connection" };
     readonly TextBlock tokenState = Hint("");
     string tokenName = "daylit-home-assistant";
@@ -84,6 +86,7 @@ sealed class SettingsWindow : Window {
             Card("Room", Field("Blind", cover, "cover.office_blind"), Field("Lights", lights, "light.office"),
                  Field("Automatic switch", autoSwitch, "input_boolean.daylit_auto"), Field("Sun", sun, "sun.sun"),
                  Hint("All optional. Entity ids as shown in Home Assistant → Settings → Entities. Per-monitor helpers stay in the config file.")),
+            Card("Updates", pushBox, Hint("Home Assistant tells Daylit when the blind, lights or a level changes, so the screen follows in about a second. Experimental.")),
             Card("Clouds", Field("Daylight sensor", daylightSensor, "sensor.solar_power"), lightStatus,
                  Hint("Optional. Solar panel power, or an outdoor light sensor: on a cloudy day the monitors stay dimmer. Daylit learns what a clear sky reads from the sensor's last 10 days in Home Assistant. Needs a location.")));
         // The sensor's state, live from the app while the window is open.
@@ -446,6 +449,7 @@ sealed class SettingsWindow : Window {
         var h = c.HomeAssistant;
         ShowTokenState(c.TokenName);
         haUrl.Text = h?.Url ?? ""; cover.Text = h?.Cover ?? ""; lights.Text = h?.Lights ?? ""; autoSwitch.Text = h?.AutoSwitch ?? ""; sun.Text = h?.Sun ?? ""; daylightSensor.Text = h?.Light ?? "";
+        pushLoaded = h?.Push; pushBox.IsChecked = h?.Push == true;
         var set = TuningField.SetValues(c.Tuning);
         loadedTune = set;
         foreach (var (id, r) in tuneRows) r.box.Text = set.TryGetValue(id, out var v) ? Fmt(v) : "";
@@ -569,7 +573,9 @@ sealed class SettingsWindow : Window {
                                               lit, ShowsNightLights && !litKeep));
         }
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon, mons,
-            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) { Light = daylightSensor.Text };
+            haUrl.Text, autoSwitch.Text, sun.Text, cover.Text, lights.Text, values, roomBox.IsChecked == true) {
+            Light = daylightSensor.Text, PushEditable = SourceTag == "homeAssistant",
+            Push = pushBox.IsChecked == true ? true : pushLoaded == false ? (bool?)false : null };
         try {
             string? now = File.Exists(path) ? File.ReadAllText(path) : null;
             if (now != opened) {

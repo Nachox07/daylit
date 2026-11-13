@@ -190,6 +190,10 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
                                  int? NightLights = null, bool NightLightsEditable = false);
     /// homeAssistant.light: the daylight sensor.
     public string Light { get; init; } = "";
+    /// `PushEditable`: the window shows the Instant updates switch; otherwise homeAssistant.push in the file is kept.
+    /// `Push` null removes the key (off is the default); false is written as false.
+    public bool PushEditable { get; init; }
+    public bool? Push { get; init; }
 }
 
 /// Which config entry a connected monitor belongs to: the longest `Match` (trimmed, case-insensitive, contained
@@ -245,6 +249,7 @@ static class ConfigPatch {
             var t = v.Trim();
             if (t == "") ha.Remove(k); else ha[k] = t;
         }
+        if (e.PushEditable) { if (e.Push is bool pv) ha["push"] = pv; else ha.Remove("push"); }
         root.Remove("homeAssistant");
         if (ha.Count > 0) root["homeAssistant"] = ha;
 
