@@ -340,6 +340,14 @@ set.
   `--check-config` explains config problems. A computer with no input for 5 minutes stops changing
   brightness on purpose (see *Two machines* in the README), and so does a laptop on battery with
   *Pause on battery* on.
+- **Home Assistant unreachable after an update on macOS.** If the panel says "macOS is blocking
+  Daylit from your local network" (the log says `home assistant: blocked by macOS Local Network
+  permission`), macOS dropped the Local Network permission, which happens when an update changes
+  the app's signature. Click *Open Settings* in the panel (or System Settings → Privacy & Security
+  → Local Network), turn Daylit off and on again, then wait a few seconds. (On macOS 27.2 and later you can also
+  remove Daylit from the list and relaunch it so macOS asks again; earlier versions have no remove
+  button.) Releases signed with a stable certificate keep the Accessibility and Automation grants
+  and are expected to keep this one too (maintainers: [release-signing.md](release-signing.md)).
 - **Logs:** `~/Library/Logs/Daylit/daylit.log` (macOS) and `%LOCALAPPDATA%\Daylit\daylit.log`
   (Windows) record automatic changes, publishes, idle/back, battery pause, theme switches and Home
   Assistant errors.

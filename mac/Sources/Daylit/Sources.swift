@@ -42,6 +42,8 @@ enum HAClient {
     }
     /// The underlying cause of the last failed call (URL error domain and code, or HTTP status), for the log.
     nonisolated(unsafe) static var lastCause: String?
+    /// The NSURLError code of the last failed call (nil for an HTTP status).
+    nonisolated(unsafe) static var lastCode: Int?
 
     /// A POST with `body`, or a GET without one.
     static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6) async -> Result<Data, Failure> {
@@ -62,9 +64,11 @@ enum HAClient {
         catch {
             let e = error as NSError
             lastCause = "\(e.domain) \(e.code): \(e.localizedDescription)"
+            lastCode = e.domain == NSURLErrorDomain ? e.code : nil
             return .failure(.unreachable)
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        lastCode = nil
         if code == 401 { tokenCache[name] = nil; lastCause = "HTTP 401"; return .failure(.rejected) }
         if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.http(code)) }
         lastCause = nil

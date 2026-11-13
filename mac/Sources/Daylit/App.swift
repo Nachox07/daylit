@@ -158,6 +158,7 @@ struct VisualEffect: View {
     var model: Daylit?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        LocalNetworkProbe.warm()
         if !DemoController.enabled { let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String; Log.write("start: Daylit \(v == nil || v == "0.0.0" ? "dev" : v!)") }
         if let a = ProcessInfo.processInfo.environment["DAYLIT_APPEARANCE"] {   // screenshots: force light or dark
             NSApp.appearance = NSAppearance(named: a == "dark" ? .darkAqua : .aqua)
