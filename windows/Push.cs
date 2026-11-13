@@ -137,7 +137,8 @@ static class PushRule {
     /// The log lines (Log.Write adds the time). None of them can carry the token.
     public static string ConnectedLine(int count) => $"push: connected ({count} entities)";
     public static string LostLine(string reason, double retryIn) => $"push: lost ({reason}), retrying in {(int)retryIn}s";
-    public static string RejectedLine(string reason) => $"push: token rejected ({reason}), not retrying until the token or config changes";
+    /// Fixed text: the server's auth_invalid message is never logged (a proxy could put anything there).
+    public const string RejectedLine = "push: token rejected";
     public const string OffLine = "push: off";
     /// The problem line shown in the panel after auth_invalid, like the REST token errors.
     public const string RejectedProblem = "Home Assistant rejected the token (push updates)";

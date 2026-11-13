@@ -138,16 +138,23 @@ final class PushMessageTests: XCTestCase {
         let o = obj(PushRule.pingMessage(id: 4))
         XCTAssertEqual(o["id"] as? Int, 4); XCTAssertEqual(o["type"] as? String, "ping")
     }
+    func testRejectedLogLineNeverIncludesServerMessage() {
+        guard case .authInvalid(let why) = PushRule.parse(#"{"type":"auth_invalid","message":"echoed by a proxy"}"#) else { return XCTFail() }
+        XCTAssertEqual(why, "echoed by a proxy")
+        XCTAssertFalse(PushRule.rejectedLine.contains(why))
+        XCTAssertFalse(PushRule.rejectedProblem.contains(why))
+    }
     func testLogLinesCarryNoToken() {
         let token = "a-token-that-must-not-appear"
         _ = PushRule.authMessage(token: token)
-        for line in [PushRule.connectedLine(12), PushRule.lostLine("no pong", retryIn: 5), PushRule.rejectedLine("Invalid access token or password"),
+        for line in [PushRule.connectedLine(12), PushRule.lostLine("no pong", retryIn: 5), PushRule.rejectedLine,
                      PushRule.offLine, PushRule.rejectedProblem] {
             XCTAssertFalse(line.contains(token), line)
         }
         XCTAssertEqual(PushRule.connectedLine(12), "push: connected (12 entities)")
         XCTAssertEqual(PushRule.lostLine("no pong", retryIn: 5), "push: lost (no pong), retrying in 5s")
         XCTAssertEqual(PushRule.offLine, "push: off")
+        XCTAssertEqual(PushRule.rejectedLine, "push: token rejected")
     }
 }
 

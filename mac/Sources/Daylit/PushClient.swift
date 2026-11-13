@@ -130,8 +130,8 @@ import DaylitCore
                     self.authenticated = true; self.authTask?.cancel()
                     self.subscribeId = self.nextId; self.nextId += 1
                     self.send(ws, PushRule.subscribeMessage(id: self.subscribeId, entities: t.entities), c)
-                case .authInvalid(let why):
-                    self.rejected(why)
+                case .authInvalid:
+                    self.rejected()
                     return
                 case .result(let id, let ok) where id == self.subscribeId:
                     guard ok else { self.lost("subscribe refused", c); return }
@@ -222,11 +222,11 @@ import DaylitCore
         }
     }
 
-    private func rejected(_ why: String) {
+    private func rejected() {
         close()
         stopped = true
         problem = PushRule.rejectedProblem
-        Log.write(PushRule.rejectedLine(why))
+        Log.write(PushRule.rejectedLine)
         tick()   // shows the problem line
     }
 

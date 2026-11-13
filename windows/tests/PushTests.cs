@@ -170,15 +170,24 @@ public class PushMessageTests {
     }
 
     [Fact]
+    public void RejectedLogLineNeverIncludesServerMessage() {
+        var m = PushRule.Parse("""{"type":"auth_invalid","message":"echoed by a proxy"}""");
+        Assert.Equal("echoed by a proxy", m.Reason);
+        Assert.DoesNotContain(m.Reason!, PushRule.RejectedLine);
+        Assert.DoesNotContain(m.Reason!, PushRule.RejectedProblem);
+    }
+
+    [Fact]
     public void LogLinesCarryNoToken() {
         const string token = "a-token-that-must-not-appear";
         _ = PushRule.AuthMessage(token);
-        foreach (var line in new[] { PushRule.ConnectedLine(12), PushRule.LostLine("no pong", 5), PushRule.RejectedLine("Invalid access token or password"),
+        foreach (var line in new[] { PushRule.ConnectedLine(12), PushRule.LostLine("no pong", 5), PushRule.RejectedLine,
                                      PushRule.OffLine, PushRule.RejectedProblem })
             Assert.DoesNotContain(token, line);
         Assert.Equal("push: connected (12 entities)", PushRule.ConnectedLine(12));
         Assert.Equal("push: lost (no pong), retrying in 5s", PushRule.LostLine("no pong", 5));
         Assert.Equal("push: off", PushRule.OffLine);
+        Assert.Equal("push: token rejected", PushRule.RejectedLine);
     }
 }
 

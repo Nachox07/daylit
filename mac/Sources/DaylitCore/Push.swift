@@ -87,7 +87,8 @@ extension PushRule {
     /// The log lines (Log.write adds the time). None of them can carry the token.
     public static func connectedLine(_ count: Int) -> String { "push: connected (\(count) entities)" }
     public static func lostLine(_ reason: String, retryIn: Double) -> String { "push: lost (\(reason)), retrying in \(Int(retryIn))s" }
-    public static func rejectedLine(_ reason: String) -> String { "push: token rejected (\(reason)), not retrying until the token or config changes" }
+    /// Fixed text: the server's auth_invalid message is never logged (a proxy could put anything there).
+    public static let rejectedLine = "push: token rejected"
     public static let offLine = "push: off"
     /// The problem line shown in the panel after auth_invalid, like the REST token errors.
     public static let rejectedProblem = "Home Assistant rejected the token (push updates)"

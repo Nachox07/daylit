@@ -185,7 +185,7 @@ sealed class PushClient {
                 _ = SendOrLose(PushRule.SubscribeMessage(subscribeId, t.Entities), c);
                 break;
             case PushKind.AuthInvalid:
-                Rejected(m.Reason ?? "");
+                Rejected();
                 break;
             case PushKind.Result when m.Id == subscribeId:
                 if (!m.Ok) { Lost("subscribe refused", c); break; }
@@ -235,11 +235,11 @@ sealed class PushClient {
         retry.Start();
     }
 
-    void Rejected(string why) {
+    void Rejected() {
         Close();
         stopped = true;
         Problem = PushRule.RejectedProblem;
-        Log.Write(PushRule.RejectedLine(why));
+        Log.Write(PushRule.RejectedLine);
         tick();   // shows the problem line
     }
 
