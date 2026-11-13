@@ -146,6 +146,7 @@ struct SettingsView: View {
     @State private var monitors: [MonitorDraft] = []
     @State private var haURL = ""
     @State private var haURLLoaded = ""   // the file's URL when the window loaded: an edit here is approved for the token
+    @State private var tokenNameLoaded: String? = nil   // the file's tokenName then (the window has no field for it)
     @State private var autoSwitch = ""
     @State private var sun = ""
     @State private var cover = ""
@@ -576,7 +577,7 @@ struct SettingsView: View {
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
-        haURL = h?.url ?? ""; haURLLoaded = haURL; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
+        haURL = h?.url ?? ""; haURLLoaded = haURL; tokenNameLoaded = h?.tokenName; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
         pushLoaded = h?.push; pushOn = h?.push ?? false
         checkUpdatesOn = c.checkUpdates ?? true
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
@@ -658,9 +659,8 @@ struct SettingsView: View {
             try out.write(to: p, options: .atomic)
             Log.write("settings: saved config.json (source=\(e.source))")
             if urlEdited {
-                // Typed on this Mac: the token may go there (the token name stays as approved before).
-                let (saved, _) = Config.load(from: p)
-                TokenGate.trustURLEdit(saved.homeAssistant)
+                // The URL typed here, not what the file holds by the time it reloads (the token name stays as approved before).
+                TokenGate.trustURLEdit(TokenDestination(url: haURL, tokenName: tokenNameLoaded))
             }
             m.reload()
             close()

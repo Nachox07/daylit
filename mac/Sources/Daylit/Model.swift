@@ -418,8 +418,8 @@ import DaylitCore
 
     /// "Use" on the token question: this address and token name are approved on this Mac.
     func approveTokenDestination() {
-        guard let cur = TokenGate.destination(config.homeAssistant) else { return }
-        TokenGate.trust(config.homeAssistant)
+        guard let cur = tokenHeld else { return }   // the destination the question named, not a newer one
+        TokenGate.trust(cur)
         Log.write("home assistant: token approved for \(cur.host) on this Mac")
         tokenQuestion = nil; tokenHeld = nil; tokenDismissed = nil; tokenDismissedAt = nil
         syncPush(force: true)
@@ -428,7 +428,7 @@ import DaylitCore
 
     /// "Not now": nothing is sent; the question comes back in an hour (TokenDestinationRule.snoozeSeconds).
     func dismissTokenQuestion() {
-        tokenDismissed = TokenGate.destination(config.homeAssistant); tokenDismissedAt = Date()
+        tokenDismissed = tokenHeld; tokenDismissedAt = Date()
         tokenQuestion = nil
         Log.write("home assistant: not sending the token yet; asking again in \(Int(TokenDestinationRule.snoozeSeconds / 60)) min")
     }

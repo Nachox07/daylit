@@ -31,16 +31,17 @@ enum TokenGate {
     /// Whether the token may go to this config's address now.
     static func allows(_ ha: HAConfig?) -> Bool { [.send, .remember].contains(decide(ha)) }
 
-    /// Approved on this Mac (Use in the panel, a token pasted in the token window).
-    static func trust(_ ha: HAConfig?) {
+    /// Approved on this Mac: Use in the panel, or a token pasted in the token window (the destination it showed
+    /// when it opened, not whatever the config holds when Save lands).
+    static func trust(_ d: TokenDestination?) {
         lock.lock(); defer { lock.unlock() }
-        if let cur = destination(ha) { remember(cur) }
+        if let d { remember(d) }
     }
 
-    /// The URL edited in this Mac's Settings window: approved, keeping the remembered token name.
-    static func trustURLEdit(_ ha: HAConfig?) {
+    /// The URL typed in this Mac's Settings window: approved, keeping the remembered token name.
+    static func trustURLEdit(_ d: TokenDestination?) {
         lock.lock(); defer { lock.unlock() }
-        if let cur = destination(ha) { remember(TokenDestinationRule.afterURLEdit(current: cur, remembered: remembered)) }
+        if let d { remember(TokenDestinationRule.afterURLEdit(current: d, remembered: remembered)) }
     }
 }
 

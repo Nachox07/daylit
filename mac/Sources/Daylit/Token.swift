@@ -178,14 +178,16 @@ struct TokenView: View {
         StatusController.shared?.close()
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let service = model.config.homeAssistant?.tokenName ?? "daylit-home-assistant"
+        // The address shown when the window opened: a token pasted here is approved for that one only. If the
+        // config changes while the window is open, the new address still gets the Use / Not now question.
+        let opened = TokenGate.destination(model.config.homeAssistant)
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Home Assistant Token"; w.isReleasedWhenClosed = false
         w.contentViewController = NSHostingController(rootView: TokenView(service: service) { saved in
             window?.close()
             if saved {
-                // A token pasted here is for the address in the config now: approved on this Mac.
-                TokenGate.trust(model.config.homeAssistant)
-                model.tokenQuestion = nil
+                TokenGate.trust(opened)
+                if TokenGate.destination(model.config.homeAssistant) == opened { model.tokenQuestion = nil }
                 HAClient.clearTokenCache()
                 NotificationCenter.default.post(name: .daylitTokenSaved, object: nil)
                 Log.write("token: saved to the keychain")
