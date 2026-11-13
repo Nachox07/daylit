@@ -153,7 +153,8 @@ struct SettingsView: View {
     @State private var tune: [String: String] = [:]   // "group.key" → typed text; empty = the default
     @State private var themeRoom = true
     @State private var pushOn = false
-    @State private var pushLoaded: Bool? = nil   // what the file said, so an explicit false stays false
+    @State private var pushLoaded: Bool? = nil
+    @State private var checkUpdatesOn = true   // what the file said, so an explicit false stays false
     @State private var opened: ConfigLocation.Opened = .file(nil)
     @State private var error: String? = nil
     @State private var note: String? = nil
@@ -379,6 +380,12 @@ struct SettingsView: View {
                 Text(iCloudFooter).font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                Toggle(isOn: $checkUpdatesOn) { Row("Automatically check for updates", "arrow.down.circle") }
+            } footer: {
+                Text("Once a day Daylit asks GitHub whether a newer version is out and shows it in the panel. Nothing about you or your setup is sent. Check for Updates… in the gear menu works either way.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 LabeledContent("config.json") {
                     Button("Open Config File") { m.openConfig() }
                 }
@@ -570,6 +577,7 @@ struct SettingsView: View {
         let h = c.homeAssistant
         haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
         pushLoaded = h?.push; pushOn = h?.push ?? false
+        checkUpdatesOn = c.checkUpdates ?? true
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
         themeRoom = c.tuning?.theme?.room ?? true
         monitors = m.mons.map { mon in
@@ -622,6 +630,8 @@ struct SettingsView: View {
         e.light = daylightSensor
         e.pushEditable = source == "homeAssistant"
         e.push = pushOn ? true : (pushLoaded == false ? false : nil)
+        e.checkUpdatesEditable = true
+        e.checkUpdates = checkUpdatesOn ? nil : false
         e.tuning = values
         e.themeRoom = themeRoom
         return e

@@ -21,7 +21,7 @@ import DaylitCore
         func model(_ mons: [Mon], source: Source, detail: String = "", sync: Bool = false) -> Daylit {
             let d = Daylit(preview: ())
             d.mons = mons; d.source = source; d.auto = true; d.detail = detail; d.sync = sync
-            d.problem = nil; d.builtIn = nil
+            d.problem = nil; d.builtIn = nil; d.homebrew = false
             d.login = false; d.iCloudOn = false; d.iCloudNote = nil; d.hasBattery = true; d.lookOn = false; d.pauseOnBattery = true   // not this Mac's own settings
             if sync { d.syncOffsets = SyncOffsets(levels: mons.map { (key: $0.uuid, level: Int($0.level)) }) }
             return d
@@ -45,6 +45,14 @@ import DaylitCore
                 let d = model([one], source: .homeAssistant, detail: "Home Assistant · sun 100% · blind 35%")
                 d.suggestion = Suggestion(monitor: one.uuid, changes: [LevelChange(level: .blindDown, from: 78, to: 61)],
                                           amount: 14, lower: true, samples: 13, days: 5)
+                return d
+            }()))),
+            ("panel-update", AnyView(Panel(m: {
+                let d = model(two, source: .sun, detail: "Sun · 21.7° above the horizon")
+                d.update = UpdateCheck.Available(version: "1.6.0", url: "https://github.com/Nachox07/daylit/releases/tag/v1.6.0",
+                                                 changes: ["Tell the user when a new version is out", "Mac: steadier DDC writes after wake",
+                                                           "Windows: Settings remembers its size"])
+                d.updateShown = true; d.updateExpanded = true
                 return d
             }()))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
