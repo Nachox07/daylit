@@ -316,10 +316,12 @@ An idle computer, or one paused on battery, leaves the appearance alone.
 
 ## Experimental
 
-These work, but have not run long enough to be on by default. They are config file only: no Settings
-switch yet.
+These work, but have not run long enough to be on by default.
 
 ### Push updates from Home Assistant
+
+Turn it on in Settings → Home Assistant → Instant updates (shown only when the source is Home
+Assistant; Save applies it at once), or set `push: true` in the config file:
 
 ```json
 "homeAssistant": {
@@ -363,7 +365,7 @@ switch yet.
   Task Manager's *Power usage* column). To time a change, switch a light or blind in Home Assistant and
   compare the time with the next `auto:` line in the log.
 
-To stop it, remove the key or set it to `false`.
+To stop it, turn the switch off, or remove the key or set it to `false`.
 
 ## Permissions (macOS)
 
