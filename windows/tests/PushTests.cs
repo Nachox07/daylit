@@ -354,3 +354,37 @@ public class PushTimingTests {
         Assert.False(PushRule.Wanted(true, Source.HomeAssistant, false, true, false));
     }
 }
+
+public class PushSettingsEditTests {
+    const string Original = """{ "futureKey": 1, "homeAssistant": { "url": "http://homeassistant.local:8123", "tokenName": "kc"PUSH } }""";
+    static JsonObject Ha(SettingsEdit e, string? original) {
+        var root = (JsonObject)JsonNode.Parse(ConfigPatch.Apply(e, original))!;
+        return root["homeAssistant"] as JsonObject ?? new JsonObject();
+    }
+    static SettingsEdit Edit(bool? push, bool editable = true) =>
+        new("homeAssistant", null, null, [], "http://homeassistant.local:8123") { PushEditable = editable, Push = push };
+    static string WithPush(string extra) => Original.Replace("PUSH", extra);
+
+    [Fact]
+    public void TurningPushOnWritesTrueAndKeepsTheRest() {
+        var h = Ha(Edit(true), WithPush(""));
+        Assert.True((bool)h["push"]!);
+        Assert.Equal("kc", (string)h["tokenName"]!);
+    }
+
+    [Fact]
+    public void TurningPushOffRemovesTheKey() => Assert.Null(Ha(Edit(null), WithPush(""", "push": true"""))["push"]);
+
+    [Fact]
+    public void AnExplicitFalseStaysFalse() => Assert.False((bool)Ha(Edit(false), WithPush(""", "push": false"""))["push"]!);
+
+    [Fact]
+    public void AbsentStaysAbsent() {
+        Assert.Null(Ha(Edit(null), WithPush(""))["push"]);
+        Assert.Null(Ha(Edit(null), null)["push"]);
+    }
+
+    [Fact]
+    public void PushIsKeptWhenTheWindowDoesNotShowTheSwitch() =>
+        Assert.True((bool)Ha(Edit(null, editable: false), WithPush(""", "push": true"""))["push"]!);
+}
