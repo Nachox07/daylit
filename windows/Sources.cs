@@ -20,6 +20,8 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
     /// Per monitor: Home Assistant's own [day, blindDown, night, nightLights] (-1 where it has no value), for the Settings
     /// chart; null when these inputs did not come from Home Assistant.
     public double[][]? FromHa { get; init; }
+    /// Configured entities Home Assistant does not have (autoSwitch, sun); empty when none is missing.
+    public IReadOnlyList<string> Missing { get; init; } = [];
 }
 
 /// Home Assistant REST: one template call per tick returns everything; sensors are posted back.
@@ -32,7 +34,7 @@ static class HAClient {
     /// The last failure was a connection problem that usually clears by itself (see HaErrorRule).
     public static bool Transient;
 
-    record Answer(double elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100, double light = -1, double lightAge = -1, string? lightUnit = null);
+    record Answer(double? elev, double pos, bool lights, bool? auto, double[][] m, double bri = 0, double sat = 100, double light = -1, double lightAge = -1, string? lightUnit = null);
 
     public static async Task<string?> Call(Config c, string path, object body) {
         if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; Transient = false; return null; }
@@ -67,7 +69,10 @@ static class HAClient {
             // Local numbers wherever HA has no value; nightLights as a fourth when either has one.
             var levels = mons.Select((m, i) => Chart.EffectiveLevels(m.LocalLevels, a.m[i])).ToArray();
             var remote = a.m.Select(v => v[4] >= 0 && v[5] > 0 ? ((double, double)?)(v[4], v[5]) : null).ToArray();
-            return new Inputs(a.elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit, FromHa = a.m.Select(v => v[..4]).ToArray() };
+            // A sun entity Home Assistant does not have: the computed sun when there is a location, else night as before.
+            double elev = a.elev ?? (c.Location is { } loc ? Sun.Elevation(DateTimeOffset.UtcNow, loc.Latitude, loc.Longitude) : -10);
+            var missing = HaTemplate.Missing(h, a.elev == null, a.auto == null);
+            return new Inputs(elev, a.pos, a.lights, a.bri, a.sat, levels, a.auto, !string.IsNullOrWhiteSpace(h.Cover)) { Remote = remote, Light = a.light, LightAge = a.lightAge, LightUnit = a.lightUnit, FromHa = a.m.Select(v => v[..4]).ToArray(), Missing = missing };
         } catch { LastError = "Unexpected answer from Home Assistant"; Transient = false; return null; }
     }
 

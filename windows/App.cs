@@ -334,7 +334,7 @@ sealed partial class Controller {
     public async void SetAuto(bool on) {
         try {
             AutoOn = on;
-            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) await HAClient.SetSwitch(Cfg, on);
+            if (Source == Source.HomeAssistant && !string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch)) { Settings.LastHaAuto = on; await HAClient.SetSwitch(Cfg, on); }
             else Settings.Auto = on;
             if (on) foreach (var m in Mons) { m.LastSet = null; m.Offset = null; m.OffsetSun = null; m.OffsetAt = null; recorder.Drop(m.Key); }
             await Tick("automatic " + (on ? "on" : "off"));
@@ -405,7 +405,8 @@ sealed partial class Controller {
         var l = Cfg.Location!;
         bool keep = Source == Source.HomeAssistant;   // a sun-only config uses its own levels
         return new Inputs(Sun.Elevation(DateTimeOffset.UtcNow, l.Latitude, l.Longitude), keep ? lastHaPos ?? 100 : 100, false, 0, 100,
-                          mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(), null,
+                          mons.Select(m => Chart.EffectiveLevels(m.LocalLevels, keep ? m.HaLevels : null)).ToArray(),
+                          keep ? Rules.AutomaticFallback(!string.IsNullOrWhiteSpace(Cfg.HomeAssistant?.AutoSwitch), Settings.LastHaAuto, Settings.Auto) : null,   // an outage keeps the last Automatic state
                           keep && lastHaPos != null);
     }
     double? lastHaPos;
@@ -588,6 +589,8 @@ sealed partial class Controller {
             for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) mons[i].HaLevels = s.FromHa is { } haRow && i < haRow.Length ? haRow[i] : s.Levels[i];
             lastHaPos = s.HasBlind ? s.Pos : null;
             lastHaLights = s.Lights;
+            if (s.Auto is bool seenAuto && Settings.LastHaAuto != seenAuto) Settings.LastHaAuto = seenAuto;   // kept across restarts for the sun fallback
+            if (HaTemplate.MissingNote(s.Missing) is { } gone) Error ??= gone;
         }
         if (!haDown && lastHaError != null) { Log.Write("home assistant: ok" + (downFor > 0 ? $" again after {downFor} min" : "")); lastHaError = null; }
         if (s == null) { Subtitle = "Waiting for Home Assistant"; return; }
