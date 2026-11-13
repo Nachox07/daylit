@@ -27,7 +27,7 @@ sealed record Inputs(double Elev, double Pos, bool Lights, double Bri, double Sa
 /// Home Assistant REST: one template call per tick returns everything; sensors are posted back.
 static class HAClient {
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(6) };
-    public static string? Token;
+    public static volatile string? Token;   // written on the UI thread, read by REST ticks and the push client
     public static string? LastError;
     /// The underlying cause of the last failure (exception or HTTP status), for the log.
     public static string? LastCause;
@@ -38,11 +38,12 @@ static class HAClient {
 
     public static async Task<string?> Call(Config c, string path, object body) {
         if (c.HomeAssistant?.Url is not { } url) { LastError = "Home Assistant is not configured"; Transient = false; return null; }
-        if (Token == null) { LastError = "No Home Assistant token (tray menu → Home Assistant token…)"; Transient = false; return null; }
+        var tok = Token;   // one read: Load() can set it to null meanwhile
+        if (tok == null) { LastError = "No Home Assistant token (tray menu → Home Assistant token…)"; Transient = false; return null; }
         try {
             using var req = new HttpRequestMessage(HttpMethod.Post, url.TrimEnd('/') + path) {
                 Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
-            req.Headers.Authorization = new("Bearer", Token);
+            req.Headers.Authorization = new("Bearer", tok);
             using var r = await http.SendAsync(req);
             Transient = false;
             if (!r.IsSuccessStatusCode && HaErrorRule.Transient((int)r.StatusCode)) Transient = true;
@@ -82,14 +83,14 @@ static class HAClient {
     /// The last `days` of a sensor's history, as Home Assistant returns it, or the cause of the failure.
     /// Leaves LastError and Transient alone: it runs beside the tick, which reads them.
     public static async Task<(string? Body, string? Cause)> History(Config c, string entity, double days) {
-        if (c.HomeAssistant?.Url is not { } url || Token == null) return (null, "not configured");
+        if (c.HomeAssistant?.Url is not { } url || Token is not { } tok) return (null, "not configured");
         static string Iso(DateTimeOffset t) =>
             t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture).Replace("+", "%2B");   // "+" would read as a space
         var end = DateTimeOffset.UtcNow; var start = end.AddDays(-days);
         string path = $"/api/history/period/{Iso(start)}?end_time={Iso(end)}&filter_entity_id={entity}&minimal_response&no_attributes";
         try {
             using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + path);
-            req.Headers.Authorization = new("Bearer", Token);
+            req.Headers.Authorization = new("Bearer", tok);
             using var r = await slow.SendAsync(req);
             if (!r.IsSuccessStatusCode) return (null, $"HTTP {(int)r.StatusCode}");
             return (await r.Content.ReadAsStringAsync(), null);
@@ -121,10 +122,10 @@ static class HAClient {
     /// does not answer or the entity has none. Leaves LastError and Transient alone, like History.
     /// Answered is true when Home Assistant gave a 200 (Step is null then if the entity has no min/max/step).
     public static async Task<(NumberStep? Step, bool Answered)> GetNumberStep(Config c, string entity) {
-        if (c.HomeAssistant?.Url is not { } url || Token == null || !Config.IsEntityId(entity)) return (null, false);
+        if (c.HomeAssistant?.Url is not { } url || Token is not { } tok || !Config.IsEntityId(entity)) return (null, false);
         try {
             using var req = new HttpRequestMessage(HttpMethod.Get, url.TrimEnd('/') + "/api/states/" + entity);
-            req.Headers.Authorization = new("Bearer", Token);
+            req.Headers.Authorization = new("Bearer", tok);
             using var r = await http.SendAsync(req);
             return r.IsSuccessStatusCode ? (NumberStep.Parse(await r.Content.ReadAsStringAsync()), true) : (null, false);
         } catch { return (null, false); }
@@ -144,12 +145,16 @@ static class Cred {
     [DllImport("advapi32")] static extern void CredFree(IntPtr p);
 
     public static string? Read(string target) {
-        if (!CredReadW(target, 1 /* GENERIC */, 0, out var p)) return null;
+        if (!CredReadW(target, 1 /* GENERIC */, 0, out var p))
+            // Only "not found" means nothing is stored; any other failure returns "" (stored but unreadable), which push retries on backoff.
+            return Marshal.GetLastWin32Error() == 1168 /* ERROR_NOT_FOUND */ ? null : "";
         try {
             var c = Marshal.PtrToStructure<CREDENTIAL>(p);
             return c.BlobSize == 0 ? null : Marshal.PtrToStringUni(c.Blob, (int)c.BlobSize / 2).Trim();
         } finally { CredFree(p); }
     }
+    /// The stored token, or null when none is stored or it could not be read: for the REST client, which treats both as "no token".
+    public static string? ReadUsable(string target) => Read(target) is { Length: > 0 } t ? t : null;
     /// Whether one is stored; the secret is never converted to a string.
     public static bool Stored(string target) {
         if (!CredReadW(target, 1 /* GENERIC */, 0, out var p)) return false;

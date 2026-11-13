@@ -109,6 +109,7 @@ Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `nigh
 optional fixed `contrast` (0–100, DDC monitors only, set at start and after a display change), and with
 Home Assistant a `homeAssistant` block naming three `input_number` entities (a fourth, `nightLights`, is optional), an optional `sensor`
 to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle or Automatic is off). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
+`homeAssistant.push` (experimental, default off) makes Home Assistant tell Daylit when one of those entities changes ([docs/setup.md → Experimental](docs/setup.md#experimental)); leave it off unless the user asks.
 
 Ask the user for: latitude/longitude (city level is enough), the HA URL, and which blind / lights
 entities belong to the room. Don't guess entity IDs.

@@ -527,6 +527,7 @@ public class ConfigTests {
         Assert.Null(c.Monitors![1].Contrast);
         Assert.Equal("input_number.daylit_left_night_lights", c.Monitors![0].HomeAssistant!.NightLights);
         Assert.Equal(40, c.Monitors![1].NightLights);
+        Assert.False(c.HomeAssistant!.Push);
     }
 
     [Fact]

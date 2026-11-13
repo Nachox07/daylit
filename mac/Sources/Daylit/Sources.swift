@@ -3,9 +3,14 @@ import Foundation
 import DaylitCore
 
 enum HAClient {
-    nonisolated(unsafe) static var tokenCache: [String: String] = [:]
+    /// Read from the main thread (REST) and from the push client's detached keychain read: always under the lock.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var tokenCache: [String: String] = [:]
+    private static func cached(_ name: String) -> String? { cacheLock.lock(); defer { cacheLock.unlock() }; return tokenCache[name] }
+    private static func cache(_ name: String, _ value: String?) { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache[name] = value }
+    static func clearTokenCache() { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache = [:] }
     static func token(_ name: String) -> String? {
-        if let t = tokenCache[name] { return t }
+        if let t = cached(name) { return t }
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         p.arguments = ["find-generic-password", "-s", name, "-w"]
         let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
@@ -14,7 +19,7 @@ enum HAClient {
         p.waitUntilExit()
         let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let s, !s.isEmpty else { return nil }
-        tokenCache[name] = s
+        cache(name, s)
         return s
     }
 
@@ -69,7 +74,7 @@ enum HAClient {
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         lastCode = nil
-        if code == 401 { tokenCache[name] = nil; lastCause = "HTTP 401"; return .failure(.rejected) }
+        if code == 401 { cache(name, nil); lastCause = "HTTP 401"; return .failure(.rejected) }
         if code >= 300 { lastCause = "HTTP \(code)"; return .failure(.http(code)) }
         lastCause = nil
         return .success(d)

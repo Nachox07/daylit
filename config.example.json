@@ -9,7 +9,8 @@
     "sun": "sun.sun",
     "cover": "cover.study_blind",
     "lights": "light.study",
-    "light": "sensor.solar_power"
+    "light": "sensor.solar_power",
+    "push": false
   },
   "monitors": [
     {

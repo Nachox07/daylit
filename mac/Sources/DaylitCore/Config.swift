@@ -10,10 +10,11 @@ public struct HAConfig: Decodable {
     public var cover: String?           // optional blind; its position scales the daytime level
     public var lights: String?          // optional light; on at night = a little brighter
     public var light: String?           // optional outdoor light sensor (solar power W, or lux): a cloudy day dims the monitors
+    public var push: Bool?              // experimental: Home Assistant says when something changed (Push.swift); default off
     public init(url: String? = nil, tokenName: String? = nil, autoSwitch: String? = nil, sun: String? = nil,
-                cover: String? = nil, lights: String? = nil, light: String? = nil) {
+                cover: String? = nil, lights: String? = nil, light: String? = nil, push: Bool? = nil) {
         self.url = url; self.tokenName = tokenName; self.autoSwitch = autoSwitch; self.sun = sun; self.cover = cover; self.lights = lights
-        self.light = light
+        self.light = light; self.push = push
     }
 }
 

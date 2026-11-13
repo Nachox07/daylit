@@ -307,12 +307,63 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 | `theme.whiteLightsAbove` / `whiteLightsBelow` | 78.4 / 66.6 | lights this bright (%) and white count as daylight / stop counting (HA brightness 200 / 170 of 255) |
 | `theme.whiteSaturationMax` / `warmSaturationMin` | 35 / 45 | colour saturation for "white" / "warm" (0 white … 100 deep colour) |
 | `theme.room` | true | false: light/dark follows the sun only |
-| `timing.pollSeconds` / `batteryPollSeconds` | 30 / 120 | how often automatic mode checks |
+| `timing.pollSeconds` / `batteryPollSeconds` | 30 / 120 | how often automatic mode checks (5 minutes while [push updates](#push-updates-from-home-assistant) are connected) |
 | `timing.idleSeconds` | 300 | no input this long: another computer may be using the monitors |
 | `timing.haFallbackSeconds` | 60 | Home Assistant down this long: the sun takes over |
 | `timing.manualKeepHours` | 12 | hand-set levels survive a restart this long |
 
 An idle computer, or one paused on battery, leaves the appearance alone.
+
+## Experimental
+
+These work, but have not run long enough to be on by default. They are config file only: no Settings
+switch yet.
+
+### Push updates from Home Assistant
+
+```json
+"homeAssistant": {
+  "url": "http://homeassistant.local:8123",
+  "push": true
+}
+```
+
+- **What it does.** Daylit keeps a WebSocket open to Home Assistant (`/api/websocket`, with the same
+  token) and follows only the entities it reads: the blind, the lights, `autoSwitch`, the sun, the
+  daylight sensor and each monitor's helpers. When one changes, the screens follow within about 2
+  seconds instead of at the next check. The socket only says *when* to check; the check itself is the
+  same as without it.
+- **A burst of changes** runs one check: each new change waits 1 more second, but never more than 3
+  seconds after the first.
+- **The daylight sensor** moves the screens at most once a minute on its own (once per
+  `batteryPollSeconds` on battery, if longer), because it can report every few seconds.
+- **Checks still run** as a safety net: every 5 minutes while the connection is up (or your
+  `timing.pollSeconds` / `batteryPollSeconds` if longer), and at the usual 30 seconds / 2 minutes while
+  it is down.
+- **When it is closed.** While the source is not Home Assistant, *Automatic* is off, the computer is
+  paused on battery, or no external monitor is connected. Each change opens or closes it. With
+  *Automatic* off the socket is closed, so turning it on again (also from Home Assistant) is picked up
+  by the normal check, which reopens the socket.
+- **Reconnecting.** After a drop it tries again after 2, 5 and 15 seconds, then every minute. It also
+  reconnects after sleep and when the network changes, and it sends a ping every minute (every 2
+  minutes on battery): no answer within 10 seconds counts as a drop, and so does no reply to the login
+  within 10 seconds of connecting.
+- **A rejected token** stops it until you save a new token (gear menu / tray menu → *Home Assistant
+  token…*) or the config changes; the panel says so.
+- **The log** shows `push: connected (N entities)`, `push: lost (<reason>), retrying in Ns` (once, then
+  every 10 minutes while it keeps failing), `push: reconnecting (wake)` or `(network change)`,
+  `push: token rejected (<reason>), not retrying until the token or config changes`,
+  `push: no token stored, waiting for one` and `push: off`. The token is never logged.
+- **Behind a reverse proxy,** the proxy must pass WebSockets on `/api/websocket` (Home Assistant's own
+  app needs that too).
+- `--check-config` shows `"push": true` in its `homeAssistant` block.
+
+- **Measuring it.** On battery, compare an hour with `push` on and an hour with it off: Activity
+  Monitor's *Energy Impact* for Daylit, or `top -pid <Daylit pid> -stats pid,power` in Terminal (Windows:
+  Task Manager's *Power usage* column). To time a change, switch a light or blind in Home Assistant and
+  compare the time with the next `auto:` line in the log.
+
+To stop it, remove the key or set it to `false`.
 
 ## Permissions (macOS)
 
