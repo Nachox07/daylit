@@ -44,6 +44,13 @@ struct Panel: View {
                     }
                     .controlSize(.small)
                 }
+            } else if m.accessibilityNeeded {   // lower priority than any real problem
+                Label(AccessibilityPrompt.message, systemImage: "keyboard")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Open Settings") {
+                    if let u = URL(string: AccessibilityPrompt.settingsURL) { NSWorkspace.shared.open(u) }
+                }
+                .controlSize(.small)
             }
         }
         .padding(14)
