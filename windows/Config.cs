@@ -127,6 +127,10 @@ sealed class Config {
                               (at + "night", mh.Night), (at + "set", mh.Set), (at + "nightLights", mh.NightLights)]);
             }
         foreach (var m in c.Monitors ?? [])
+            foreach (var (key, lv) in new[] { ("day", m?.Day), ("blindDown", m?.BlindDown), ("night", m?.Night) })
+                if (lv is double d && !(double.IsFinite(d) && d >= 0 && d <= 100))
+                    return $"config.json: monitor \"{m!.Match}\" {key} is 0 to 100";
+        foreach (var m in c.Monitors ?? [])
             if (m?.NightLights is double nlv && !(double.IsFinite(nlv) && nlv >= 0 && nlv <= 100))
                 return $"config.json: monitor \"{m.Match}\" nightLights is 0 to 100";
         foreach (var (key, id) in ids)

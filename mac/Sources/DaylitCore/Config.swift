@@ -93,7 +93,7 @@ public struct Config: Decodable {
         do { c = try JSONDecoder().decode(Config.self, from: ConfigText.relaxed(d)) }
         catch { return (nil, "config.json is not valid: \(Self.describe(error))") }
         if let err = c.validate() {
-            var safe = Config(pauseOnBattery: c.pauseOnBattery, ddcTool: c.ddcTool, monitors: c.monitors)
+            var safe = Config(pauseOnBattery: c.pauseOnBattery, monitors: c.monitors)   // no ddcTool: it names a program to run
             safe.builtIn = c.builtIn
             return (safe, err)
         }
@@ -134,6 +134,11 @@ public struct Config: Decodable {
                     (at + "night", h.night), (at + "set", h.set), (at + "nightLights", h.nightLights)]
         }
         for m in monitors ?? [] {
+            for (key, v) in [("day", m.day), ("blindDown", m.blindDown), ("night", m.night)] {
+                if let v, !(v.isFinite && (0...100).contains(v)) {
+                    return "config.json: monitor \"\(m.match)\" \(key) is 0 to 100"
+                }
+            }
             if let v = m.nightLights, !(v.isFinite && (0...100).contains(v)) {
                 return "config.json: monitor \"\(m.match)\" nightLights is 0 to 100"
             }

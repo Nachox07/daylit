@@ -76,7 +76,15 @@ static class Rules {
     /// known position instead of counting as fully open; with none seen yet it counts as open.
     public static double BlindPosition(double reported, double? last) => reported >= 0 ? Math.Min(reported, 100) : last ?? 100;
 
-    public static int Target(double[] v, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
+    /// A brightness level as a finite 0–100: out of range is clamped, infinity counts as the nearest end,
+    /// and NaN as 0 (a level that is not a number must never reach the formula).
+    public static double ClampLevel(double v) => double.IsNaN(v) ? 0 : Math.Clamp(v, 0, 100);
+
+    public static int Target(double[] v0, double pos, bool lights, double sun, Tuning? t = null, bool? boost = null, double light = 1) {
+        var v = v0.Select(ClampLevel).ToArray();
+        pos = ClampLevel(pos);
+        if (double.IsNaN(light)) light = 1;   // a light scale that is not a number caps nothing
+        if (double.IsNaN(sun)) sun = 0;
         double daytime = v[1] + (v[0] - v[1]) * pos / 100;
         double share = Math.Min(sun, light);
         double x;
@@ -90,8 +98,14 @@ static class Rules {
             x = v[2] + (daytime - v[2]) * share;
             if (lights && (boost ?? sun < 0.3)) x = Math.Max(x, v[2] + (t?.LightsBoost ?? 5));
         }
+        if (!double.IsFinite(x)) return (int)Math.Round(v[2], MidpointRounding.AwayFromZero);   // last guard: the night level
         return (int)Math.Round(Math.Clamp(x, 0, 100), MidpointRounding.AwayFromZero);
     }
+
+    /// Automatic mode while Home Assistant does not answer (the sun fallback). With an autoSwitch it keeps the
+    /// last state Home Assistant gave, so an outage never turns Automatic on or off; without a switch, or before
+    /// one was ever seen, the local setting decides.
+    public static bool AutomaticFallback(bool hasSwitch, bool? lastFromHa, bool local) => hasSwitch ? lastFromHa ?? local : local;
 
     /// The nightLights level in a monitor's levels in effect (a fourth number, 0 or more); null when it has none.
     public static double? NightLightsLevel(double[] v) => v.Length > 3 && v[3] >= 0 ? (double?)v[3] : null;
@@ -245,6 +259,18 @@ sealed class LookRule {
 
 /// The one Home Assistant template each tick sends to POST /api/template.
 static class HaTemplate {
+    /// The configured entities Home Assistant does not have, as far as an answer shows: the autoSwitch (its
+    /// `auto` came back null) and the sun entity (its `elev` came back null).
+    public static List<string> Missing(HaConfig h, bool elevMissing, bool autoMissing) {
+        var r = new List<string>();
+        if (!string.IsNullOrEmpty(h.AutoSwitch) && autoMissing) r.Add(h.AutoSwitch);
+        if (elevMissing) r.Add(string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!);
+        return r;
+    }
+
+    /// The problem line for those entities, or null when none is missing.
+    public static string? MissingNote(IReadOnlyList<string> ids) => ids.Count == 0 ? null : "Home Assistant has no entity " + string.Join(", ", ids);
+
     static string Num(string? entity, double fallback) =>
         string.IsNullOrWhiteSpace(entity) ? fallback.ToString(CultureInfo.InvariantCulture)
                                           : $"{{{{ states('{entity}') | float({fallback.ToString(CultureInfo.InvariantCulture)}) }}}}";
@@ -260,7 +286,8 @@ static class HaTemplate {
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
         string sat = h.Lights is { Length: > 0 } l3 ? $"(state_attr('{l3}','hs_color') or [0, 100])[1] | float(100)" : "100";
-        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson }}}}" : "null";
+        // A missing entity renders null, not false: a typo must not look like "Automatic is off". states['…'] is None then.
+        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson if states['{a}'] else 'null' }}}}" : "null";
         string mons_ = string.Join(", ", monitors.Select(e => {
             string set = e?.Set is { Length: > 0 } st
                 ? $"{Num(st, -1)}, {{{{ as_timestamp(states['{st}'].last_changed) if states['{st}'] else 0 }}}}" : "-1, 0";   // states['…']: None when missing; an object id may start with a digit
@@ -271,7 +298,7 @@ static class HaTemplate {
         string lightUnit = h.Light is { Length: > 0 } lu ? $"{{{{ state_attr('{lu}','unit_of_measurement') | tojson }}}}" : "null";   // W, kW, lx…; null when unknown
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
-            {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) }},
+            {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) if states['{{{sun}}}'] else 'null' }},
              "pos": {{ {{{pos}}} }},
              "lights": {{ {{{lights}}} }},
              "auto": {{{auto}}},

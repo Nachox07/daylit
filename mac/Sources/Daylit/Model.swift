@@ -125,7 +125,7 @@ import DaylitCore
         source = src
         configProblem = err ?? srcErr
         problem = configProblem
-        DDC.tool = c.ddcTool ?? DDC.defaultTool
+        if let note = DDC.configure(c.ddcTool) { log(note) }
         HAClient.tokenCache = [:]
         log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
@@ -379,6 +379,7 @@ import DaylitCore
     func setAuto(_ on: Bool) {
         auto = on
         if source == .homeAssistant, let ha = config.homeAssistant, let sw = ha.autoSwitch {
+            lastHAAuto = on
             Task { _ = await HAClient.call(ha, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), ["entity_id": sw]) }
         } else {
             UserDefaults.standard.set(on, forKey: "auto")
@@ -583,6 +584,12 @@ import DaylitCore
     var lastHAPos: Double?
     /// The room lights Home Assistant last gave: a monitor with a nightLights level keeps them while it is down.
     var lastHALights: Bool?
+    /// The Automatic state Home Assistant last gave, kept across restarts: the sun fallback uses it, so an outage
+    /// never flips Automatic (nil: none seen yet).
+    var lastHAAuto: Bool? {
+        get { UserDefaults.standard.object(forKey: "lastHAAuto") as? Bool }
+        set { if let v = newValue { UserDefaults.standard.set(v, forKey: "lastHAAuto") } else { UserDefaults.standard.removeObject(forKey: "lastHAAuto") } }
+    }
     var lastProbe: String?
 
     func tick() async {
@@ -790,7 +797,8 @@ import DaylitCore
             }
             switch result {
             case .success(let s):
-                problem = configProblem
+                let missing = s.missingEntities(ha)
+                problem = HAState.missingNote(missing) ?? configProblem
                 if lastHAError != nil {
                     let mins = haDownSince.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
                     Log.write("home assistant: ok" + (mins > 0 ? " again after \(mins) min" : ""))
@@ -801,12 +809,15 @@ import DaylitCore
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
                 lastHALights = s.lights
-                if let a = s.auto { auto = a } else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
-                let sun = Int((daylightFraction(elevation: s.elev, tuning: config.tuned) * 100).rounded())
+                if let a = s.auto { auto = a; if lastHAAuto != a { lastHAAuto = a } }
+                else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
+                // A sun entity Home Assistant does not have: the computed sun when there is a location, else night as before.
+                let elev = s.elev ?? config.location.map { solarElevation(latitude: $0.latitude, longitude: $0.longitude) } ?? -10
+                let sun = Int((daylightFraction(elevation: elev, tuning: config.tuned) * 100).rounded())
                 var line = "Home Assistant · sun \(sun)%"
                 if ha.cover != nil { line += " · blind \(Int(pos))%" }
                 if ha.lights != nil { line += lightsNote(lights: s.lights, bri: s.bri, sat: s.sat, tuning: config.tuned) }
-                var i = Inputs(elev: s.elev, pos: pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
+                var i = Inputs(elev: elev, pos: pos, lights: s.lights, levels: s.m, line: line, fromHA: true,
                                hasBlind: ha.cover != nil, bri: s.bri, sat: s.sat)
                 if let e = ha.light, Config.isEntityId(e), let loc = config.location {
                     noteLightUnit(e, s.lightUnit)
@@ -850,7 +861,8 @@ import DaylitCore
                 problem = show ? message : configProblem
                 if f == .noToken || f == .rejected { detail = "Home Assistant · not connected" }
                 if config.location != nil, Date().timeIntervalSince(haDownSince!) >= config.tuned.haFallbackSeconds {
-                    auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true
+                    auto = automaticFallback(hasSwitch: !(ha.autoSwitch ?? "").isEmpty, lastFromHA: lastHAAuto,
+                                             local: UserDefaults.standard.object(forKey: "auto") as? Bool ?? true)
                     return fromSun(nil)   // the error line under it says Home Assistant is unreachable
                 }
                 if show { detail = "Home Assistant · not connected" }

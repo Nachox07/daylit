@@ -86,11 +86,11 @@ static class Chart {
     /// `fromHa`: a template row [day, blindDown, night, nightLights, set, setChanged] or its first four numbers.
     /// Home Assistant's value wins where it has one (>= 0), else the local number.
     public static double[] EffectiveLevels(double[] local, double[]? fromHa) {
-        var lv = local.Take(3).ToArray();
-        if (fromHa != null) for (int k = 0; k < Math.Min(3, Math.Min(fromHa.Length, lv.Length)); k++) if (fromHa[k] >= 0) lv[k] = fromHa[k];
+        var lv = local.Take(3).Select(Rules.ClampLevel).ToArray();
+        if (fromHa != null) for (int k = 0; k < Math.Min(3, Math.Min(fromHa.Length, lv.Length)); k++) if (fromHa[k] >= 0) lv[k] = Rules.ClampLevel(fromHa[k]);
         double? fromRow = fromHa != null && fromHa.Length > 3 && fromHa[3] >= 0 ? (double?)fromHa[3] : null;
         double? own = local.Length > 3 && local[3] >= 0 ? (double?)local[3] : null;
-        return (fromRow ?? own) is double nl ? lv.Append(nl).ToArray() : lv;
+        return (fromRow ?? own) is double nl ? lv.Append(Rules.ClampLevel(nl)).ToArray() : lv;
     }
 
     /// The level right now and how it got there: the blind picks the daytime level, the sun blends it with

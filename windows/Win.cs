@@ -74,6 +74,11 @@ static class Settings {
     static void Set(string name, bool v) { using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue(name, v ? 1 : 0, RegistryValueKind.DWord); }
     /// Automatic mode when it is not a Home Assistant switch.
     public static bool Auto { get => Get("Auto", true); set => Set("Auto", value); }
+    /// The Automatic state Home Assistant last gave (null: none seen yet): the sun fallback uses it, so an outage never flips Automatic.
+    public static bool? LastHaAuto {
+        get => Registry.CurrentUser.OpenSubKey(Key)?.GetValue("LastHaAuto") is int i ? i == 1 : null;
+        set { if (value is bool v) Set("LastHaAuto", v); }
+    }
     /// Light/dark mode from daylight and room lights.
     public static bool AutoLook { get => Get("AutoLook", true); set => Set("AutoLook", value); }
     /// Pause on battery, once changed in the panel; null = use the config's pauseOnBattery (default on).

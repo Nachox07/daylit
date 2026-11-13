@@ -66,6 +66,13 @@ enum DDC {
     nonisolated(unsafe) static var tool = defaultTool
     static let defaultTool = ["/opt/homebrew/bin/m1ddc", "/usr/local/bin/m1ddc"]
         .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/opt/homebrew/bin/m1ddc"
+    /// Points `tool` at the configured m1ddc, or the default when `ddcTool` is unset or not a known m1ddc.
+    /// Returns the note to show (and log) when a configured value was ignored.
+    @discardableResult static func configure(_ configured: String?) -> String? {
+        let r = DDCToolRule.resolve(configured: configured, pathDirs: DDCToolRule.pathDirs())
+        tool = r.path ?? defaultTool
+        return r.note
+    }
     static var available: Bool { FileManager.default.isExecutableFile(atPath: tool) }
     /// Why DDC isn't available here: m1ddc only exists for Apple silicon.
     static var hint: String {
