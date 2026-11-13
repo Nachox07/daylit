@@ -7,7 +7,8 @@
 #   2. Homebrew: copies the cask to Nachox07/homebrew-tap and pushes.
 #   3. winget: only with WINGET=1. Syncs the Nachox07/winget-pkgs fork, adds the manifests on a
 #      branch and opens a pull request to microsoft/winget-pkgs.
-#   4. Opens a pull request here with the updated packaging/ files.
+# The files in packaging/ here are templates: update.sh rewrites the version, URLs and hashes on
+# every run, so they are not committed back. The tap and winget-pkgs hold the published values.
 set -euo pipefail
 
 VERSION="${1:?usage: $0 <version, e.g. 1.3.0>}"
@@ -78,31 +79,4 @@ else
       --title "Update: Nachox07.Daylit to $VERSION" \
       --body "Update: **Nachox07.Daylit** to **$VERSION**, from the GitHub release https://github.com/Nachox07/daylit/releases/tag/v$VERSION. Opened by Daylit's release workflow."
   fi
-fi
-
-# Keep packaging/ in this repository in step
-if git -C "$ROOT" diff --quiet -- packaging; then
-  echo "packaging/ already names $VERSION"
-elif [ "$DRY" = 1 ]; then
-  git -C "$ROOT" diff --stat -- packaging
-  echo "dry run: open a pull request with these files"
-else
-  # The workflow checks out the release tag, so the pull request branch is built on the current
-  # main (not on the tag's history): fetch main and carry over only the files update.sh changed.
-  PB="packaging/v$VERSION"
-  git clone -q --depth 1 --branch main "https://github.com/Nachox07/daylit.git" "$WORK/main"
-  git -C "$ROOT" diff --name-only -z -- packaging | while IFS= read -r -d '' f; do
-    cp "$ROOT/$f" "$WORK/main/$f"
-  done
-  git -C "$WORK/main" checkout -q -b "$PB"
-  if git -C "$WORK/main" diff --quiet -- packaging; then
-    echo "packaging/ on main already names $VERSION"
-    exit 0
-  fi
-  git -C "$WORK/main" add packaging
-  commit "$WORK/main" "Point packaging at $VERSION"
-  git -C "$WORK/main" push -q -f origin "$PB"
-  [ -n "$(gh pr list -R Nachox07/daylit --head "$PB" --state open --json number -q '.[].number')" ] ||
-  gh pr create -R Nachox07/daylit --head "$PB" --base main --label packaging --title "Point packaging at $VERSION" \
-    --body "The release workflow updated the Homebrew cask and winget manifests for v$VERSION and published them. This keeps the copies in packaging/ in step."
 fi

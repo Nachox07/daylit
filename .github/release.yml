@@ -2,4 +2,4 @@
 # every pull request merged since the previous release, except the release's own bookkeeping.
 changelog:
   exclude:
-    labels: [packaging]   # "Point packaging at X.Y.Z", opened by packaging/publish.sh
+    labels: [packaging]   # the old "Point packaging at X.Y.Z" bookkeeping pull requests

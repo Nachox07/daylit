@@ -31,7 +31,8 @@ The release workflow's `packages` job runs `publish.sh` once the release is up. 
 
 Without the secret the job only warns. By hand, the same steps are:
 
-1. `packaging/update.sh 1.2.0`, and commit the changed files here.
+1. `packaging/update.sh 1.2.0` (no need to commit the result: the files here are templates, and the
+   version they name can be older than the latest release).
 2. Homebrew: copy `homebrew/Casks/daylit.rb` to `Casks/daylit.rb` in `Nachox07/homebrew-tap`
    and push. Check with `brew update && brew upgrade --cask nachox07/tap/daylit`.
 3. winget: `packaging/update.sh 1.2.0 <your winget-pkgs fork>` copies the manifests to

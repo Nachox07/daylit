@@ -129,7 +129,7 @@ jobs:
           gh release create "$TAG" Daylit-mac-*.zip Daylit-windows-*.zip \
             --repo "$GITHUB_REPOSITORY" --title "Daylit $TAG" --notes-file notes.md
   packages:
-    # Homebrew tap, winget and packaging/ here, through packaging/publish.sh. Needs the secret
+    # Homebrew tap and winget, through packaging/publish.sh. Needs the secret
     # PACKAGES_TOKEN (a classic token with the public_repo scope); without it the job only warns.
     # winget runs only when the repository variable WINGET_AUTO is "true".
     needs: [version, release]
