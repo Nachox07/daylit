@@ -120,10 +120,10 @@ in the same menu. On macOS Daylit also notices the change within a few seconds.
 |---|---|
 | `source` | `off`, `sun` or `homeAssistant`. Default: `homeAssistant` when a `homeAssistant.url` is set, else `sun` when a `location` is set, else `off`. |
 | `location` | `latitude` and `longitude` (city level is enough). Needed for `sun`; with Home Assistant it is the fallback. |
-| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
+| `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20; a value outside that range is a config problem, and a Home Assistant value above 100 counts as 100), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
-| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only) if it is not in Homebrew's usual place. |
+| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only). Only `m1ddc` is run: the Homebrew paths (`/opt/homebrew/bin/m1ddc`, `/usr/local/bin/m1ddc`) or a file named `m1ddc` in a `PATH` folder. Any other value is ignored, with a note in `--check-config` and the log. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
 Find the `match` text for your monitors with the built-in commands:
