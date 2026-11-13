@@ -207,7 +207,7 @@ public class SuggestTriggerTests {
         Assert.Equal("62", Suggestion.Fmt(62));
         Assert.Equal("62", Suggestion.Fmt(62.004));
         var up = new Suggestion("m", [new LevelChange(Level.Night, 20, 30)], 8, false, 3, 3);
-        Assert.Equal("You raise Monitor by about 8 in the evening. Set night 20 → 30?", up.Sentence("Monitor"));
+        Assert.Equal("You raise Monitor by about 8 when the room is dim. Set night 20 → 30?", up.Sentence("Monitor"));
     }
 }
 
@@ -455,7 +455,8 @@ public class SuggestFixtureTests {
         var samples = elevs.SelectMany((e, d) => new[] {
             SuggestData.Make(6 + d, 9, e.Morning, 0.40, 63, l), SuggestData.Make(6 + d, 15, e.Afternoon, 0.58, 72, l) }).ToList();
         Assert.Equal(new[] { 75, 79, 75, 79, 75, 78 }, samples.Select(x => x.Auto));
-        Assert.Empty(Suggest.Candidates(samples, SuggestData.UtcDay));   // no level reaches 0.55 of the weight
+        // Day and blind down never reach 0.55 of the weight; night is the largest at 0.45 or more only on two days.
+        Assert.Empty(Suggest.Candidates(samples, SuggestData.UtcDay));
         Assert.Null(Suggest.SuggestionFor("m", samples, l, [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole],
                                           SuggestData.T0 + 10 * 86400, null, dayOf: SuggestData.UtcDay));
     }

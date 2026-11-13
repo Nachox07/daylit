@@ -221,7 +221,8 @@ public class NightLightsSuggestTests {
     [InlineData(0.0)]
     [InlineData(5.0)]
     [InlineData(11.9)]
-    public void NoSampleWhileTheLightsAreOnAndTheSunIsNotFullyUp(double elev) => Assert.Null(Make(elev, true, Four));
+    // The four-level weights explain these ticks, so they are recorded like any other.
+    public void LitTwilightOnAMonitorWithNightLightsIsASample(double elev) => Assert.True(Make(elev, true, Four)?.Lights);
 
     [Fact]
     public void SamplesWithTheLightsOffOrTheSunFullyUp() {
@@ -299,5 +300,201 @@ public class FieldUnchangedTests {
         Assert.Null(ContrastRule.ParseField("", "72.5").value);
         Assert.False(ContrastRule.ParseField("", "72.5").keep);
         Assert.False(ContrastRule.ParseField("x", "72.5").ok);
+    }
+}
+
+/// A sample as the app records it: daylight capped by `light`, Auto from the real target with these levels.
+static class Recorded {
+    public static Sample Make(int day, double hour, double elev, double p, bool lights, int chosen, double[] l, double light = 1) {
+        var t = new Tuning();
+        double s = Math.Min(t.Fraction(elev), light);
+        int auto = Rules.Target(l, p * 100, lights, t.Fraction(elev), t, elev < t.LightsBoostSunBelow, light);
+        return new Sample("m", chosen, auto, s, p, elev, lights, l, SuggestData.T0 + day * 86400 + hour * 3600);
+    }
+}
+
+public class NightLightsWeightTests {
+    static readonly double[] Four = [95, 62, 60, 80];
+    static readonly double[] Three = [95, 62, 60];
+
+    static void Same(double[] want, double[] got) {
+        Assert.Equal(want.Length, got.Length);
+        for (int k = 0; k < want.Length; k++) Assert.Equal(want[k], got[k], 1e-9);
+    }
+
+    [Fact]
+    public void WithTheLightsOnWhatDaylightLeavesIsSplitBetweenNightAndLightsOn() {
+        // Sun at 3° (daylight 0.4), blind open, lights on: 0.6 left, 40% of it to night and 60% to lights on.
+        var x = Recorded.Make(0, 18, 3, 1, true, 70, Four);
+        var w = Suggest.Weights(x, true);
+        Same([0.4, 0, 0.24, 0.36], w);
+        Assert.Equal(1, w.Sum(), 1e-9);
+        Same([0.4, 0, 0.6, 0], Suggest.Weights(x with { Lights = false }, true));
+        Same([0.4, 0, 0.6, 0], Suggest.Weights(x, false));
+    }
+
+    [Fact]
+    public void TheWeightsGiveTheTarget() {
+        // The fit is only right when the weights are the target's own blend: check them against it everywhere.
+        foreach (double elev in new[] { -8.0, -3, 0, 3, 6, 9, 12, 30 })
+            foreach (double p in new[] { 0.0, 0.4, 1 })
+                foreach (double light in new[] { 0.3, 1 })
+                    foreach (bool lights in new[] { false, true }) {
+                        var x = Recorded.Make(0, 12, elev, p, lights, 50, Four, light);
+                        var w = Suggest.Weights(x, true);
+                        double blend = w.Zip(Four).Sum(z => z.First * z.Second);
+                        Assert.True(Math.Abs(blend - x.Auto) <= 0.5, $"elev {elev} p {p} light {light} lights {lights}: {blend} vs {x.Auto}");
+                    }
+    }
+
+    [Fact]
+    public void NightAndLightsOnCountFromPointFourFiveWhenTheirsIsTheLargestWeight() {
+        // A cloudy morning, daylight held to half, blind 40% open: night 0.5, day 0.2, blind down 0.3.
+        Assert.True(Suggest.Dominates(Recorded.Make(0, 9, 20, 0.4, false, 63, Three, 0.5), Level.Night));
+        // Daylight 0.56: night 0.44, under the bar.
+        Assert.False(Suggest.Dominates(Recorded.Make(0, 9, 20, 0.4, false, 63, Three, 0.56), Level.Night));
+        // A dark evening with the lights on: all of it is the lights-on level, none night.
+        var lit = Recorded.Make(0, 20, -6, 1, true, 72, Four);
+        Assert.True(Suggest.Dominates(lit, Level.NightLights));
+        Assert.False(Suggest.Dominates(lit, Level.Night));
+        // The same evening on a monitor without the level: night, as before.
+        Assert.True(Suggest.Dominates(Recorded.Make(0, 20, -6, 1, true, 72, Three), Level.Night));
+        // An even split (no daylight counted, sun at 4.5°: half to each) counts for neither.
+        var even = Recorded.Make(0, 17, 4.5, 1, true, 70, Four, 0);
+        Assert.False(Suggest.Dominates(even, Level.Night));
+        Assert.False(Suggest.Dominates(even, Level.NightLights));
+        // Day and blind down keep their 0.55 bar: 0.5 of day is not enough even when it is the largest.
+        Assert.False(Suggest.Dominates(Recorded.Make(0, 12, 4.5, 1, false, 70, Three), Level.Day));
+    }
+
+    [Fact]
+    public void TheFitRecoversAllFourLevels() {
+        double[] truth = [90, 50, 30, 70];
+        var samples = new List<Sample>();
+        for (int i = 0; i < 20; i++)
+            foreach (double elev in new[] { -6.0, 0, 4.5, 9, 30 })
+                foreach (double p in new[] { 0.0, 0.5, 1 })
+                    foreach (bool lights in new[] { false, true }) {
+                        var x = Recorded.Make(0, 12, elev, p, lights, 0, [70, 40, 20, 60]);
+                        var w = Suggest.Weights(x, true);
+                        samples.Add(x with { Chosen = (int)Math.Round(w.Zip(truth).Sum(z => z.First * z.Second), MidpointRounding.AwayFromZero) });
+                    }
+        var f = Suggest.Fit(samples, [70, 40, 20, 60], [Level.Day, Level.BlindDown, Level.Night, Level.NightLights]);
+        for (int k = 0; k < 4; k++) Assert.True(Math.Abs(f[k] - truth[k]) <= 1, $"level {k}: {f[k]}");
+    }
+
+    [Fact]
+    public void AMonitorWithoutNightLightsNeverFitsOne() {
+        var lit = Enumerable.Range(0, 6).Select(d => Recorded.Make(d, 20, -6, 1, true, 50, Three)).ToList();
+        Assert.DoesNotContain(Level.NightLights, Suggest.Candidates(lit, SuggestData.UtcDay));
+        Assert.Equal(Three, Suggest.Fit(lit, Three, [Level.NightLights]));
+    }
+
+    [Fact]
+    public void SamplesSavedBeforeKeepLoadingAndCountTheSame() {
+        // A corrections.json written before the four-level fit: a lights-on sample in full daylight on a monitor
+        // with nightLights (the only lit sample it recorded then) and a three-level one.
+        const string text = """
+        {"samples": [
+          {"monitor": "m", "chosen": 70, "auto": 75, "s": 1, "p": 0.4, "elev": 30, "lights": true, "levels": [95, 62, 60, 80], "at": 1793577600},
+          {"monitor": "m", "chosen": 70, "auto": 86, "s": 1, "p": 0.35, "elev": 30, "lights": false, "levels": [100, 78, 75], "at": 1793577600}
+        ]}
+        """;
+        var got = Suggest.Decode(text);
+        Assert.Equal(2, got.Count);
+        // Sun fully up: the lights add nothing, so the sample weighs what it did with three levels.
+        Same([.. Suggest.Weights(1, 0.4), 0], Suggest.Weights(got[0], true));
+        Assert.Equal(got, Suggest.Decode(Suggest.Encode(got)));
+    }
+}
+
+/// Cloudy mornings and lit evenings: the user wants a dimmer room darker and a lit evening a little lower.
+public class NightLightsSuggestionTests {
+    static readonly double[] Four = [95, 62, 60, 80];
+    static readonly double[] Three = [95, 62, 60];
+    static readonly NumberStep?[] Whole = [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole, NumberStep.Whole];   // a local nightLights, or one that may be added
+    /// Sunny, blind fully down; sunny, blind open; a dark evening with the lights on.
+    static readonly (double Elev, double Pos, bool Lights)[] References = [(30, 0, false), (30, 100, false), (-6, 100, true)];
+    static int T(double[] l, (double Elev, double Pos, bool Lights) r) {
+        var t = new Tuning();
+        return Rules.Target(l, r.Pos, r.Lights, t.Fraction(r.Elev), t, r.Elev < t.LightsBoostSunBelow);
+    }
+    static double[] Applied(double[] l, Suggestion s) {
+        var o = l.ToList();
+        foreach (var c in s.Changes) { if ((int)c.Level < o.Count) o[(int)c.Level] = c.To; else o.Add(c.To); }
+        return o.ToArray();
+    }
+    static Suggestion? Suggest4(List<Sample> samples, double[] levels, NumberStep?[]? steps = null) =>
+        Suggest.SuggestionFor("m", samples, levels, steps ?? Whole, SuggestData.T0 + 6 * 86400, null, null, SuggestData.UtcDay);
+    /// Two cloudy mornings (daylight held to half, blind 40% open, lights off) at 63 and two lit evenings at 72, on four days.
+    static List<Sample> Week(double[] l, int morning = 63, int evening = 72) =>
+        Enumerable.Range(0, 4).SelectMany(d => new[] {
+            Recorded.Make(d, 8.5, 15, 0.4, false, morning, l, 0.5), Recorded.Make(d, 9.5, 20, 0.4, false, morning, l, 0.5),
+            Recorded.Make(d, 20, -6, 1, true, evening, l), Recorded.Make(d, 21, -12, 1, true, evening, l) }).ToList();
+
+    [Fact]
+    public void CloudyMorningsAndLitEveningsSuggestNightAndLightsOn() {
+        var samples = Week(Four);
+        Assert.Equal(new[] { 68, 68, 80, 80 }, samples.Take(4).Select(x => x.Auto));
+        Assert.Equal(new[] { Level.Night, Level.NightLights }, Suggest.Candidates(samples, SuggestData.UtcDay));
+        var s = Suggest4(samples, Four);
+        Assert.NotNull(s);
+        var after = Applied(Four, s);
+        // Within a few points of what the user chose (the pull toward today's levels keeps them a little short):
+        Assert.Equal(54, after[2]);   // a 63 on the cloudy mornings asks for night 51
+        Assert.Equal(73, after[3]);   // the lit evenings were set to 72
+        Assert.Equal("You lower Monitor by about 8 with the lights on. Set lights on 80 → 73, night 60 → 54?", s.Sentence("Monitor"));
+        // Sunny days do not change.
+        foreach (var r in References.Take(2)) Assert.Equal(T(Four, r), T(after, r));
+    }
+
+    [Fact]
+    public void AMonitorWithoutNightLightsIsOfferedOneBesideALowerNight() {
+        // The same cloudy mornings on a monitor without the level; lit evenings were fine at night + the boost (65).
+        var samples = Week(Three).Where(x => !x.Lights).ToList();
+        var s = Suggest4(samples, Three);
+        Assert.NotNull(s);
+        Assert.Equal(new[] { Level.Night, Level.NightLights }, s.Changes.Select(c => c.Level));
+        Assert.Equal(new LevelChange(Level.NightLights, 65, 65, true), s.Changes[1]);
+        var after = Applied(Three, s);
+        Assert.Equal(4, after.Length);
+        // The lit evening keeps its level, and sunny days do not change.
+        Assert.Equal(65, T(Three, References[2]));
+        Assert.Equal(T(Three, References[2]), T(after, References[2]));
+        foreach (var r in References.Take(2)) Assert.Equal(T(Three, r), T(after, r));
+        Assert.Equal("You lower Monitor by about 5 when the room is dim. Set night 60 → 54, lights on 65 (new)?", s.Sentence("Monitor"));
+    }
+
+    [Fact]
+    public void WithoutALightsOnStepOnlyNightIsOffered() {
+        // Three steps, or none for the fourth: the room lights do not come from Home Assistant, so no level is added.
+        var samples = Week(Three).Where(x => !x.Lights).ToList();
+        foreach (var steps in new[] { Whole.Take(3).ToArray(), [NumberStep.Whole, NumberStep.Whole, NumberStep.Whole, null] })
+            Assert.Equal(new[] { Level.Night }, Suggest4(samples, Three, steps)!.Changes.Select(c => c.Level));
+    }
+
+    [Fact]
+    public void ARaisedNightIsOfferedAlone() {
+        var s = Suggest4(Week(Three, morning: 76).Where(x => !x.Lights).ToList(), Three);
+        Assert.Equal(new[] { Level.Night }, s!.Changes.Select(c => c.Level));
+        Assert.False(s.Lower);
+    }
+
+    [Fact]
+    public void TheLightsOnLevelReadsWithTheLightsOn() {
+        var s = new Suggestion("m", [new LevelChange(Level.NightLights, 80, 72)], 8, true, 8, 4);
+        Assert.Equal("You lower Monitor by about 8 with the lights on. Set lights on 80 → 72?", s.Sentence("Monitor"));
+        var pair = new Suggestion("m", [new LevelChange(Level.Night, 60, 51), new LevelChange(Level.NightLights, 65, 65, true)], 5, true, 8, 4);
+        Assert.Equal("You lower Monitor by about 5 when the room is dim. Set night 60 → 51, lights on 65 (new)?", pair.Sentence("Monitor"));
+        Assert.Equal("suggest: Monitor night 60 → 51, lights on 65 (new) (8 changes on 4 days)", pair.LogLine("Monitor"));
+    }
+
+    [Fact]
+    public void ApplyWritesTheLightsOnLevelBesideNight() {
+        const string file = """{ "source": "sun", "location": { "latitude": 51.48, "longitude": 0 }, "monitors": [ { "match": "Monitor", "night": 60 } ] }""";
+        string text = ConfigPatch.SetLevels(new Dictionary<string, int> { ["night"] = 51, ["nightLights"] = 65 }, "Generic Monitor", "Monitor", file);
+        var mon = System.Text.Json.Nodes.JsonNode.Parse(text)!["monitors"]![0]!;
+        Assert.Equal(51, (int)mon["night"]!);
+        Assert.Equal(65, (int)mon["nightLights"]!);
     }
 }

@@ -75,7 +75,7 @@ partial class Controller {
     /// The monitor's input_number for a level, when the source is Home Assistant and one is configured.
     string? HaEntity(Level l, Mon m) {
         if (Source != Source.HomeAssistant || m.Spec?.HomeAssistant is not { } h) return null;
-        string? e = l switch { Level.Day => h.Day, Level.BlindDown => h.BlindDown, _ => h.Night };
+        string? e = l switch { Level.Day => h.Day, Level.BlindDown => h.BlindDown, Level.Night => h.Night, _ => h.NightLights };
         return e != null && Config.IsEntityId(e) ? e : null;
     }
 
@@ -86,11 +86,9 @@ partial class Controller {
     /// Whether some of the monitor's levels should come from Home Assistant but are not available this tick:
     /// Home Assistant is down (the sun stands in), or a configured helper reads below 0. Samples recorded
     /// with Home Assistant's levels must not be judged stale against local ones then.
+    /// The nightLights helper is part of the levels snapshot too (row index 3).
     bool HaLevelsUnavailable(Mon m, int i, Inputs s, bool haDown) =>
-        LevelText.All.Any(l => HaEntity(l, m) != null && !HaLevelAvailable(l, i, s, haDown))
-        // The nightLights helper is part of the levels snapshot too (row index 3).
-        || (Source == Source.HomeAssistant && m.Spec?.HomeAssistant?.NightLights is { } nlEntity && Config.IsEntityId(nlEntity)
-            && !(!haDown && s.FromHa is { } nlRaw && i < nlRaw.Length && nlRaw[i].Length > 3 && nlRaw[i][3] >= 0));
+        LevelText.All.Any(l => HaEntity(l, m) != null && !HaLevelAvailable(l, i, s, haDown));
 
     /// What a level can be stored as now: a whole number for a local level, the input_number's own step, or
     /// null when it comes from Home Assistant and is unavailable. Retry is true when the level is available
@@ -134,10 +132,16 @@ partial class Controller {
             if (!kept.Any(x => x.Monitor == m.Key)) continue;
             // Steps are only needed for the levels the samples can tell apart (the others are never proposed).
             var mine = kept.Where(x => x.Monitor == m.Key && Suggest.SameLevels(x.Levels, s.Levels[i])).ToList();
-            var cand = Suggest.Candidates(mine);
-            var steps = new NumberStep?[3];
+            var cand = Suggest.Candidates(mine, t: Cfg.Tuned);
+            // A monitor without nightLights may be offered one beside a lower night, but only when the room lights
+            // come from Home Assistant: without them the level would never be used.
+            bool hasNl = Rules.NightLightsLevel(s.Levels[i]) != null;
+            bool canAddNl = !hasNl && Source == Source.HomeAssistant && Cfg.HomeAssistant?.Lights is { } lightsEntity
+                            && Config.IsEntityId(lightsEntity) && cand.Contains(Level.Night);
+            var steps = new NumberStep?[4];
             foreach (var l in LevelText.All) {
-                if (!cand.Contains(l)) { steps[(int)l] = NumberStep.Whole; continue; }
+                if (l == Level.NightLights && !hasNl && !canAddNl) { steps[(int)l] = null; continue; }
+                if (!cand.Contains(l) && !(l == Level.NightLights && canAddNl)) { steps[(int)l] = NumberStep.Whole; continue; }
                 var r = await StepFor(l, m, i, s, haDown);
                 if (r.Retry) suggestDirty = true;   // Home Assistant did not answer: work it out again next tick
                 steps[(int)l] = r.Step;

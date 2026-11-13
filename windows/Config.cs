@@ -327,7 +327,7 @@ static class ConfigPatch {
         var entry = BestEntry(list, display);
         if (entry == null) { entry = new JsonObject { ["match"] = suggestedMatch }; list.Add(entry); }
         foreach (var (k, v) in levels)
-            if (k is "day" or "blindDown" or "night") entry[k] = Math.Clamp(v, 0, 100);
+            if (k is "day" or "blindDown" or "night" or "nightLights") entry[k] = Math.Clamp(v, 0, 100);
         root["monitors"] = list;
         var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
