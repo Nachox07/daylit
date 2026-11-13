@@ -158,6 +158,8 @@ into another computer right now) and which config entry matched which monitor.
    - macOS: the app asks on first start and saves it in the keychain. Gear menu → *Home Assistant
      token…* changes it. From Terminal instead:
      `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts).
+     The next time Daylit reads it, it moves the token to a keychain item only Daylit can read
+     (macOS may ask once, naming `security`).
    - Windows: the app asks on first start and saves it in Credential Manager. Right-click the tray
      icon → *Home Assistant token…* to change it.
    Settings → *Home Assistant* shows whether a token is stored ("Token: stored"), never the token.
@@ -218,12 +220,23 @@ The Settings window's *Home Assistant* pane has the field and shows what the sen
 
 ### Security notes
 
-- **macOS keychain.** Daylit reads the token through `/usr/bin/security`. A token saved from
-  Daylit's dialog trusts Daylit and that tool, so reading it never prompts; a token added from
-  Terminal prompts once, naming `security`. Either way, any process running as you can read that
-  one item with the same tool. Daylit doesn't read the keychain in-process because the downloadable build is
-  not signed with a stable Developer ID: the keychain would ask again after every update. If that
-  trade-off doesn't suit you, answer *Allow* instead (it asks again on each start).
+- **macOS keychain.** Daylit reads and writes the token itself, and its keychain item trusts only
+  Daylit: another program asking for it gets a keychain prompt. The release builds are signed with
+  the same certificate every time, so updates keep reading it without asking. A token saved by an
+  older Daylit, or added from Terminal with `security add-generic-password`, trusts
+  `/usr/bin/security` instead; Daylit reads it once that way (an older Daylit's item without a
+  question, a Terminal one asks once, naming `security`), then replaces it with an item only Daylit
+  can read and logs `token: moved to an app-only keychain item`. A build you sign ad-hoc yourself
+  gets a new signature each time, so the keychain asks after every rebuild.
+- **A changed Home Assistant address (macOS).** Each Mac remembers the address (scheme, host, port
+  and path) and the token name it last used with its token. If they change in the file underneath
+  it (another Mac through *Keep settings in iCloud Drive*, or a hand edit), Daylit sends the token
+  nowhere and the panel asks: "Home Assistant address changed to *host*. Send the token there?"
+  **Use** approves it on this Mac; **Not now** keeps waiting and asks again in an hour. Meanwhile
+  the sun stands in, as when Home Assistant is down (with a `location`), and push updates stay off.
+  A URL typed in this Mac's Settings window and a token pasted in *Home Assistant token…* are
+  approved at once; so is the address in use when you first start this version. Windows has no
+  synced config and doesn't ask.
 - **The config file is trusted.** Whoever can edit `config.json` already runs code as you, so
   Daylit doesn't try to defend against a hostile config beyond rejecting malformed values (entity
   ids and the URL above).

@@ -2,6 +2,49 @@
 import Foundation
 import DaylitCore
 
+/// Where this Mac may send its token (DaylitCore.TokenDestinationRule): the address and token name it last used,
+/// in UserDefaults, so a change in an iCloud-synced config.json is asked about before the token goes there.
+enum TokenGate {
+    private static let key = "tokenDestination"
+    private static let lock = NSLock()
+
+    static func destination(_ ha: HAConfig?) -> TokenDestination? { TokenDestination(url: ha?.url, tokenName: ha?.tokenName) }
+
+    static var remembered: TokenDestination? {
+        guard let d = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(TokenDestination.self, from: d)
+    }
+
+    static func remember(_ d: TokenDestination) {
+        if let data = try? JSONEncoder().encode(d) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    /// The decision for this config; nothing remembered yet remembers it (first start, or an upgrade).
+    static func decide(_ ha: HAConfig?) -> TokenDestinationRule.Decision {
+        lock.lock(); defer { lock.unlock() }
+        let cur = destination(ha)
+        let d = TokenDestinationRule.decide(current: cur, remembered: remembered)
+        if d == .remember, let cur { remember(cur) }
+        return d
+    }
+
+    /// Whether the token may go to this config's address now.
+    static func allows(_ ha: HAConfig?) -> Bool { [.send, .remember].contains(decide(ha)) }
+
+    /// Approved on this Mac: Use in the panel, or a token pasted in the token window (the destination it showed
+    /// when it opened, not whatever the config holds when Save lands).
+    static func trust(_ d: TokenDestination?) {
+        lock.lock(); defer { lock.unlock() }
+        if let d { remember(d) }
+    }
+
+    /// The URL typed in this Mac's Settings window: approved, keeping the remembered token name.
+    static func trustURLEdit(_ d: TokenDestination?) {
+        lock.lock(); defer { lock.unlock() }
+        if let d { remember(TokenDestinationRule.afterURLEdit(current: d, remembered: remembered)) }
+    }
+}
+
 enum HAClient {
     /// Read from the main thread (REST) and from the push client's detached keychain read: always under the lock.
     private static let cacheLock = NSLock()
@@ -9,34 +52,23 @@ enum HAClient {
     private static func cached(_ name: String) -> String? { cacheLock.lock(); defer { cacheLock.unlock() }; return tokenCache[name] }
     private static func cache(_ name: String, _ value: String?) { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache[name] = value }
     static func clearTokenCache() { cacheLock.lock(); defer { cacheLock.unlock() }; tokenCache = [:] }
+    /// The token from the keychain (TokenStore), cached until the config or the token changes.
     static func token(_ name: String) -> String? {
         if let t = cached(name) { return t }
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", name, "-w"]
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let s, !s.isEmpty else { return nil }
+        guard let s = TokenStore.read(name) else { return nil }
         cache(name, s)
         return s
     }
 
-    /// Whether a token is stored, without reading it (security exits 0 when the item exists).
-    static func tokenStored(_ name: String) -> Bool {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", name]
-        p.standardOutput = Pipe(); p.standardError = Pipe()
-        guard (try? p.run()) != nil else { return false }
-        p.waitUntilExit()
-        return p.terminationStatus == 0
-    }
+    /// Whether a token is stored, without reading it.
+    static func tokenStored(_ name: String) -> Bool { TokenStore.stored(name) }
 
     /// Transient (see `isTransient`): a connection that fails, or a gateway answer (502, 503, 504). Any other
     /// `.http` is an answer Home Assistant gave (403, 404, 500...), which will not fix itself in a minute.
     enum Failure: Error, Equatable {
         case noToken, rejected, unreachable, http(Int), badAnswer
+        /// The address or token name changed since this Mac last used the token: nothing was sent (TokenGate).
+        case notApproved
         var isTransient: Bool {
             switch self {
             case .unreachable: return true
@@ -50,9 +82,11 @@ enum HAClient {
     /// The NSURLError code of the last failed call (nil for an HTTP status).
     nonisolated(unsafe) static var lastCode: Int?
 
-    /// A POST with `body`, or a GET without one.
-    static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6) async -> Result<Data, Failure> {
+    /// A POST with `body`, or a GET without one. Only to an approved address (TokenGate) unless `approved`:
+    /// the Settings window's Test with a URL typed there.
+    static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6, approved: Bool = false) async -> Result<Data, Failure> {
         let name = ha.tokenName ?? "daylit-home-assistant"
+        guard approved || TokenGate.allows(ha) else { return .failure(.notApproved) }
         guard let token = token(name) else { return .failure(.noToken) }
         var base = ha.url ?? ""
         while base.hasSuffix("/") { base.removeLast() }
@@ -118,6 +152,7 @@ enum HAClient {
         case .unreachable: return "Cannot reach Home Assistant"
         case .http(let code): return "Home Assistant answered \(code)"
         case .badAnswer: return "Unexpected answer from Home Assistant (check the entity ids)"
+        case .notApproved: return "The Home Assistant address changed: choose Use in the panel to send the token there"
         }
     }
 }

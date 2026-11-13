@@ -148,6 +148,9 @@ iCloud bringing it over. macOS only: Windows keeps its own file.
   its own file as `~/.config/daylit/config.local-backup.json`, so nothing is lost.
 - **Turning it off** copies the iCloud file back to `~/.config/daylit/config.json`. The iCloud copy
   stays for your other Macs.
+- **A changed Home Assistant address** (or token name) from another Mac is not used until you
+  choose **Use** in the panel: until then this Mac's token goes nowhere and the sun stands in
+  ([docs/setup.md → Security notes](docs/setup.md#security-notes)).
 - **What stays on each Mac:** the Home Assistant token (in that Mac's keychain), levels set by hand,
   *Automatic*, linked monitors, and the gear menu's switches (pause on battery, light/dark from
   daylight, open at login).

@@ -18,6 +18,13 @@ import DaylitCore
     }
     @Published var localNetworkBlocked = false   // the problem is macOS's Local Network permission: the panel offers Open Settings
     @Published var accessibilityNeeded = false   // brightness keys wait for Accessibility permission: the panel offers Open Settings
+    /// The Home Assistant address or token name changed underneath (iCloud, a hand edit): the panel asks before the
+    /// token goes there (DaylitCore.TokenDestinationRule). nil: nothing to ask, or "Not now" for the hour.
+    @Published var tokenQuestion: String?
+    /// The destination held back and already logged, and the one "Not now" was chosen for, and when.
+    var tokenHeld: TokenDestination?
+    var tokenDismissed: TokenDestination?
+    var tokenDismissedAt: Date?
     @Published var login = SMAppService.mainApp.status == .enabled
     @Published var pauseOnBattery = true
     @Published var hasBattery = Power.hasBattery
@@ -147,6 +154,7 @@ import DaylitCore
         configProblem = err ?? srcErr ?? ddcNote   // shown in the panel too: an ignored ddcTool is easy to miss in the file
         problem = configProblem
         HAClient.clearTokenCache()
+        tokenQuestion = nil   // the next tick asks again if the new config's address is still not approved
         log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
             log(String(format: "sun elevation now %.2f° at %.3f, %.3f", solarElevation(latitude: l.latitude, longitude: l.longitude), l.latitude, l.longitude))
@@ -159,9 +167,10 @@ import DaylitCore
     /// Opens or closes the push socket for the current config, source, pause, Automatic and monitors (PushRule.wanted).
     func syncPush(force: Bool = false) {
         guard PushRule.wanted(push: config.homeAssistant?.push, source: source, paused: paused, auto: auto, hasMonitors: !mons.isEmpty),
-              let ha = config.homeAssistant, let url = PushRule.socketURL(ha.url ?? "") else { push.update(nil); return }
-        push.update(.init(url: url, tokenName: ha.tokenName ?? "daylit-home-assistant", entities: PushRule.entities(config), daylight: ha.light),
-                    force: force)
+              let ha = config.homeAssistant, let url = PushRule.socketURL(ha.url ?? ""),
+              TokenGate.allows(ha) else { push.update(nil); return }   // a changed address waits for Use in the panel
+        push.update(.init(url: url, haURL: ha.url ?? "", tokenName: ha.tokenName ?? "daylit-home-assistant", entities: PushRule.entities(config),
+                          daylight: ha.light), force: force)
     }
 
     func screensChanged() {
@@ -405,6 +414,23 @@ import DaylitCore
         let id = Focus.screenID().flatMap { s in mons.first { $0.id == s && $0.control != .none }?.id }
             ?? mons.first { $0.control != .none && $0.available }?.id
         if let id { key(up: up, fine: fine, on: id) }
+    }
+
+    /// "Use" on the token question: this address and token name are approved on this Mac.
+    func approveTokenDestination() {
+        guard let cur = tokenHeld else { return }   // the destination the question named, not a newer one
+        TokenGate.trust(cur)
+        Log.write("home assistant: token approved for \(cur.host) on this Mac")
+        tokenQuestion = nil; tokenHeld = nil; tokenDismissed = nil; tokenDismissedAt = nil
+        syncPush(force: true)
+        refresh()
+    }
+
+    /// "Not now": nothing is sent; the question comes back in an hour (TokenDestinationRule.snoozeSeconds).
+    func dismissTokenQuestion() {
+        tokenDismissed = tokenHeld; tokenDismissedAt = Date()
+        tokenQuestion = nil
+        Log.write("home assistant: not sending the token yet; asking again in \(Int(TokenDestinationRule.snoozeSeconds / 60)) min")
     }
 
     func setAuto(_ on: Bool) {
@@ -868,6 +894,21 @@ import DaylitCore
             return fromSun(nil)
         case .homeAssistant:
             guard let ha = config.homeAssistant else { return nil }
+            if let cur = TokenGate.destination(ha), TokenGate.decide(ha) == .ask {
+                // Changed underneath since the token was last used here: no call at all until Use. The sun stands in, as in an outage.
+                if tokenHeld != cur { tokenHeld = cur; Log.write(TokenDestinationRule.heldLine(current: cur)) }
+                let show = TokenDestinationRule.showQuestion(current: cur, dismissed: tokenDismissed,
+                                                             dismissedAt: tokenDismissedAt?.timeIntervalSince1970, now: Date().timeIntervalSince1970)
+                let q = show ? TokenDestinationRule.question(current: cur, remembered: TokenGate.remembered) : nil
+                if tokenQuestion != q { tokenQuestion = q }
+                problem = configProblem
+                guard config.location != nil else { detail = "Home Assistant · waiting for your OK"; return nil }
+                auto = automaticFallback(hasSwitch: !(ha.autoSwitch ?? "").isEmpty, lastFromHA: lastHAAuto,
+                                         local: UserDefaults.standard.object(forKey: "auto") as? Bool ?? true)
+                return fromSun(nil)
+            }
+            if tokenQuestion != nil { tokenQuestion = nil }
+            tokenHeld = nil
             var result = await HAClient.state(ha, mons)
             for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
                 guard case .failure(let failure) = result, failure.isTransient else { break }
