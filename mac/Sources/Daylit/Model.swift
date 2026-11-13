@@ -123,9 +123,10 @@ import DaylitCore
         suggestDirty = true; stepCache = [:]; notNumber = []; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
-        configProblem = err ?? srcErr
+        let ddcNote = DDC.configure(c.ddcTool)
+        if let ddcNote { log(ddcNote) }
+        configProblem = err ?? srcErr ?? ddcNote   // shown in the panel too: an ignored ddcTool is easy to miss in the file
         problem = configProblem
-        if let note = DDC.configure(c.ddcTool) { log(note) }
         HAClient.tokenCache = [:]
         log("config \(p.path): source=\(src) problem=\(configProblem ?? "none")")
         if src == .sun, let l = c.location {
@@ -379,7 +380,7 @@ import DaylitCore
     func setAuto(_ on: Bool) {
         auto = on
         if source == .homeAssistant, let ha = config.homeAssistant, let sw = ha.autoSwitch {
-            lastHAAuto = on
+            // lastHAAuto is saved when Home Assistant's own answer confirms it, not before.
             Task { _ = await HAClient.call(ha, "/api/services/input_boolean/" + (on ? "turn_on" : "turn_off"), ["entity_id": sw]) }
         } else {
             UserDefaults.standard.set(on, forKey: "auto")
@@ -586,10 +587,19 @@ import DaylitCore
     var lastHALights: Bool?
     /// The Automatic state Home Assistant last gave, kept across restarts: the sun fallback uses it, so an outage
     /// never flips Automatic (nil: none seen yet).
+    /// Saved with the autoSwitch it was seen on; read back only while the config names that same entity.
     var lastHAAuto: Bool? {
-        get { UserDefaults.standard.object(forKey: "lastHAAuto") as? Bool }
-        set { if let v = newValue { UserDefaults.standard.set(v, forKey: "lastHAAuto") } else { UserDefaults.standard.removeObject(forKey: "lastHAAuto") } }
+        get { storedAutomatic(value: UserDefaults.standard.object(forKey: "lastHAAuto") as? Bool,
+                              entity: UserDefaults.standard.string(forKey: "lastHAAutoEntity"), configured: config.homeAssistant?.autoSwitch) }
+        set {
+            if let v = newValue, let e = config.homeAssistant?.autoSwitch, !e.isEmpty {
+                UserDefaults.standard.set(v, forKey: "lastHAAuto"); UserDefaults.standard.set(e, forKey: "lastHAAutoEntity")
+            } else { UserDefaults.standard.removeObject(forKey: "lastHAAuto"); UserDefaults.standard.removeObject(forKey: "lastHAAutoEntity") }
+        }
     }
+    /// The missing-entity note last shown and when it was logged (the log gets it once, then every 10 minutes).
+    var missingNoteShown: String?
+    var missingNoteLoggedAt: Date?
     var lastProbe: String?
 
     func tick() async {
@@ -798,7 +808,15 @@ import DaylitCore
             switch result {
             case .success(let s):
                 let missing = s.missingEntities(ha)
-                problem = HAState.missingNote(missing) ?? configProblem
+                let note = HAState.missingNote(missing)
+                problem = HAState.problemLine(config: configProblem, missing: missing)
+                if let note {
+                    if HAErrorRule.shouldLog(message: note, lastMessage: missingNoteShown, lastLogged: missingNoteLoggedAt?.timeIntervalSince1970,
+                                             now: Date().timeIntervalSince1970) {
+                        Log.write("home assistant: \(note)"); missingNoteLoggedAt = Date()
+                    }
+                } else { missingNoteLoggedAt = nil }
+                missingNoteShown = note
                 if lastHAError != nil {
                     let mins = haDownSince.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
                     Log.write("home assistant: ok" + (mins > 0 ? " again after \(mins) min" : ""))
@@ -809,8 +827,10 @@ import DaylitCore
                 let pos = ha.cover != nil ? blindPosition(reported: s.pos, last: lastHAPos) : 100
                 lastHAPos = ha.cover != nil ? pos : nil
                 lastHALights = s.lights
-                if let a = s.auto { auto = a; if lastHAAuto != a { lastHAAuto = a } }
-                else { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
+                if let a = s.auto, lastHAAuto != a { lastHAAuto = a }
+                // A switch Home Assistant has no value for leaves Automatic as it was, as in an outage.
+                auto = automaticNow(hasSwitch: !(ha.autoSwitch ?? "").isEmpty, fromHA: s.auto, lastFromHA: lastHAAuto,
+                                    local: UserDefaults.standard.object(forKey: "auto") as? Bool ?? true)
                 // A sun entity Home Assistant does not have: the computed sun when there is a location, else night as before.
                 let elev = s.elev ?? config.location.map { solarElevation(latitude: $0.latitude, longitude: $0.longitude) } ?? -10
                 let sun = Int((daylightFraction(elevation: elev, tuning: config.tuned) * 100).rounded())

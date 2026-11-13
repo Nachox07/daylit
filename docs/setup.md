@@ -123,7 +123,7 @@ in the same menu. On macOS Daylit also notices the change within a few seconds.
 | `monitors` | Per-monitor overrides, matched by `match` (any case-insensitive part of the monitor's name). `label`, the levels `day`, `blindDown`, `night` (0–100, defaults 70/40/20; a value outside that range is a config problem, and a Home Assistant value above 100 counts as 100), an optional `nightLights` (0–100, [Lights on level](#lights-on-level)), an optional fixed `contrast` (0–100, [details](#contrast)) and, on macOS, `control` (`native` or `ddc`). |
 | `homeAssistant` | `url`, `tokenName` (default `daylit-home-assistant`) and the entities `autoSwitch`, `sun`, `cover`, `lights` and `light` (a daylight sensor, see [Clouds](#clouds-a-daylight-sensor)), each optional. |
 | `pauseOnBattery` | Starting value of *Pause on battery* in the gear menu (default `true`); the menu remembers your choice. |
-| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only). Only `m1ddc` is run: the Homebrew paths (`/opt/homebrew/bin/m1ddc`, `/usr/local/bin/m1ddc`) or a file named `m1ddc` in a `PATH` folder. Any other value is ignored, with a note in `--check-config` and the log. |
+| `ddcTool` | macOS only: path to `m1ddc` (Apple silicon only). Only Homebrew's `m1ddc` is run: `/opt/homebrew/bin/m1ddc` or `/usr/local/bin/m1ddc`, or the place one of those links points to under the Homebrew `Cellar`. Any other value (a bare `m1ddc` too: the app started at login has a shorter `PATH` than a terminal) is ignored, with a note in the panel, in `--check-config` and in the log. |
 | `builtIn` | macOS only: `false` hides the built-in screen's slider (shown while the lid is open; manual only, automatic mode never changes it). |
 
 Find the `match` text for your monitors with the built-in commands:
@@ -328,7 +328,7 @@ set.
 - **A monitor shows "no brightness control".** Turn on DDC/CI in the monitor's own menu, and try
   another cable or port: some docks and adapters block DDC. On Apple-silicon Macs, `brew install m1ddc` if it is
   missing. m1ddc does not support Intel Macs; there only monitors that accept macOS's own
-  brightness control work.
+  brightness control work. If the panel says "ddcTool ignored", the `ddcTool` in `config.json` is not Homebrew's `m1ddc`: remove it or point it at `/opt/homebrew/bin/m1ddc`.
 - **A monitor says "doesn't report its brightness".** Some monitors accept DDC changes but never
   answer reads. Move its slider once: if the monitor reacts, Daylit keeps it as write-only (the
   slider shows the last level sent, and automatic mode drives it). If it refuses, check DDC/CI in

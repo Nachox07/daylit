@@ -57,10 +57,10 @@ final class LevelSafetyTests: XCTestCase {
 final class HAMissingEntityTests: XCTestCase {
     func testTemplateRendersNullForAMissingAutoSwitchAndSun() {
         let t = HATemplate.build(HAConfig(url: "http://x", autoSwitch: "input_boolean.auto", sun: "sun.home"), [])
-        XCTAssertTrue(t.contains("is_state('input_boolean.auto','on') | tojson if states['input_boolean.auto'] else 'null'"), t)
-        XCTAssertTrue(t.contains("state_attr('sun.home','elevation') | float(-10) if states['sun.home'] else 'null'"), t)
+        XCTAssertTrue(t.contains("is_state('input_boolean.auto','on') | tojson if states['input_boolean.auto'] and states['input_boolean.auto'].state not in ['unavailable', 'unknown'] else 'null'"), t)
+        XCTAssertTrue(t.contains("state_attr('sun.home','elevation') | float if state_attr('sun.home','elevation') is number else 'null'"), t)
         let d = HATemplate.build(HAConfig(url: "http://x"), [])
-        XCTAssertTrue(d.contains("states['sun.sun']"), d)
+        XCTAssertTrue(d.contains("state_attr('sun.sun','elevation') is number"), d)
     }
 
     func testAnAnswerWithNullSunAndAutoParses() {
@@ -96,9 +96,41 @@ final class AutomaticFallbackTests: XCTestCase {
     }
 }
 
+final class AutomaticNowTests: XCTestCase {
+    func testHomeAssistantsAnswerWins() {
+        XCTAssertFalse(automaticNow(hasSwitch: true, fromHA: false, lastFromHA: true, local: true))
+        XCTAssertTrue(automaticNow(hasSwitch: true, fromHA: true, lastFromHA: false, local: false))
+    }
+    func testAMissingSwitchKeepsTheLastHomeAssistantValue() {
+        XCTAssertFalse(automaticNow(hasSwitch: true, fromHA: nil, lastFromHA: false, local: true))
+        XCTAssertTrue(automaticNow(hasSwitch: true, fromHA: nil, lastFromHA: nil, local: true))
+        XCTAssertFalse(automaticNow(hasSwitch: false, fromHA: nil, lastFromHA: true, local: false))
+    }
+}
+
+final class StoredAutomaticTests: XCTestCase {
+    func testTheValueCountsForTheEntityItWasSeenOn() {
+        XCTAssertEqual(storedAutomatic(value: false, entity: "input_boolean.a", configured: "input_boolean.a"), false)
+    }
+    func testAnotherOrUnknownEntityIgnoresTheValue() {
+        XCTAssertNil(storedAutomatic(value: false, entity: "input_boolean.a", configured: "input_boolean.b"))
+        XCTAssertNil(storedAutomatic(value: false, entity: nil, configured: "input_boolean.a"))
+        XCTAssertNil(storedAutomatic(value: false, entity: "input_boolean.a", configured: nil))
+    }
+}
+
+final class ProblemLineTests: XCTestCase {
+    func testAConfigProblemComesBeforeAMissingEntity() {
+        XCTAssertEqual(HAState.problemLine(config: "config.json: bad", missing: ["x.y"]), "config.json: bad")
+        XCTAssertEqual(HAState.problemLine(config: nil, missing: ["x.y"]), "Home Assistant has no entity x.y")
+        XCTAssertNil(HAState.problemLine(config: nil, missing: []))
+    }
+}
+
 final class DDCToolRuleTests: XCTestCase {
-    private func resolve(_ c: String?, path: [String] = ["/usr/bin", "/opt/tools"], present: Set<String> = []) -> (path: String?, note: String?) {
-        DDCToolRule.resolve(configured: c, pathDirs: path, exists: { present.contains($0) })
+    private let cellar = "/opt/homebrew/Cellar/m1ddc/1.2.0/bin/m1ddc"
+    private func resolve(_ c: String?, links: [String: String] = ["/opt/homebrew/bin/m1ddc": "/opt/homebrew/Cellar/m1ddc/1.2.0/bin/m1ddc"]) -> (path: String?, note: String?) {
+        DDCToolRule.resolve(configured: c, resolvingLinks: { links[$0] ?? $0 })
     }
     func testUnsetUsesTheDefaultWithoutANote() {
         XCTAssertNil(resolve(nil).path); XCTAssertNil(resolve(nil).note)
@@ -108,17 +140,23 @@ final class DDCToolRuleTests: XCTestCase {
         XCTAssertEqual(resolve("/opt/homebrew/bin/m1ddc").path, "/opt/homebrew/bin/m1ddc")
         XCTAssertEqual(resolve("/usr/local/bin/m1ddc").path, "/usr/local/bin/m1ddc")
     }
-    func testAnM1ddcOnThePathIsAccepted() {
-        XCTAssertEqual(resolve("m1ddc", present: ["/opt/tools/m1ddc"]).path, "/opt/tools/m1ddc")
-        XCTAssertEqual(resolve("/opt/tools/m1ddc").path, "/opt/tools/m1ddc")
-        XCTAssertNil(resolve("m1ddc").path)   // not on the PATH: default, nothing run from the file
+    func testTheCellarTargetOfAHomebrewLinkIsAccepted() {
+        XCTAssertEqual(resolve(cellar).path, cellar)
+        XCTAssertNotNil(resolve("/opt/homebrew/Cellar/other/1.0/bin/m1ddc").note)   // not what a Homebrew link points to
+        XCTAssertNotNil(resolve("/opt/homebrew/Cellar/m1ddc/9.9/bin/m1ddc").note)
+    }
+    func testALinkPointingOutsideTheCellarIsIgnored() {
+        XCTAssertNotNil(resolve("/tmp/evil/m1ddc", links: ["/opt/homebrew/bin/m1ddc": "/tmp/evil/m1ddc"]).note)
     }
     func testAnyOtherProgramIsIgnoredWithANote() {
-        for bad in ["/bin/sh", "/tmp/m1ddc", "/opt/tools/../tools/m1ddc", "/Users/x/evil", "sh", "m1ddc2", "/opt/tools/other", "../m1ddc"] {
-            let r = resolve(bad, present: ["/opt/tools/m1ddc"])
+        for bad in ["/bin/sh", "/tmp/m1ddc", "/opt/tools/m1ddc", "/opt/tools/../tools/m1ddc", "/Users/x/evil", "sh", "m1ddc", "m1ddc2", "../m1ddc"] {
+            let r = resolve(bad)
             XCTAssertNil(r.path, bad)
             XCTAssertEqual(r.note, DDCToolRule.note, bad)
         }
+    }
+    func testTheNoteNamesTheRule() {
+        XCTAssertEqual(DDCToolRule.note, "ddcTool ignored: only m1ddc from Homebrew is run")
     }
     func testConfigWithABadValueKeepsNoDdcTool() {
         let (c, err) = Config.parse(Data(#"{"ddcTool": "/bin/sh", "homeAssistant": {"url": "ftp://x"}}"#.utf8))

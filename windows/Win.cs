@@ -75,9 +75,16 @@ static class Settings {
     /// Automatic mode when it is not a Home Assistant switch.
     public static bool Auto { get => Get("Auto", true); set => Set("Auto", value); }
     /// The Automatic state Home Assistant last gave (null: none seen yet): the sun fallback uses it, so an outage never flips Automatic.
-    public static bool? LastHaAuto {
-        get => Registry.CurrentUser.OpenSubKey(Key)?.GetValue("LastHaAuto") is int i ? i == 1 : null;
-        set { if (value is bool v) Set("LastHaAuto", v); }
+    /// Saved with the autoSwitch it was seen on; read back only while the config names that same entity.
+    public static bool? LastHaAuto(string? entity) {
+        using var k = Registry.CurrentUser.OpenSubKey(Key);
+        bool? v = k?.GetValue("LastHaAuto") is int i ? i == 1 : null;
+        return Rules.StoredAutomatic(v, k?.GetValue("LastHaAutoEntity") as string, entity);
+    }
+    public static void SetLastHaAuto(bool value, string? entity) {
+        if (string.IsNullOrEmpty(entity)) return;
+        Set("LastHaAuto", value);
+        using var k = Registry.CurrentUser.CreateSubKey(Key); k.SetValue("LastHaAutoEntity", entity, RegistryValueKind.String);
     }
     /// Light/dark mode from daylight and room lights.
     public static bool AutoLook { get => Get("AutoLook", true); set => Set("AutoLook", value); }

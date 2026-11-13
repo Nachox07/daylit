@@ -29,6 +29,9 @@ public struct HAState: Decodable {
         ids.isEmpty ? nil : "Home Assistant has no entity " + ids.joined(separator: ", ")
     }
 
+    /// The problem line: a config problem first (the user fixes the file), else the missing entities.
+    public static func problemLine(config: String?, missing: [String]) -> String? { config ?? missingNote(missing) }
+
     /// nil when the answer is not what the template produces (e.g. a wrong entity id broke the JSON).
     public static func parse(_ d: Data) -> HAState? {
         guard let s = try? JSONDecoder().decode(HAState.self, from: d), s.m.values.allSatisfy({ $0.count == 6 }) else { return nil }
@@ -47,9 +50,10 @@ public enum HATemplate {
                                                                               night: ok($0.night), set: ok($0.set), nightLights: ok($0.nightLights)) }) }
         let pos = ha.cover.map { "state_attr('\($0)','current_position') | float(-1)" } ?? "100"
         let lights = ha.lights.map { "is_state('\($0)','on') | tojson" } ?? "false | tojson"   // bare false renders as Python False
-        // A missing entity renders null, not false: a typo must not look like "Automatic is off". states['…'] is None then.
-        let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson if states['\($0)'] else 'null' }}" } ?? "null"   // null outside {{ }}: Jinja has no null
-        let elev = "{{ state_attr('\(ha.sun ?? "sun.sun")','elevation') | float(-10) if states['\(ha.sun ?? "sun.sun")'] else 'null' }}"
+        // A missing or unavailable entity renders null, not false: a typo or an outage must not look like "Automatic is off". states['…'] is None when missing.
+        let auto = ha.autoSwitch.map { "{{ is_state('\($0)','on') | tojson if states['\($0)'] and states['\($0)'].state not in ['unavailable', 'unknown'] else 'null' }}" } ?? "null"   // null outside {{ }}: Jinja has no null
+        let sunId = ha.sun ?? "sun.sun"
+        let elev = "{{ state_attr('\(sunId)','elevation') | float if state_attr('\(sunId)','elevation') is number else 'null' }}"   // no number: null, so the computed sun is used
         let bri = ha.lights.map { "state_attr('\($0)','brightness') | float(0)" } ?? "0"
         let sat = ha.lights.map { "(state_attr('\($0)','hs_color') or [0, 100])[1] | float(100)" } ?? "100"
         func num(_ e: String?) -> String { e.map { "{{ states('\($0)') | float(-1) }}" } ?? "-1" }

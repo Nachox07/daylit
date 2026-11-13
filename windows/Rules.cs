@@ -107,6 +107,16 @@ static class Rules {
     /// one was ever seen, the local setting decides.
     public static bool AutomaticFallback(bool hasSwitch, bool? lastFromHa, bool local) => hasSwitch ? lastFromHa ?? local : local;
 
+    /// Automatic mode on a tick Home Assistant answered. Its switch decides when it gave a value; a switch it gave
+    /// none for (a missing entity, `unavailable`) leaves Automatic as it was, the same as during an outage.
+    public static bool AutomaticNow(bool hasSwitch, bool? fromHa, bool? lastFromHa, bool local) =>
+        fromHa ?? AutomaticFallback(hasSwitch, lastFromHa, local);
+
+    /// The Automatic state saved from Home Assistant counts only for the autoSwitch it was seen on: a different
+    /// entity in the config (or an older save with none recorded) starts again from the local setting.
+    public static bool? StoredAutomatic(bool? value, string? entity, string? configured) =>
+        !string.IsNullOrEmpty(configured) && entity == configured ? value : null;
+
     /// The nightLights level in a monitor's levels in effect (a fourth number, 0 or more); null when it has none.
     public static double? NightLightsLevel(double[] v) => v.Length > 3 && v[3] >= 0 ? (double?)v[3] : null;
 
@@ -271,6 +281,9 @@ static class HaTemplate {
     /// The problem line for those entities, or null when none is missing.
     public static string? MissingNote(IReadOnlyList<string> ids) => ids.Count == 0 ? null : "Home Assistant has no entity " + string.Join(", ", ids);
 
+    /// The problem line: a config problem first (the user fixes the file), else the missing entities.
+    public static string? ProblemLine(string? config, IReadOnlyList<string> missing) => config ?? MissingNote(missing);
+
     static string Num(string? entity, double fallback) =>
         string.IsNullOrWhiteSpace(entity) ? fallback.ToString(CultureInfo.InvariantCulture)
                                           : $"{{{{ states('{entity}') | float({fallback.ToString(CultureInfo.InvariantCulture)}) }}}}";
@@ -286,8 +299,8 @@ static class HaTemplate {
         string lights = h.Lights is { Length: > 0 } l ? $"is_state('{l}','on') | tojson" : "false | tojson";   // bare false renders as Python False
         string bri = h.Lights is { Length: > 0 } l2 ? $"state_attr('{l2}','brightness') | float(0)" : "0";
         string sat = h.Lights is { Length: > 0 } l3 ? $"(state_attr('{l3}','hs_color') or [0, 100])[1] | float(100)" : "100";
-        // A missing entity renders null, not false: a typo must not look like "Automatic is off". states['…'] is None then.
-        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson if states['{a}'] else 'null' }}}}" : "null";
+        // A missing or unavailable entity renders null, not false: a typo or an outage must not look like "Automatic is off". states['…'] is None when missing.
+        string auto = h.AutoSwitch is { Length: > 0 } a ? $"{{{{ is_state('{a}','on') | tojson if states['{a}'] and states['{a}'].state not in ['unavailable', 'unknown'] else 'null' }}}}" : "null";
         string mons_ = string.Join(", ", monitors.Select(e => {
             string set = e?.Set is { Length: > 0 } st
                 ? $"{Num(st, -1)}, {{{{ as_timestamp(states['{st}'].last_changed) if states['{st}'] else 0 }}}}" : "-1, 0";   // states['…']: None when missing; an object id may start with a digit
@@ -298,7 +311,7 @@ static class HaTemplate {
         string lightUnit = h.Light is { Length: > 0 } lu ? $"{{{{ state_attr('{lu}','unit_of_measurement') | tojson }}}}" : "null";   // W, kW, lx…; null when unknown
         string sun = string.IsNullOrWhiteSpace(h.Sun) ? "sun.sun" : h.Sun!;
         return $$$"""
-            {"elev": {{ state_attr('{{{sun}}}','elevation') | float(-10) if states['{{{sun}}}'] else 'null' }},
+            {"elev": {{ state_attr('{{{sun}}}','elevation') | float if state_attr('{{{sun}}}','elevation') is number else 'null' }},
              "pos": {{ {{{pos}}} }},
              "lights": {{ {{{lights}}} }},
              "auto": {{{auto}}},
