@@ -25,7 +25,7 @@ the keychain asks for the token after each rebuild: answer *Always Allow*, or te
   (suggested levels from repeated hand changes; `windows/Suggest.cs` is its twin), `Update` (whether a newer
   release is out and what changed; `windows/Update.cs` is its twin).
 - `Sources/Daylit/`: the app. `Model.swift` runs the tick, `Displays.swift` monitor I/O,
-  `Sources.swift` Home Assistant calls, `Token.swift` the token's
+  `Sources.swift` Home Assistant calls and which address may get the token, `Token.swift` the token's
   keychain item and dialog, `Keys.swift` brightness keys and
   shortcuts, `UI.swift` the panel, on-screen indicator and shortcuts window, `Look.swift`,
   `Cli.swift`, `Log.swift`, `App.swift`.

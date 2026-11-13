@@ -9,6 +9,8 @@ import DaylitCore
     /// What to connect to. The same target keeps the connection.
     struct Target: Equatable {
         let url: URL
+        /// homeAssistant.url as configured: the token goes out only while TokenGate approves it.
+        let haURL: String
         let tokenName: String
         let entities: [String]
         let daylight: String?
@@ -83,6 +85,12 @@ import DaylitCore
 
     private func open() {
         guard let t = target, !stopped else { return }
+        // Never authenticate to an address this Mac has not approved (an iCloud change waits for Use in the panel).
+        guard TokenGate.allows(HAConfig(url: t.haURL, tokenName: t.tokenName)) else {
+            close(); stopped = true
+            Log.write("push: address not approved on this Mac, waiting")
+            return
+        }
         conn += 1
         let c = conn, name = t.tokenName
         Task {

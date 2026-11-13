@@ -172,10 +172,13 @@ struct TokenView: View {
         w.contentViewController = NSHostingController(rootView: TokenView(service: service) { saved in
             window?.close()
             if saved {
+                // A token pasted here is for the address in the config now: approved on this Mac.
+                TokenGate.trust(model.config.homeAssistant)
+                model.tokenQuestion = nil
                 HAClient.clearTokenCache()
                 NotificationCenter.default.post(name: .daylitTokenSaved, object: nil)
                 Log.write("token: saved to the keychain")
-                model.push.tokenChanged()
+                model.syncPush(force: true)   // a fresh try, also after auth_invalid or a socket that waited for approval
                 model.refresh()
             }
         })

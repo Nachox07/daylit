@@ -55,6 +55,11 @@ import DaylitCore
                 d.updateShown = true; d.updateExpanded = true
                 return d
             }()))),
+            ("panel-token-question", AnyView(Panel(m: {
+                let d = model(two, source: .homeAssistant, detail: "Sun · 21.7° above the horizon")
+                d.tokenQuestion = "Home Assistant address changed to ha.example.local. Send the token there?"
+                return d
+            }()))),
             ("panel-empty", AnyView(Panel(m: model([], source: .off)))),
             ("hud", AnyView(HUDView(label: "Studio Display", value: 72))),
         ].map { ($0.0, AnyView($0.1.background(PanelBackground(cornerRadius: 16)))) } + [

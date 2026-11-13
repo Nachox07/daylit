@@ -112,6 +112,10 @@ import DaylitCore
             let name = ha.tokenName ?? "daylit-home-assistant"
             let stored = HAClient.tokenStored(name)   // presence only, never read or printed
             if !stored { notes.append("no Home Assistant token in the keychain as \"\(name)\" (see README; the user adds it)") }
+            // Read only: the check never approves or remembers an address.
+            if TokenDestinationRule.decide(current: TokenGate.destination(ha), remembered: TokenGate.remembered) == .ask {
+                notes.append("homeAssistant.url or tokenName changed since this Mac last used its token: nothing is sent until the user chooses Use in the panel")
+            }
             if let u = ha.url, Config.isCleartextToNonLocal(u) {
                 notes.append("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://")
             }

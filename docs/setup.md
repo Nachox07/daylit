@@ -222,6 +222,15 @@ The Settings window's *Home Assistant* pane has the field and shows what the sen
   question, a Terminal one asks once, naming `security`), then replaces it with an item only Daylit
   can read and logs `token: moved to an app-only keychain item`. A build you sign ad-hoc yourself
   gets a new signature each time, so the keychain asks after every rebuild.
+- **A changed Home Assistant address (macOS).** Each Mac remembers the address (scheme, host, port
+  and path) and the token name it last used with its token. If they change in the file underneath
+  it (another Mac through *Keep settings in iCloud Drive*, or a hand edit), Daylit sends the token
+  nowhere and the panel asks: "Home Assistant address changed to *host*. Send the token there?"
+  **Use** approves it on this Mac; **Not now** keeps waiting and asks again in an hour. Meanwhile
+  the sun stands in, as when Home Assistant is down (with a `location`), and push updates stay off.
+  A URL typed in this Mac's Settings window and a token pasted in *Home Assistant token…* are
+  approved at once; so is the address in use when you first start this version. Windows has no
+  synced config and doesn't ask.
 - **The config file is trusted.** Whoever can edit `config.json` already runs code as you, so
   Daylit doesn't try to defend against a hostile config beyond rejecting malformed values (entity
   ids and the URL above).

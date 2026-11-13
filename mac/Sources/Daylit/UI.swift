@@ -42,6 +42,16 @@ struct Panel: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
 
+            if let q = m.tokenQuestion {   // the address changed underneath: nothing is sent until Use
+                Label(q, systemImage: "key")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Use") { m.approveTokenDestination() }.accessibilityLabel("Use this Home Assistant address")
+                    Button("Not now") { m.dismissTokenQuestion() }
+                }
+                .controlSize(.small)
+            }
+
             if let p = [m.problem, m.suggestError].compactMap({ $0 }).joined(separator: "\n") as String?, !p.isEmpty {
                 Label(p, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)

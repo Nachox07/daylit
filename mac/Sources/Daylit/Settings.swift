@@ -145,6 +145,7 @@ struct SettingsView: View {
     @State private var lon = ""
     @State private var monitors: [MonitorDraft] = []
     @State private var haURL = ""
+    @State private var haURLLoaded = ""   // the file's URL when the window loaded: an edit here is approved for the token
     @State private var autoSwitch = ""
     @State private var sun = ""
     @State private var cover = ""
@@ -575,7 +576,7 @@ struct SettingsView: View {
         source = c.source ?? (src == .homeAssistant ? "homeAssistant" : src == .sun ? "sun" : "off")
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
-        haURL = h?.url ?? ""; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
+        haURL = h?.url ?? ""; haURLLoaded = haURL; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
         pushLoaded = h?.push; pushOn = h?.push ?? false
         checkUpdatesOn = c.checkUpdates ?? true
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
@@ -656,6 +657,11 @@ struct SettingsView: View {
             try FileManager.default.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
             try out.write(to: p, options: .atomic)
             Log.write("settings: saved config.json (source=\(e.source))")
+            if urlEdited {
+                // Typed on this Mac: the token may go there (the token name stays as approved before).
+                let (saved, _) = Config.load(from: p)
+                TokenGate.trustURLEdit(saved.homeAssistant)
+            }
             m.reload()
             close()
         } catch ConfigEditError.invalid(let why) {
@@ -678,7 +684,13 @@ struct SettingsView: View {
         }
     }
 
-    /// Checks the URL and the stored token, then that each entity typed here exists.
+    /// The URL field differs from the file's: typed here, so approved for the token (TokenGate).
+    var urlEdited: Bool {
+        TokenDestination.normalise(haURL) != TokenDestination.normalise(haURLLoaded) && TokenDestination.normalise(haURL) != nil
+    }
+
+    /// Checks the URL and the stored token, then that each entity typed here exists. A URL typed here may get the
+    /// token; one that changed underneath waits for Use in the panel, as everywhere else.
     func test() {
         let ids = [cover, lights, autoSwitch, sun, daylightSensor].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if let bad = ids.first(where: { !Config.isEntityId($0) }) { error = "\"\(bad)\" is not an entity id like light.office."; return }
@@ -687,7 +699,7 @@ struct SettingsView: View {
         let template = ids.isEmpty ? "ok" : ids.map { "{{ '\($0)' if states('\($0)') in ['unknown', 'unavailable'] else '' }}" }.joined(separator: " ")
         testing = true; error = nil; note = nil
         Task { @MainActor in
-            let r = await HAClient.call(ha, "/api/template", ["template": template])
+            let r = await HAClient.call(ha, "/api/template", ["template": template], approved: urlEdited)
             testing = false
             switch r {
             case .success(let d):
