@@ -1,5 +1,7 @@
-# Shapes the "What's changed" list the release workflow puts at the top of each release:
-# every pull request merged since the previous release, except the release's own bookkeeping.
+# Shapes the "What's changed" list the release workflow puts at the top of each release (and the
+# app's What's new): every pull request merged since the previous release, except the ones below.
 changelog:
   exclude:
-    labels: [packaging]   # the old "Point packaging at X.Y.Z" bookkeeping pull requests
+    labels:
+      - packaging   # the old "Point packaging at X.Y.Z" bookkeeping pull requests
+      - internal    # release process, CI and repository chores: nothing a user notices

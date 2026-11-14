@@ -105,6 +105,10 @@ A `v*` tag builds and publishes both apps (`.github/workflows/release.yml`). The
 with a stable certificate when the secrets `MAC_CERT_P12` and `MAC_CERT_PASSWORD` exist, else ad-hoc:
 see [docs/release-signing.md](docs/release-signing.md).
 
+The release notes (and the app's *What's new*) list every pull request merged since the last release
+(`.github/release.yml`). Label a pull request `internal` when users won't notice it (release process, CI,
+repository chores), so it stays out.
+
 ## Test without Home Assistant
 
 - No config at all: Daylit manages the detected monitors by hand (sliders, keys, indicator).
