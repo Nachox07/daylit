@@ -143,7 +143,7 @@ computer right now, or no token stored yet) and which config entry matched which
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);
   gear menu → *Keyboard shortcuts…*. `⌃⌥⌘D` / `Ctrl+Alt+D` switch light and dark mode (same switch as the
   gear menu item). On macOS the brightness keys also work once the user grants
-  Accessibility permission.
+  Accessibility permission; on Windows a keyboard's own brightness keys work with no setup.
 - When a newer release is out the panel says so (*Download*, *What's new*, *Not now*); gear menu →
   *Check for updates…* checks right away. Daylit never installs anything itself.
 - The gear menu's *Settings…* window lets the user change the source, location, levels, contrast (DDC

@@ -554,3 +554,26 @@ static class ShortcutRule {
         return null;
     }
 }
+
+/// The keyboard's own brightness keys: HID consumer usages 0x6F (Display Brightness Increment) and 0x70
+/// (Decrement), read through Raw Input. A key acts once, when its usage appears in a report; the reports
+/// that repeat it while held and the empty one on release do nothing.
+static class BrightnessKeys {
+    public const ushort Up = 0x6F, Down = 0x70;
+
+    /// true: brighter, false: dimmer, null: nothing new pressed. `before`, `now`: the usages in the device's
+    /// previous report and in this one.
+    public static bool? Pressed(IReadOnlyCollection<ushort> before, IReadOnlyCollection<ushort> now) =>
+        now.Contains(Up) && !before.Contains(Up) ? true : now.Contains(Down) && !before.Contains(Down) ? false : null;
+
+    /// Fallback when Windows can't parse a report: consumer usages as 16-bit little-endian values after the
+    /// report id (the common layout, e.g. 02-6F-00-00-00).
+    public static ushort[] FromBytes(ReadOnlySpan<byte> report) {
+        var r = new List<ushort>();
+        for (int i = 1; i + 1 < report.Length; i += 2) {
+            ushort u = (ushort)(report[i] | report[i + 1] << 8);
+            if (u is Up or Down) r.Add(u);
+        }
+        return r.ToArray();
+    }
+}

@@ -246,7 +246,10 @@ The Settings window's *Home Assistant* pane has the field and shows what the sen
 - macOS: the keyboard's brightness keys change the monitor holding the focused window (they need
   Accessibility permission; the built-in screen keeps working as usual). `⌃⌥⌘↑/↓` work without that
   permission. Add `⇧` for steps of 1.
-- Windows: `Ctrl+Alt+PgUp/PgDn`, plus `Shift` for steps of 1.
+- Windows: `Ctrl+Alt+PgUp/PgDn`, plus `Shift` for steps of 1. A keyboard with its own brightness keys (the standard
+  HID *brightness up/down* keys, often on `Fn`) works too, also with `Shift`, with no setup. Windows may still show its own
+  brightness flyout, but it leaves external monitors alone. Keys that only work through the keyboard maker's
+  software can't be seen.
 - Both: `⌃⌥⌘D` (macOS) / `Ctrl+Alt+D` (Windows) switch between light and dark mode, as the gear menu item does.
 - macOS's default is the key in the D position of a US keyboard, so on other layouts it may print another letter.
   On Windows, `Ctrl+Alt+D` is the same as AltGr+D on some layouts: change it if AltGr+D types a character you use.
