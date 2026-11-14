@@ -565,15 +565,4 @@ static class BrightnessKeys {
     /// previous report and in this one.
     public static bool? Pressed(IReadOnlyCollection<ushort> before, IReadOnlyCollection<ushort> now) =>
         now.Contains(Up) && !before.Contains(Up) ? true : now.Contains(Down) && !before.Contains(Down) ? false : null;
-
-    /// Fallback when Windows can't parse a report: consumer usages as 16-bit little-endian values after the
-    /// report id (the common layout, e.g. 02-6F-00-00-00).
-    public static ushort[] FromBytes(ReadOnlySpan<byte> report) {
-        var r = new List<ushort>();
-        for (int i = 1; i + 1 < report.Length; i += 2) {
-            ushort u = (ushort)(report[i] | report[i + 1] << 8);
-            if (u is Up or Down) r.Add(u);
-        }
-        return r.ToArray();
-    }
 }

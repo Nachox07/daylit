@@ -552,7 +552,7 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
     [DllImport("user32")] static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
     [DllImport("hid")] static extern int HidP_GetUsages(int type, ushort page, ushort collection, [Out] ushort[] usages, ref uint length,
                                                           IntPtr preparsed, IntPtr report, uint reportLength);
-    [DllImport("user32")] static extern short GetKeyState(int vk);
+    [DllImport("user32")] static extern short GetAsyncKeyState(int vk);
     readonly Dictionary<IntPtr, IntPtr> preparsed = [];
     readonly Dictionary<IntPtr, ushort[]> lastUsages = [];
 
@@ -564,20 +564,26 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
         try {
             if (GetRawInputData(input, 0x10000003, buf, ref size, header) != size) return;
             if (Marshal.ReadInt32(buf, 0) != 2 /* RIM_TYPEHID */) return;
+            if (size < header + 8) return;
             var device = Marshal.ReadIntPtr(buf, 8);
             int each = Marshal.ReadInt32(buf, (int)header), count = Marshal.ReadInt32(buf, (int)header + 4);
+            if (each <= 0 || count <= 0 || (long)each * count > size - header - 8) return;   // sizes that don't fit the buffer
             for (int i = 0; i < count; i++) {
                 var report = buf + (int)header + 8 + i * each;
                 var now = Usages(device, report, each);
                 var before = lastUsages.GetValueOrDefault(device, []);
                 lastUsages[device] = now;
-                if (BrightnessKeys.Pressed(before, now) is bool up) on(up, GetKeyState(0x10 /* VK_SHIFT */) < 0);
+                if (BrightnessKeys.Pressed(before, now) is bool up) on(up, GetAsyncKeyState(0x10 /* VK_SHIFT */) < 0);
             }
         } finally { Marshal.FreeHGlobal(buf); }
     }
 
     ushort[] Usages(IntPtr device, IntPtr report, int length) {
         if (!preparsed.TryGetValue(device, out var pp)) {
+            if (preparsed.Count >= 16) {   // a dock or switch that reconnects the keyboard gives it a new handle each time
+                foreach (var old in preparsed.Values) if (old != IntPtr.Zero) Marshal.FreeHGlobal(old);
+                preparsed.Clear(); lastUsages.Clear();
+            }
             uint n = 0;
             GetRawInputDeviceInfo(device, 0x20000005 /* RIDI_PREPARSEDDATA */, IntPtr.Zero, ref n);
             pp = IntPtr.Zero;
@@ -587,14 +593,11 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
             }
             preparsed[device] = pp;
         }
-        if (pp != IntPtr.Zero) {
-            var list = new ushort[32]; uint len = (uint)list.Length;
-            if (HidP_GetUsages(0 /* HidP_Input */, 0x0C, 0, list, ref len, pp, report, (uint)length) == 0x00110000 /* HIDP_STATUS_SUCCESS */)
-                return list[..(int)len];
-        }
-        var bytes = new byte[length];
-        Marshal.Copy(report, bytes, 0, length);
-        return BrightnessKeys.FromBytes(bytes);
+        if (pp == IntPtr.Zero) return [];
+        var list = new ushort[32]; uint len = (uint)list.Length;
+        // A report Windows can't parse (another report id, too many keys at once) says nothing about brightness.
+        return HidP_GetUsages(0 /* HidP_Input */, 0x0C, 0, list, ref len, pp, report, (uint)length) == 0x00110000 /* HIDP_STATUS_SUCCESS */
+            ? list[..(int)Math.Min(len, (uint)list.Length)] : [];
     }
     /// Registers up/down and their Shift variants (fine steps). False if any is taken.
     public bool Register(Shortcut up, Shortcut down) {

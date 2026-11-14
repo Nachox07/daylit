@@ -12,12 +12,4 @@ public class BrightnessKeysTests {
         Assert.Null(BrightnessKeys.Pressed(Up, None));    // release
         Assert.False(BrightnessKeys.Pressed(None, Down));
     }
-
-    [Fact]
-    public void ReadsTheUsageFromAPlainConsumerReport() {
-        Assert.Equal(Up, BrightnessKeys.FromBytes([0x02, 0x6F, 0x00, 0x00, 0x00]));
-        Assert.Equal(Down, BrightnessKeys.FromBytes([0x02, 0x70, 0x00, 0x00, 0x00]));
-        Assert.Empty(BrightnessKeys.FromBytes([0x02, 0x00, 0x00, 0x00, 0x00]));
-        Assert.Empty(BrightnessKeys.FromBytes([0x02, 0xE9, 0x00]));   // volume up is not a brightness key
-    }
 }
