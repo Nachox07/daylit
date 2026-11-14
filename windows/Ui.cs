@@ -527,7 +527,8 @@ static class TokenDialog {
     }
 }
 
-/// Ctrl+Alt+PageUp/PageDown (+Shift for fine steps), registered on a message-only window.
+/// Ctrl+Alt+PageUp/PageDown (+Shift for fine steps), registered on a message-only window, and the keyboard's
+/// brightness keys through Raw Input (+Shift for fine steps too).
 /// The WPF dispatcher pumps its messages like any other window's.
 sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
     [DllImport("user32")] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
@@ -539,6 +540,64 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
         this.on = on;
         this.onTheme = onTheme;
         CreateHandle(new WF.CreateParams { Parent = new IntPtr(-3) });   // HWND_MESSAGE
+        // The keyboard's own brightness keys (HID consumer control, page 0x0C usage 0x01), even while another app
+        // has the focus. Windows' own handler leaves external monitors alone, so the two don't fight.
+        var dev = new[] { new RawInputDevice { UsagePage = 0x0C, Usage = 0x01, Flags = 0x100 /* RIDEV_INPUTSINK */, Target = Handle } };
+        if (!RegisterRawInputDevices(dev, 1, (uint)Marshal.SizeOf<RawInputDevice>())) Log.Write("keys: the keyboard's brightness keys are not available");
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct RawInputDevice { public ushort UsagePage, Usage; public uint Flags; public IntPtr Target; }
+    [DllImport("user32", SetLastError = true)] static extern bool RegisterRawInputDevices(RawInputDevice[] d, uint n, uint size);
+    [DllImport("user32")] static extern uint GetRawInputData(IntPtr input, uint command, IntPtr data, ref uint size, uint headerSize);
+    [DllImport("user32")] static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
+    [DllImport("hid")] static extern int HidP_GetUsages(int type, ushort page, ushort collection, [Out] ushort[] usages, ref uint length,
+                                                          IntPtr preparsed, IntPtr report, uint reportLength);
+    [DllImport("user32")] static extern short GetAsyncKeyState(int vk);
+    readonly Dictionary<IntPtr, IntPtr> preparsed = [];
+    readonly Dictionary<IntPtr, ushort[]> lastUsages = [];
+
+    /// One WM_INPUT: the brightness usages in the report, acted on when one is newly pressed.
+    void RawInput(IntPtr input) {
+        uint header = (uint)(8 + 2 * IntPtr.Size), size = 0;
+        if (GetRawInputData(input, 0x10000003 /* RID_INPUT */, IntPtr.Zero, ref size, header) != 0 || size == 0) return;
+        var buf = Marshal.AllocHGlobal((int)size);
+        try {
+            if (GetRawInputData(input, 0x10000003, buf, ref size, header) != size) return;
+            if (Marshal.ReadInt32(buf, 0) != 2 /* RIM_TYPEHID */) return;
+            if (size < header + 8) return;
+            var device = Marshal.ReadIntPtr(buf, 8);
+            int each = Marshal.ReadInt32(buf, (int)header), count = Marshal.ReadInt32(buf, (int)header + 4);
+            if (each <= 0 || count <= 0 || (long)each * count > size - header - 8) return;   // sizes that don't fit the buffer
+            for (int i = 0; i < count; i++) {
+                var report = buf + (int)header + 8 + i * each;
+                var now = Usages(device, report, each);
+                var before = lastUsages.GetValueOrDefault(device, []);
+                lastUsages[device] = now;
+                if (BrightnessKeys.Pressed(before, now) is bool up) on(up, GetAsyncKeyState(0x10 /* VK_SHIFT */) < 0);
+            }
+        } finally { Marshal.FreeHGlobal(buf); }
+    }
+
+    ushort[] Usages(IntPtr device, IntPtr report, int length) {
+        if (!preparsed.TryGetValue(device, out var pp)) {
+            if (preparsed.Count >= 16) {   // a dock or switch that reconnects the keyboard gives it a new handle each time
+                foreach (var old in preparsed.Values) if (old != IntPtr.Zero) Marshal.FreeHGlobal(old);
+                preparsed.Clear(); lastUsages.Clear();
+            }
+            uint n = 0;
+            GetRawInputDeviceInfo(device, 0x20000005 /* RIDI_PREPARSEDDATA */, IntPtr.Zero, ref n);
+            pp = IntPtr.Zero;
+            if (n > 0) {
+                pp = Marshal.AllocHGlobal((int)n);
+                if (GetRawInputDeviceInfo(device, 0x20000005, pp, ref n) == unchecked((uint)-1)) { Marshal.FreeHGlobal(pp); pp = IntPtr.Zero; }
+            }
+            preparsed[device] = pp;
+        }
+        if (pp == IntPtr.Zero) return [];
+        var list = new ushort[32]; uint len = (uint)list.Length;
+        // A report Windows can't parse (another report id, too many keys at once) says nothing about brightness.
+        return HidP_GetUsages(0 /* HidP_Input */, 0x0C, 0, list, ref len, pp, report, (uint)length) == 0x00110000 /* HIDP_STATUS_SUCCESS */
+            ? list[..(int)Math.Min(len, (uint)list.Length)] : [];
     }
     /// Registers up/down and their Shift variants (fine steps). False if any is taken.
     public bool Register(Shortcut up, Shortcut down) {
@@ -555,9 +614,14 @@ sealed class HotkeyWindow : WF.NativeWindow, IDisposable {
     public void Unregister() { for (int i = 1; i <= 5; i++) UnregisterHotKey(Handle, i); }
     protected override void WndProc(ref WF.Message m) {
         if (m.Msg == 0x0312 /* WM_HOTKEY */) { int id = (int)m.WParam; if (id == 5) onTheme(); else on(id is 1 or 3, id >= 3); }
+        else if (m.Msg == 0x00FF /* WM_INPUT */) RawInput(m.LParam);
         base.WndProc(ref m);
     }
-    public void Dispose() { Unregister(); DestroyHandle(); }
+    public void Dispose() {
+        Unregister(); DestroyHandle();
+        foreach (var pp in preparsed.Values) if (pp != IntPtr.Zero) Marshal.FreeHGlobal(pp);
+        preparsed.Clear();
+    }
 }
 
 /// A key plus modifiers, in RegisterHotKey terms (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8).
