@@ -237,6 +237,10 @@ static class Rules {
                     level = Math.Clamp(target + (int)Math.Round(o * w, MidpointRounding.AwayFromZero), 0, 100);
                 else s = s with { Offset = null, OffsetSun = null, OffsetAt = null };
             }
+            // A target 1 point away from what the monitor shows waits until it is 2 away, so a target hovering on
+            // a rounding edge (99, 100, 99…) does not rewrite the monitor every few minutes. A hand-set level or a
+            // "set" from Home Assistant is never held back: they are already on the monitor.
+            if (Math.Abs(level - c) == 1 && s.LastSet == c) level = c;
             if (c != level) write = level;
             applied = level; c = level;
             s = s with { LastSet = level, LastTarget = target };

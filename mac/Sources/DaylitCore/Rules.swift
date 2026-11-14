@@ -280,6 +280,10 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
                 s.offset = nil; s.offsetSun = nil; s.offsetAt = nil
             }
         }
+        // A target 1 point away from what the monitor shows waits until it is 2 away, so a target hovering on
+        // a rounding edge (99, 100, 99…) does not rewrite the monitor every few minutes. A hand-set level or a
+        // "set" from Home Assistant is never held back: they are already on the monitor.
+        if abs(level - c) == 1 && s.lastSet == c { level = c }
         if c != level { step.write = level; step.level = level }
         applied = level; s.lastSet = level; s.lastTarget = want
     }
