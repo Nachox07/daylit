@@ -159,6 +159,16 @@ final class UserLevelWinsTests: XCTestCase {
         XCTAssertNil(levelAfterWrite(new: 70, ok: true, atStart: 40, now: 40, held: true))    // slider held
         XCTAssertNil(levelAfterWrite(new: 70, ok: false, atStart: 40, now: 40, held: false))  // refused
     }
+    func testATargetHoveringOnePointAwayDoesNotRewriteTheMonitor() {
+        func d(_ c: Int, _ want: Int, _ st: HoldState) -> Step {
+            decide(current: c, want: want, remote: nil, state: st, here: true, auto: true, dragging: false, sun: 1, touched: false)
+        }
+        let dip = d(100, 99, HoldState(lastSet: 100, lastTarget: 100))   // the target dips to 99, Daylit had written 100
+        XCTAssertNil(dip.write); XCTAssertEqual(dip.applied, 100); XCTAssertNil(dip.state.offset)
+        XCTAssertNil(d(100, 100, dip.state).write)          // and comes back: still nothing to write
+        XCTAssertEqual(d(100, 98, dip.state).write, 98)     // two points away it moves
+        XCTAssertEqual(d(70, 71, HoldState()).write, 71)    // nothing written yet: one point is written
+    }
     func testACommittedWriteLeavesTheSliderAtWhatWasWrittenSoAWriteOnlyMonitorGetsNoOffset() {
         let before = HoldState(lastSet: 40, lastTarget: 40)
         let step = decide(current: 40, want: 70, remote: nil, state: before, here: true, auto: true, dragging: false, sun: 1, touched: false)

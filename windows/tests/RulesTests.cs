@@ -130,6 +130,19 @@ public class DecideTests {
     }
 
     [Fact]
+    public void ATargetHoveringOnePointAwayDoesNotRewriteTheMonitor() {
+        var st = new Hold(null, 100, 100);
+        var dip = D(100, 99, s: st, touched: false);   // the target dips to 99, Daylit had written 100
+        Assert.Null(dip.Write); Assert.Equal(100, dip.Current); Assert.Null(dip.State.Offset);
+        Assert.Null(D(100, 100, s: dip.State, touched: false).Write);   // and comes back: still nothing to write
+        Assert.Equal(98, D(100, 98, s: dip.State, touched: false).Write);   // two points away it moves
+    }
+
+    [Fact]
+    public void AOnePointChangeIsWrittenWhenDaylitHasNotWrittenYet() =>
+        Assert.Equal(71, D(70, 71, touched: false).Write);
+
+    [Fact]
     public void ARefusedWriteIsRetriedAndNotMistakenForAHandSetLevel() {
         var first = D(40, 70, touched: false);
         Assert.Equal(70, first.Write);
