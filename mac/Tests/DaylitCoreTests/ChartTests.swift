@@ -91,9 +91,9 @@ final class ChartTests: XCTestCase {
     }
 
     func testALinkedMonitorEndsOnTheGroupsLevel() {
-        let d = explain(day: 80, blindDown: 60, night: 30, elev: 30, pos: 40, lights: false, linked: 64, leader: "Studio Display")
+        let d = explain(day: 80, blindDown: 60, night: 30, elev: 30, pos: 40, lights: false, linked: 64, leader: "LG 27UP850")
         XCTAssertEqual(d.level, 64)
-        XCTAssertEqual(d.steps.last, DecisionStep("Linked to Studio Display", "→ 64", final: true))
+        XCTAssertEqual(d.steps.last, DecisionStep("Linked to LG 27UP850", "→ 64", final: true))
     }
     func testWithAutomaticOffTheLastStepIsATarget() {
         let d = explain(day: 90, blindDown: 70, night: 45, elev: 30, pos: nil, lights: false, applying: false)

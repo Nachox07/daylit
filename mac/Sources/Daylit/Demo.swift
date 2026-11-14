@@ -35,7 +35,7 @@ import DaylitCore
             m.level = level; m.available = true; m.readState = .readable
             return m
         }
-        model.mons = [mon(1, "Studio Display", 80), mon(2, "Dell U2723QE", 100)]
+        model.mons = [mon(1, "LG 27UP850", 80), mon(2, "Dell U2723QE", 100)]
         model.source = .homeAssistant; model.auto = true
         model.detail = "Home Assistant · sun 64% · blind 80%"
         model.problem = nil; model.builtIn = nil; model.sync = false
@@ -99,14 +99,14 @@ import DaylitCore
         else { dell = ease(30, 70, from: 11, to: 13) }
         let linked = t >= 5 && t < 10
         // Linked, the first follows with the offset it had when the link went on (80 vs 60 → +20).
-        let studio = t < 6 ? 80 : (t < 10 ? 80 + (dell - 60) : 50)
+        let lg = t < 6 ? 80 : (t < 10 ? 80 + (dell - 60) : 50)
 
         if linked != wasSync {
             withAnimation(.snappy(duration: 0.25)) { model.sync = linked }
             wasSync = linked
         }
         if model.mons.count == 2 {
-            model.mons[0].level = studio.rounded()
+            model.mons[0].level = lg.rounded()
             model.mons[1].level = dell.rounded()
         }
     }
