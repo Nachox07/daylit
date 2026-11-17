@@ -164,6 +164,10 @@ iCloud bringing it over. macOS only: Windows keeps its own file.
 Build, test and screenshot steps for both apps are in [CONTRIBUTING.md](CONTRIBUTING.md). Both apps
 share their rules and have unit tests that run in CI on every push.
 
+Daylit is built with [Claude Code](https://www.anthropic.com/claude-code) as a coding assistant,
+which is why Claude shows up as a co-author on commits. Every change is tested on real monitors, on
+a Mac and a Windows PC, before a release.
+
 ## License
 
 [MIT](LICENSE). Home Assistant is a trademark of the Open Home Foundation; Daylit is not affiliated
