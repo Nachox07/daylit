@@ -142,3 +142,36 @@ public class AutomaticFallbackTests {
         Assert.False(Rules.AutomaticFallback(false, true, false));
     }
 }
+
+/// Numbers from Home Assistant are kept to the ranges they can really have, so an absurd answer can
+/// neither overflow a conversion to int nor push a formula past what it was written for.
+public class HaBoundsTests {
+    [Fact]
+    public void OutOfRangeValuesAreClamped() {
+        Assert.Equal(90, HaBounds.Elevation(1e30));
+        Assert.Equal(-90, HaBounds.Elevation(-1e30));
+        Assert.Equal(100, HaBounds.Position(1e30));
+        Assert.Equal(255, HaBounds.Brightness(1e30));
+        Assert.Equal(0, HaBounds.Saturation(-1e30));
+        Assert.Equal(-1, HaBounds.Reading(1e300));   // no real sensor reports that much: treated as no reading
+        Assert.Equal(-1, HaBounds.Age(-1e300));
+        Assert.Equal(new[] { 100, -1, 50, -1, 100, HaBounds.MaxTimestamp }, HaBounds.Row([1e30, -1e30, 50, -5, 1e30, 1e300]));
+    }
+
+    [Fact]
+    public void OrdinaryValuesAreUnchanged() {
+        Assert.Equal(-12.5, HaBounds.Elevation(-12.5));
+        Assert.Equal(-1, HaBounds.Position(-1));     // -1 = the blind has no position
+        Assert.Equal(200, HaBounds.Brightness(200));
+        Assert.Equal(20, HaBounds.Saturation(20));
+        Assert.Equal(850, HaBounds.Reading(850));
+        Assert.Equal(30, HaBounds.Age(30));
+        Assert.Equal(new double[] { 80, 40, 20, -1, 55, 1700000000 }, HaBounds.Row([80, 40, 20, -1, 55, 1700000000]));
+    }
+
+    [Fact]
+    public void LightsNoteStaysReadableForAnyBrightness() {
+        Assert.Equal(" · lights 100% white", Rules.LightsNote(true, 1e30, 0));
+        Assert.Equal(" · lights 100% white", Rules.LightsNote(true, 255, 0));
+    }
+}

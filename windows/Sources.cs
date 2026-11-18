@@ -68,6 +68,10 @@ static class HAClient {
             if (a == null || a.m == null || a.m.Length != mons.Count || a.m.Any(v => v == null || v.Length != 6)) {
                 LastError = "Unexpected answer from Home Assistant"; Transient = false; return null;
             }
+            // Every number kept to the range it can really have: an absurd answer must not reach the formulas.
+            a = a with { elev = a.elev is double e0 ? HaBounds.Elevation(e0) : null, pos = HaBounds.Position(a.pos),
+                         bri = HaBounds.Brightness(a.bri), sat = HaBounds.Saturation(a.sat), light = HaBounds.Reading(a.light),
+                         lightAge = HaBounds.Age(a.lightAge), m = a.m.Select(HaBounds.Row).ToArray() };
             // Local numbers wherever HA has no value; nightLights as a fourth when either has one.
             var levels = mons.Select((m, i) => Chart.EffectiveLevels(m.LocalLevels, a.m[i])).ToArray();
             var remote = a.m.Select(v => v[4] >= 0 && v[5] > 0 ? ((double, double)?)(v[4], v[5]) : null).ToArray();

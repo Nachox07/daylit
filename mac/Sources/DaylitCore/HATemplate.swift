@@ -15,6 +15,24 @@ public struct HAState: Decodable {
     /// setChanged is the set helper's last_changed (Unix seconds).
     public let m: [String: [Double]]
 
+    enum CodingKeys: String, CodingKey { case elev, pos, lights, auto, bri, sat, light, lightAge, lightUnit, m }
+
+    /// Every number is kept to the range it can really have (HABounds): an absurd answer must not crash a
+    /// conversion to Int or push a formula past what it was written for.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        elev = try c.decodeIfPresent(Double.self, forKey: .elev).map(HABounds.elevation)
+        pos = HABounds.position(try c.decode(Double.self, forKey: .pos))
+        lights = try c.decode(Bool.self, forKey: .lights)
+        auto = try c.decodeIfPresent(Bool.self, forKey: .auto)
+        bri = HABounds.brightness(try c.decode(Double.self, forKey: .bri))
+        sat = HABounds.saturation(try c.decode(Double.self, forKey: .sat))
+        light = try c.decodeIfPresent(Double.self, forKey: .light).map(HABounds.reading)
+        lightAge = try c.decodeIfPresent(Double.self, forKey: .lightAge).map(HABounds.age)
+        lightUnit = try c.decodeIfPresent(String.self, forKey: .lightUnit)
+        m = try c.decode([String: [Double]].self, forKey: .m).mapValues(HABounds.row)
+    }
+
     /// The configured entities Home Assistant does not have, as far as this answer shows: the autoSwitch
     /// (its `auto` came back null) and the sun entity (its `elev` came back null).
     public func missingEntities(_ ha: HAConfig) -> [String] {
@@ -78,5 +96,37 @@ public enum HATemplate {
          "lightUnit": \(lightUnit),
          "m": {\(m)}}
         """
+    }
+}
+
+/// The ranges Home Assistant's numbers can really have. Anything outside is clamped to the nearest end, or
+/// treated as "no value" (-1) where a huge number cannot be a real reading. The same rules as HaBounds on Windows.
+public enum HABounds {
+    /// The latest Unix time a set helper's last_changed is taken as (about the year 5100).
+    public static let maxTimestamp = 1e11
+    /// A light sensor reading above this is no real sensor (lux in full sun is ~120 000).
+    static let maxReading = 1e9
+
+    static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { v.isNaN ? lo : min(max(v, lo), hi) }
+
+    /// The sun's elevation in degrees.
+    public static func elevation(_ v: Double) -> Double { v.isNaN ? -10 : clamp(v, -90, 90) }
+    /// The blind's position 0–100; below 0 means it has none (-1).
+    public static func position(_ v: Double) -> Double { v.isNaN || v < 0 ? -1 : min(v, 100) }
+    /// Light brightness 0–255.
+    public static func brightness(_ v: Double) -> Double { clamp(v, 0, 255) }
+    /// hs_color saturation 0–100.
+    public static func saturation(_ v: Double) -> Double { clamp(v, 0, 100) }
+    /// A light sensor reading; -1 = none.
+    public static func reading(_ v: Double) -> Double { v.isNaN || v < 0 || v > maxReading ? -1 : v }
+    /// Seconds since the sensor reported; -1 = unknown.
+    public static func age(_ v: Double) -> Double { v.isNaN || v < 0 ? -1 : min(v, maxTimestamp) }
+    /// A monitor row [day, blindDown, night, nightLights, set, setChanged]: levels 0–100 or -1 (none),
+    /// setChanged a Unix time or -1. Other lengths pass through (parse rejects them).
+    public static func row(_ r: [Double]) -> [Double] {
+        r.enumerated().map { i, v in
+            if v.isNaN || v < 0 { return -1 }
+            return i == 5 ? min(v, maxTimestamp) : min(v, 100)
+        }
     }
 }

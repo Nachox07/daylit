@@ -377,7 +377,7 @@ public func lightsNote(lights: Bool, bri: Double, sat: Double, tuning t: Tuning 
     guard lights else { return "" }
     guard bri > 0 else { return " · lights on" }
     let tone = sat <= t.whiteSaturationMax ? " white" : sat > t.warmSaturationMin ? " warm" : ""
-    return " · lights \(Int((bri / 2.55).rounded()))%\(tone)"
+    return " · lights \(Int((HABounds.brightness(bri) / 2.55).rounded()))%\(tone)"
 }
 
 /// Whether a DDC monitor reports its brightness. Some monitors accept DDC writes but never answer

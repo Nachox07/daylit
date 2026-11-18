@@ -165,3 +165,36 @@ final class DDCToolRuleTests: XCTestCase {
         XCTAssertEqual(Config.parse(Data(#"{"ddcTool": "/bin/sh"}"#.utf8)).0?.ddcTool, "/bin/sh")   // a valid file still carries it; the rule decides
     }
 }
+
+/// Numbers from Home Assistant are kept to the ranges they can really have, so an absurd answer can
+/// neither crash a conversion to Int nor push a formula past what it was written for.
+final class HABoundsTests: XCTestCase {
+    func testOutOfRangeAnswerIsClampedWhenParsed() {
+        let a = #"{"elev": 1e30, "pos": 1e30, "lights": true, "auto": true, "bri": 1e30, "sat": -1e30, "light": 1e300, "lightAge": -1e300, "m": {"U": [1e30, -1e30, 50, -5, 1e30, 1e300]}}"#
+        let s = HAState.parse(Data(a.utf8))!
+        XCTAssertEqual(s.elev, 90)
+        XCTAssertEqual(s.pos, 100)
+        XCTAssertEqual(s.bri, 255)
+        XCTAssertEqual(s.sat, 0)
+        XCTAssertEqual(s.light, -1)            // no real sensor reports that much: treated as no reading
+        XCTAssertEqual(s.lightAge, -1)
+        XCTAssertEqual(s.m["U"], [100, -1, 50, -1, 100, HABounds.maxTimestamp])
+    }
+
+    func testOrdinaryAnswerIsUnchanged() {
+        let a = #"{"elev": -12.5, "pos": -1, "lights": true, "auto": null, "bri": 200, "sat": 20, "light": 850, "lightAge": 30, "m": {"U": [80, 40, 20, -1, 55, 1700000000]}}"#
+        let s = HAState.parse(Data(a.utf8))!
+        XCTAssertEqual(s.elev, -12.5)
+        XCTAssertEqual(s.pos, -1)              // -1 = the blind has no position
+        XCTAssertEqual(s.bri, 200)
+        XCTAssertEqual(s.sat, 20)
+        XCTAssertEqual(s.light, 850)
+        XCTAssertEqual(s.lightAge, 30)
+        XCTAssertEqual(s.m["U"], [80, 40, 20, -1, 55, 1700000000])
+    }
+
+    func testLightsNoteStaysReadableForAnyBrightness() {
+        XCTAssertEqual(lightsNote(lights: true, bri: 1e30, sat: 0), " · lights 100% white")
+        XCTAssertEqual(lightsNote(lights: true, bri: 255, sat: 0), " · lights 100% white")
+    }
+}
