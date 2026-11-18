@@ -25,6 +25,17 @@ trap 'rm -rf "$TMP"' EXIT
 for f in "$MAC_ZIP" "$WIN_ZIP"; do
   curl -fsSL -o "$TMP/$f" "$BASE/$f" || { echo "could not download $BASE/$f (is v$VERSION published?)" >&2; exit 1; }
 done
+# Releases after v1.8.0 carry SHA256SUMS, written by the release workflow from the zips it built.
+# The downloads must match it, so a zip replaced on the release page afterwards is caught here.
+if curl -fsSL -o "$TMP/SHA256SUMS" "$BASE/SHA256SUMS" 2>/dev/null; then
+  [ "$(grep -cE "  ($MAC_ZIP|$WIN_ZIP)\$" "$TMP/SHA256SUMS")" = 2 ] \
+    || { echo "SHA256SUMS of v$VERSION does not list both zips" >&2; exit 1; }
+  (cd "$TMP" && shasum -a 256 -c SHA256SUMS --ignore-missing >/dev/null) \
+    || { echo "the downloaded zips do not match SHA256SUMS of v$VERSION: do not publish" >&2; exit 1; }
+  echo "checked both zips against SHA256SUMS"
+else
+  echo "v$VERSION has no SHA256SUMS (a release before it existed): zips not cross-checked" >&2
+fi
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 MAC_SHA="$(sha "$TMP/$MAC_ZIP")"
 WIN_SHA="$(sha "$TMP/$WIN_ZIP" | tr '[:lower:]' '[:upper:]')"

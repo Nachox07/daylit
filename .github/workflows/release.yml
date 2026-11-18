@@ -30,47 +30,71 @@ jobs:
         run: swift test
         working-directory: mac
       - name: Build (Apple silicon + Intel)
-        # With the secrets MAC_CERT_P12 (base64 .p12) and MAC_CERT_PASSWORD the app is signed with that
-        # certificate (a stable identity, so macOS keeps its permissions across updates); without them
-        # build.sh signs ad-hoc, as before. See docs/release-signing.md.
+        # Signed with the certificate in the secrets MAC_CERT_P12 (base64 .p12) and MAC_CERT_PASSWORD: a
+        # stable identity, so macOS keeps its permissions and the keychain item across updates. Without
+        # them the release fails: an ad-hoc signed release would cost every user their permissions and
+        # the token. Local builds still sign ad-hoc. See docs/release-signing.md.
         env:
           VERSION: ${{ needs.version.outputs.version }}
           MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
           MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
-          if [ -n "$MAC_CERT_P12" ] && [ -n "$MAC_CERT_PASSWORD" ]; then
-            KEYCHAIN="$RUNNER_TEMP/daylit-signing.keychain-db"
-            P12="$RUNNER_TEMP/daylit-cert.p12"
-            trap 'rm -f "$P12"' EXIT   # the decoded certificate never outlives this step
-            KEYCHAIN_PASSWORD=$(uuidgen)
-            printf '%s' "$MAC_CERT_P12" | base64 --decode > "$P12"
-            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-            security set-keychain-settings -lut 3600 "$KEYCHAIN"
-            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-            security import "$P12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
-            rm -f "$P12"
-            unset MAC_CERT_P12 MAC_CERT_PASSWORD   # not needed any more: keep them out of the build's environment
-            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
-            security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-            # No -v: a self-signed certificate is not "trusted", but codesign can still use it.
-            DAYLIT_SIGN_IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\)/ {print $2; exit}')
-            if [ -z "$DAYLIT_SIGN_IDENTITY" ]; then
-              echo "::error::MAC_CERT_P12 holds no code-signing identity"
-              exit 1
-            fi
-            export DAYLIT_SIGN_IDENTITY
+          if [ -z "$MAC_CERT_P12" ] || [ -z "$MAC_CERT_PASSWORD" ]; then
+            echo "::error::MAC_CERT_P12 and MAC_CERT_PASSWORD must be set: a release is never signed ad-hoc (docs/release-signing.md)"
+            exit 1
           fi
+          KEYCHAIN="$RUNNER_TEMP/daylit-signing.keychain-db"
+          P12="$RUNNER_TEMP/daylit-cert.p12"
+          trap 'rm -f "$P12"' EXIT   # the decoded certificate never outlives this step
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          printf '%s' "$MAC_CERT_P12" | base64 --decode > "$P12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -k "$KEYCHAIN" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$P12"
+          unset MAC_CERT_P12 MAC_CERT_PASSWORD   # not needed any more: keep them out of the build's environment
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # No -v: a self-signed certificate is not "trusted", but codesign can still use it.
+          DAYLIT_SIGN_IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\)/ {print $2; exit}')
+          if [ -z "$DAYLIT_SIGN_IDENTITY" ]; then
+            echo "::error::MAC_CERT_P12 holds no code-signing identity"
+            exit 1
+          fi
+          export DAYLIT_SIGN_IDENTITY
           DAYLIT_UNIVERSAL=1 DAYLIT_VERSION="$VERSION" mac/build.sh "$RUNNER_TEMP"
-          if [ -n "${KEYCHAIN:-}" ]; then
-            codesign -dv "$RUNNER_TEMP/Daylit.app" 2>&1 | grep -E 'Authority|Signature|Identifier' | sed -n 1,3p || true
+          # The app must carry exactly that certificate: its leaf's SHA-1 is the identity's hash.
+          # An ad-hoc signature has no certificate, so the extraction leaves no file and this fails.
+          codesign --verify --strict "$RUNNER_TEMP/Daylit.app"
+          codesign -d --extract-certificates="$RUNNER_TEMP/daylit-signed-cert" "$RUNNER_TEMP/Daylit.app"
+          SIGNED=$(shasum -a 1 "$RUNNER_TEMP/daylit-signed-cert0" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+          if [ "$SIGNED" != "$DAYLIT_SIGN_IDENTITY" ]; then
+            echo "::error::Daylit.app is not signed with the release certificate"
+            exit 1
           fi
+          codesign -dv "$RUNNER_TEMP/Daylit.app" 2>&1 | grep -E 'Authority|Identifier' || true
+      - name: UI snapshots
+        run: mac/snapshots.sh "$RUNNER_TEMP/Daylit.app" "$RUNNER_TEMP/snapshots"
+      - name: Upload UI snapshots (renders, and diff-*.png when they differ)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshots-mac
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
+      - name: Zip (ditto keeps the signature)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          codesign --verify --strict "$RUNNER_TEMP/Daylit.app"   # still intact after the snapshot run
           ditto -c -k --keepParent "$RUNNER_TEMP/Daylit.app" "Daylit-mac-$VERSION.zip"
       - name: Remove the signing keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/daylit-signing.keychain-db" 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mac
+          name: release-mac
           path: Daylit-mac-*.zip
   windows:
     needs: version
@@ -89,10 +113,24 @@ jobs:
         run: |
           dotnet publish windows/Daylit.csproj -c Release -o out --nologo "-p:Version=$env:VERSION" -p:DebugType=none
           Remove-Item out/*.pdb -ErrorAction SilentlyContinue
-          Compress-Archive -Path out/* -DestinationPath "Daylit-windows-$env:VERSION.zip"
+      - name: UI snapshots
+        shell: pwsh
+        run: ./windows/snapshots.ps1 ./out/Daylit.exe (Join-Path $env:RUNNER_TEMP 'snapshots')
+      - name: Upload UI snapshots (renders, and diff-*.png when they differ)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snapshots-windows
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
+      - name: Zip
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: Compress-Archive -Path out/* -DestinationPath "Daylit-windows-$env:VERSION.zip"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows
+          name: release-windows
           path: Daylit-windows-*.zip
   release:
     needs: [version, macos, windows]
@@ -102,7 +140,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: release-*   # the two zips, never the snapshot renders
           merge-multiple: true
+      - name: Checksums
+        # SHA256SUMS lists both zips, so a download can be checked against what this run built:
+        # shasum -a 256 -c SHA256SUMS --ignore-missing (docs/setup.md → Checking a download).
+        run: |
+          sha256sum Daylit-mac-*.zip Daylit-windows-*.zip > SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq 2 ] || { echo "::error::expected exactly two release zips"; cat SHA256SUMS; exit 1; }
+          cat SHA256SUMS
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,8 +171,12 @@ jobs:
           Needs the .NET 10 Desktop Runtime: `winget install Microsoft.DotNet.DesktopRuntime.10`.
 
           Setup (location, Home Assistant, keys): see docs/setup.md in the repository.
+
+          **Check a download:** `shasum -a 256 -c SHA256SUMS --ignore-missing` in the folder with the
+          zip and `SHA256SUMS` (Windows: `Get-FileHash Daylit-windows-*.zip` and compare).
           NOTES
-          gh release create "$TAG" Daylit-mac-*.zip Daylit-windows-*.zip \
+          { echo; echo '```'; cat SHA256SUMS; echo '```'; } >> notes.md
+          gh release create "$TAG" Daylit-mac-*.zip Daylit-windows-*.zip SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --title "Daylit $TAG" --notes-file notes.md
   packages:
     # Homebrew tap and winget, through packaging/publish.sh. Needs the secret
