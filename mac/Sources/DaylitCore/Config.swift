@@ -113,7 +113,7 @@ public struct Config: Decodable {
 
     /// First problem found, or nil.
     public func validate() -> String? {
-        if let u = homeAssistant?.url, !u.isEmpty {
+        if let u = homeAssistant?.url?.trimmingCharacters(in: .whitespaces), !u.isEmpty {   // spaces only: no address, as on Windows
             guard let url = URL(string: u), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil else {
                 return "config.json: homeAssistant.url is not an http(s) URL"
             }
@@ -209,14 +209,16 @@ extension Config {
 
     /// The source to use, plus a problem to show when the config asks for something it cannot do.
     public func resolvedSource() -> (Source, String?) {
-        let hasHA = !(homeAssistant?.url ?? "").isEmpty
+        let hasHA = !(homeAssistant?.url ?? "").trimmingCharacters(in: .whitespaces).isEmpty
         let fallback: Source = location != nil ? .sun : .off
-        switch source {
-        case nil: return (hasHA ? .homeAssistant : fallback, nil)
+        // Case and spaces do not matter, and an empty source picks one as a missing one does (as on Windows).
+        switch source?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case nil, "": return (hasHA ? .homeAssistant : fallback, nil)
         case "off": return (.off, nil)
         case "sun": return location != nil ? (.sun, nil) : (.off, "Sun mode needs a location (latitude, longitude)")
-        case "homeAssistant": return hasHA ? (.homeAssistant, nil) : (fallback, "Home Assistant mode needs homeAssistant.url")
-        case let s?: return (hasHA ? .homeAssistant : fallback, "Unknown source \"\(s)\" (use off, sun or homeAssistant)")
+        case "homeassistant": return hasHA ? (.homeAssistant, nil) : (fallback, "Home Assistant mode needs homeAssistant.url")
+        // A source Daylit does not know does nothing rather than guess what was meant.
+        default: return (.off, "Unknown source \"\(source ?? "")\" (use off, sun or homeAssistant)")
         }
     }
 }

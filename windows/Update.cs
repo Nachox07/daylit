@@ -11,6 +11,10 @@ static class UpdateCheck {
     public const string ReleasesUrl = "https://api.github.com/repos/Nachox07/daylit/releases?per_page=20";
     /// First check a little after start, then once a day while running.
     public static readonly TimeSpan StartDelay = TimeSpan.FromSeconds(60), Interval = TimeSpan.FromHours(24);
+
+    /// Whether the automatic check is due, `elapsed` seconds after the last good answer (null: none yet).
+    /// A clock set back since then (negative elapsed) checks now rather than waiting for the old date to come back.
+    public static bool Due(double? elapsed) => elapsed is not double e || e < 0 || e >= Interval.TotalSeconds;
     /// The panel's What's new list shows this many changes, then "and N more".
     public const int ShownChanges = 8;
 

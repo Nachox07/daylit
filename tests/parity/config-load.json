@@ -1,0 +1,27 @@
+{
+  "about": "Reading config.json (Config.parse / Config.Parse): what kind of problem it has (none, json, value, source) and the source in effect.",
+  "cases": [
+    {"name": "an empty object is off", "fn": "parse", "in": {"text": "{}"}, "out": {"problem": "none", "source": "off"}},
+    {"name": "sun with a location", "fn": "parse", "in": {"text": "{\"source\": \"sun\", \"location\": {\"latitude\": 10, \"longitude\": 20}}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "sun without a location is a source problem", "fn": "parse", "in": {"text": "{\"source\": \"sun\"}"}, "out": {"problem": "source", "source": "off"}},
+    {"name": "no source with a location picks the sun", "fn": "parse", "in": {"text": "{\"location\": {\"latitude\": 10, \"longitude\": 20}}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "no source with a Home Assistant address picks it", "fn": "parse", "in": {"text": "{\"homeAssistant\": {\"url\": \"http://ha.example:8123\"}}"}, "out": {"problem": "none", "source": "homeAssistant"}},
+    {"name": "the source ignores case", "fn": "parse", "in": {"text": "{\"source\": \"Sun\", \"location\": {\"latitude\": 10, \"longitude\": 20}}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "the source ignores spaces", "fn": "parse", "in": {"text": "{\"source\": \" homeAssistant \", \"homeAssistant\": {\"url\": \"http://ha.example\"}}"}, "out": {"problem": "none", "source": "homeAssistant"}},
+    {"name": "an empty source picks one as a missing one does", "fn": "parse", "in": {"text": "{\"source\": \"\", \"location\": {\"latitude\": 10, \"longitude\": 20}}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "an unknown source is off", "fn": "parse", "in": {"text": "{\"source\": \"moon\", \"homeAssistant\": {\"url\": \"http://ha.example\"}}"}, "out": {"problem": "source", "source": "off"}},
+    {"name": "an address of spaces is no address", "fn": "parse", "in": {"text": "{\"homeAssistant\": {\"url\": \"   \"}, \"location\": {\"latitude\": 10, \"longitude\": 20}}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "a latitude out of range is a value problem", "fn": "parse", "in": {"text": "{\"location\": {\"latitude\": 100, \"longitude\": 20}}"}, "out": {"problem": "value", "source": "off"}},
+    {"name": "a location without longitude does not load", "fn": "parse", "in": {"text": "{\"source\": \"sun\", \"location\": {\"latitude\": 10}}"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "an empty location does not load", "fn": "parse", "in": {"text": "{\"location\": {}}"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "a non-http address is a value problem", "fn": "parse", "in": {"text": "{\"homeAssistant\": {\"url\": \"ftp://ha.example\"}}"}, "out": {"problem": "value", "source": "off"}},
+    {"name": "an entity id with capitals is a value problem", "fn": "parse", "in": {"text": "{\"homeAssistant\": {\"url\": \"http://ha.example\", \"lights\": \"Light.Desk\"}}"}, "out": {"problem": "value", "source": "off"}},
+    {"name": "a list is not a config", "fn": "parse", "in": {"text": "[1, 2]"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "null is not a config", "fn": "parse", "in": {"text": "null"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "line comments are allowed", "fn": "parse", "in": {"text": "{ // a note\n  \"source\": \"off\" }"}, "out": {"problem": "none", "source": "off"}},
+    {"name": "block comments and a trailing comma are allowed", "fn": "parse", "in": {"text": "{\"source\": \"sun\", /* here */ \"location\": {\"latitude\": 10, \"longitude\": 20},}"}, "out": {"problem": "none", "source": "sun"}},
+    {"name": "a comment inside a number does not join its digits", "fn": "parse", "in": {"text": "{\"monitors\": [{\"match\": \"X\", \"day\": 1/* x */0}]}"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "a block comment that never closes does not load", "fn": "parse", "in": {"text": "{\"source\": \"off\"} /* never closed"}, "out": {"problem": "json", "source": "off"}},
+    {"name": "comment marks inside a string are text", "fn": "parse", "in": {"text": "{\"homeAssistant\": {\"url\": \"http://ha.example/*x*/\"}}"}, "out": {"problem": "none", "source": "homeAssistant"}}
+  ]
+}

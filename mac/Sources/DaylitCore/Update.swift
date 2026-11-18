@@ -8,6 +8,13 @@ public enum UpdateCheck {
     /// First check a little after start, then once a day while running.
     public static let startDelay: Double = 60
     public static let interval: Double = 24 * 3600
+
+    /// Whether the automatic check is due, `elapsed` seconds after the last good answer (nil: none yet).
+    /// A clock set back since then (negative elapsed) checks now rather than waiting for the old date to come back.
+    public static func due(elapsed: Double?) -> Bool {
+        guard let e = elapsed else { return true }
+        return e < 0 || e >= interval
+    }
     public static let brewCommand = "brew upgrade --cask daylit"
     /// The panel's What's new list shows this many changes, then "and N more".
     public static let shownChanges = 8

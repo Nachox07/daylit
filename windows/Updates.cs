@@ -32,7 +32,7 @@ sealed partial class Controller {
         updateTimer = new DispatcherTimer(DispatcherPriority.Background, ui) { Interval = UpdateCheck.StartDelay };
         updateTimer.Tick += async (_, _) => {
             updateTimer.Interval = TimeSpan.FromHours(1);
-            bool due = updateLastCheck is not DateTime t || DateTime.UtcNow - t >= UpdateCheck.Interval;
+            bool due = UpdateCheck.Due(updateLastCheck is DateTime t ? (DateTime.UtcNow - t).TotalSeconds : null);
             if (CheckUpdates && due) await CheckForUpdates(manual: false);
         };
         updateTimer.Start();

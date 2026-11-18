@@ -24,16 +24,22 @@ public enum ConfigText {
                 i += 1; continue
             }
             if c == UInt8(ascii: "\"") { inString = true; out.append(c); i += 1; continue }
+            // A comment counts as a space, as in a JSON reader that skips comments: `1/* x */0` stays two
+            // numbers (an error), never the 10 that joining them would make.
             if c == UInt8(ascii: "/"), i + 1 < s.count, s[i + 1] == UInt8(ascii: "/") {
                 comments = true
                 while i < s.count, s[i] != UInt8(ascii: "\n") { i += 1 }
+                out.append(UInt8(ascii: " "))
                 continue
             }
             if c == UInt8(ascii: "/"), i + 1 < s.count, s[i + 1] == UInt8(ascii: "*") {
                 comments = true
-                i += 2
-                while i + 1 < s.count, !(s[i] == UInt8(ascii: "*") && s[i + 1] == UInt8(ascii: "/")) { i += 1 }
-                i += 2; continue
+                var j = i + 2
+                while j + 1 < s.count, !(s[j] == UInt8(ascii: "*") && s[j + 1] == UInt8(ascii: "/")) { j += 1 }
+                // Never closed: keep it, so the file fails to load instead of losing whatever follows.
+                guard j + 1 < s.count else { out.append(contentsOf: s[i...]); break }
+                out.append(UInt8(ascii: " "))
+                i = j + 2; continue
             }
             if c == UInt8(ascii: "}") || c == UInt8(ascii: "]") {
                 // Drop a comma that only has whitespace between it and this closing bracket.
@@ -139,7 +145,8 @@ public enum ConfigPatch {
             if m.nightLightsEditable {
                 if let v = m.nightLights { entry["nightLights"] = clamp(v) } else { entry["nightLights"] = nil }
             }
-            if let i { list[i] = entry } else { list.append(entry) }
+            // A new entry is claimed too: a second monitor of the same model keeps the first one's levels (as on Windows).
+            if let i { list[i] = entry } else { list.append(entry); claimed.insert(list.count - 1) }
         }
         root["monitors"] = list.isEmpty ? nil : list
 
@@ -160,9 +167,14 @@ public enum ConfigPatch {
         return out
     }
 
-    /// Two decimals, written as typed: a Double would serialize 51.48 as 51.479999999999997.
+    /// Two decimals, written as typed: a Double would serialize 51.48 as 51.479999999999997. A half rounds away
+    /// from zero from the number as shown (10.125 → 10.13), as on Windows, not from its binary value.
     static func round2(_ v: Double) -> NSDecimalNumber {
-        NSDecimalNumber(string: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), v == 0 ? 0 : v))
+        guard v.isFinite, v != 0 else { return 0 }
+        let r = NSDecimalNumber(string: "\(v)", locale: Locale(identifier: "en_US_POSIX"))
+            .rounding(accordingToBehavior: NSDecimalNumberHandler(roundingMode: .plain, scale: 2, raiseOnExactness: false,
+                                                                  raiseOnOverflow: false, raiseOnUnderflow: false, raiseOnDivideByZero: false))
+        return r == NSDecimalNumber.zero ? 0 : r
     }
     /// A whole number as an integer, otherwise as typed (no binary-float tails like 1.5000000001).
     static func number(_ v: Double) -> Any { v == v.rounded() && abs(v) < 1e9 ? Int(v) : NSDecimalNumber(string: String(v)) }

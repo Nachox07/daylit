@@ -17,6 +17,8 @@
     <Compile Include="../Push.cs" Link="App/Push.cs" />
     <Compile Include="../Update.cs" Link="App/Update.cs" />
     <None Include="../../config.example.json" Link="config.example.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The shared cases both apps run (tests/parity; ParityTests.cs here, ParityTests.swift on macOS). -->
+    <None Include="../../tests/parity/*.json" LinkBase="parity" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

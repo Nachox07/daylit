@@ -260,9 +260,9 @@ static class Rules {
     public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {
         t ??= new Tuning();
         if (!lights) return "";
-        if (bri <= 0) return " · lights on";
+        if (!(bri > 0)) return " · lights on";   // also a brightness that is not a number
         string tone = sat <= t.WhiteSaturationMax ? " white" : sat > t.WarmSaturationMin ? " warm" : "";
-        return $" · lights {(int)Math.Round(HaBounds.Brightness(bri) / 2.55)}%{tone}";
+        return $" · lights {(int)Math.Round(HaBounds.Brightness(bri) / 2.55, MidpointRounding.AwayFromZero)}%{tone}";
     }
 }
 

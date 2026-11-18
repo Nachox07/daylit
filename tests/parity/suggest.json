@@ -1,0 +1,29 @@
+{
+  "about": "Suggested levels (Suggest / Suggestion / NumberStep on both apps).",
+  "cases": [
+    {"name": "the main level set in Home Assistant clears the offset", "fn": "applyClearsOffset", "in": {"mainInHA": true, "fileWritten": false}, "out": true},
+    {"name": "the main level refused by Home Assistant keeps the offset", "fn": "applyClearsOffset", "in": {"mainInHA": false, "fileWritten": true}, "out": false},
+    {"name": "a local main level written to the file clears the offset", "fn": "applyClearsOffset", "in": {"mainInHA": null, "fileWritten": true}, "out": true},
+    {"name": "a local main level the file did not take keeps the offset", "fn": "applyClearsOffset", "in": {"mainInHA": null, "fileWritten": false}, "out": false},
+    {"name": "to the nearest step", "fn": "roundToStep", "in": {"v": 47.3, "step": {"min": 0, "max": 100, "step": 5}}, "out": 45},
+    {"name": "a half step rounds up", "fn": "roundToStep", "in": {"v": 47.5, "step": {"min": 0, "max": 100, "step": 5}}, "out": 50},
+    {"name": "below the range is the lowest step", "fn": "roundToStep", "in": {"v": -3, "step": {"min": 0, "max": 100, "step": 1}}, "out": 0},
+    {"name": "a step of 0 cannot be used", "fn": "roundToStep", "in": {"v": 50, "step": {"min": 0, "max": 100, "step": 0}}, "out": null},
+    {"name": "above a narrow range is its top", "fn": "roundToStep", "in": {"v": 50, "step": {"min": 10, "max": 20, "step": 1}}, "out": 20},
+    {"name": "a decimal step", "fn": "roundToStep", "in": {"v": 33, "step": {"min": 0, "max": 100, "step": 2.5}}, "out": 32.5},
+    {"name": "a whole number has no decimals", "fn": "fmt", "in": {"v": 45}, "out": "45"},
+    {"name": "one decimal", "fn": "fmt", "in": {"v": 32.5}, "out": "32.5"},
+    {"name": "two decimals, a half rounds up", "fn": "fmt", "in": {"v": 0.125}, "out": "0.13"},
+    {"name": "trailing zeros are trimmed", "fn": "fmt", "in": {"v": 62.2}, "out": "62.2"},
+    {"name": "the same levels", "fn": "sameLevels", "in": {"a": [1, 2, 3], "b": [1, 2, 3]}, "out": true},
+    {"name": "levels a millionth apart are the same", "fn": "sameLevels", "in": {"a": [1, 2, 3], "b": [1, 2, 3.0000001]}, "out": true},
+    {"name": "different levels", "fn": "sameLevels", "in": {"a": [1, 2, 3], "b": [1, 2, 4]}, "out": false},
+    {"name": "a different count", "fn": "sameLevels", "in": {"a": [1, 2, 3], "b": [1, 2]}, "out": false},
+    {"name": "an input_number's min, max and step", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100, \"step\": 1}}"}, "out": {"min": 0, "max": 100, "step": 1}},
+    {"name": "a step that is true is not a number", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100, \"step\": true}}"}, "out": null},
+    {"name": "a missing step", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100}}"}, "out": null},
+    {"name": "a step of 0", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100, \"step\": 0}}"}, "out": null},
+    {"name": "max below min", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 50, \"max\": 10, \"step\": 1}}"}, "out": null},
+    {"name": "not JSON", "fn": "numberStep", "in": {"json": "unavailable"}, "out": null}
+  ]
+}

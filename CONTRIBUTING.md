@@ -57,6 +57,25 @@ dotnet test windows/tests/Daylit.Tests.csproj        # Rules.cs + Config.cs, xUn
 CI runs both before building. Put new logic where it can be tested (`DaylitCore` / `Rules.cs`) and
 keep the app files for the parts that touch the OS: displays, keys, windows, network.
 
+### Shared test cases
+
+`tests/parity/` holds cases both apps run: `ParityTests.swift` on macOS and `ParityTests.cs` on Windows read
+the same files, so a rule cannot drift apart between the two. Each file is one area (update checks, Home
+Assistant numbers, the brightness target and small rules, a tick's hold decision, reading config.json, saving
+into it, suggested levels), and each case is
+
+```json
+{ "name": "a half rounds up", "fn": "target", "in": { "levels": [71, 40, 20], "elev": 4.5, "pos": 100, "lights": false }, "out": 46 }
+```
+
+`name` says what the case shows, `fn` picks the function the runners call, `in` its arguments and `out` the
+result. JSON has no NaN or infinity: write them as the strings `"NaN"`, `"Infinity"`, `"-Infinity"`.
+
+To add a case, add it to the file for its area and run both test suites. A new `fn`, or a new file, needs a
+line in both runners (every file in the folder runs, and one with no runner fails the test). When the
+two apps disagree, README → *How it works* and docs/setup.md decide which one is right; fix the other one in the
+same change. Keep the platform-specific tests for what only one app has.
+
 ### UI snapshots (visual regression)
 
 Each app can draw its panel and on-screen indicator offscreen from fixed, made-up state (two

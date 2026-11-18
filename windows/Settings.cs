@@ -50,6 +50,8 @@ sealed class SettingsWindow : Window {
     ];
 
     readonly string path;
+    /// A level as a whole number, rounded as macOS does: a 62.75 in the file is saved as 63, not cut to 62.
+    static int Whole(double v) => (int)Math.Round(v, MidpointRounding.AwayFromZero);
     /// Snapshots: a fixed time, so "Sun now" and the previews do not change between runs.
     public static DateTimeOffset? FixedNow;
     /// Snapshots: a made-up token state, so the machine that renders them does not matter.
@@ -424,8 +426,8 @@ sealed class SettingsWindow : Window {
         s.Minimum = 0; s.Maximum = 100; s.SmallChange = 1; s.LargeChange = 10; s.IsSnapToTickEnabled = true; s.TickFrequency = 1;
         s.VerticalAlignment = VerticalAlignment.Center; s.Margin = new Thickness(0, 0, 8, 0);
         System.Windows.Automation.AutomationProperties.SetName(s, title);
-        s.ValueChanged += (_, _) => { pct.Text = $"{(int)s.Value}%"; Refresh(); };
-        pct.Text = $"{(int)s.Value}%";
+        s.ValueChanged += (_, _) => { pct.Text = $"{Whole(s.Value)}%"; Refresh(); };
+        pct.Text = $"{Whole(s.Value)}%";
         var g = new Grid { Margin = new Thickness(0, 4, 0, 4) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -572,7 +574,7 @@ sealed class SettingsWindow : Window {
                 lit = litValue; litKeep = keepLit;
             }
             mons.Add(new SettingsEdit.Monitor(r.mon.D.Friendly, ConfigPatch.SuggestMatch(r.mon.D.Friendly), r.label.Text,
-                                              (int)r.day.Value, (int)r.blind.Value, (int)r.night.Value, contrast, r.contrast != null && !contrastKeep,
+                                              Whole(r.day.Value), Whole(r.blind.Value), Whole(r.night.Value), contrast, r.contrast != null && !contrastKeep,
                                               lit, ShowsNightLights && !litKeep));
         }
         var edit = new SettingsEdit(SourceTag, Coords?.lat, Coords?.lon, mons,
