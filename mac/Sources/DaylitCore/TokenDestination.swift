@@ -33,6 +33,18 @@ public struct TokenDestination: Codable, Equatable, Sendable {
         return "\(scheme)://\(h):\(port)\(path)"
     }
 
+    /// The address as a person reads it: `https://ha.example.local:443/ha` → `https://ha.example.local/ha`
+    /// (the default port left out). Shown in the token window, which approves exactly this address.
+    public var shown: String {
+        guard let r = url.range(of: "://") else { return url }
+        let rest = url[r.upperBound...]
+        let slash = rest.firstIndex(of: "/") ?? rest.endIndex
+        var authority = String(rest[..<slash])
+        let defaultPort = url.hasPrefix("https://") ? ":443" : ":80"
+        if authority.hasSuffix(defaultPort) { authority.removeLast(defaultPort.count) }
+        return String(url[..<r.upperBound]) + authority + rest[slash...]
+    }
+
     /// The host for the panel line ("ha.example.local").
     public var host: String {
         var h = URLComponents(string: url)?.host ?? url
@@ -45,20 +57,30 @@ public enum TokenDestinationRule {
     public enum Decision: Equatable {
         /// The remembered destination: send the token.
         case send
-        /// Nothing remembered yet (first start, or an upgrade from a version without this check): remember
-        /// this one and send, with no question.
-        case remember
-        /// Changed since the token was last used: send nothing until the user chooses Use.
+        /// Nothing remembered and no token stored on this Mac: there is nothing to send, so nothing to ask (the
+        /// caller says "no token").
+        /// Nothing is remembered either: the address is approved when a token is pasted in the token window
+        /// (which shows it) or when the user chooses Use.
+        case noToken
+        /// Changed since the token was last used, or a token is stored but no address was ever approved for it
+        /// on this Mac (an upgrade from a version without this check, or a token added from Terminal): send
+        /// nothing until the user chooses Use.
         case ask
         /// No valid address: send nothing (the config check already says why).
         case hold
     }
 
-    public static func decide(current: TokenDestination?, remembered: TokenDestination?) -> Decision {
+    /// `tokenStored` is only consulted when nothing is remembered (pass a closure so the keychain is not
+    /// queried on every call).
+    public static func decide(current: TokenDestination?, remembered: TokenDestination?, tokenStored: () -> Bool) -> Decision {
         guard let current else { return .hold }
-        guard let remembered else { return .remember }
+        guard let remembered else { return tokenStored() ? .ask : .noToken }
         return current == remembered ? .send : .ask
     }
+
+    /// Whether the token may be read and sent. Not with `.noToken`: a token stored a moment later (from
+    /// Terminal) must still be asked about, so the caller reports "no token" without reading the keychain.
+    public static func allows(_ d: Decision) -> Bool { d == .send }
 
     /// What to remember after the URL is edited in this Mac's Settings window. The window has no token-name
     /// field, so a token name changed in the file is not approved by saving it: the remembered one stays.
@@ -68,17 +90,21 @@ public enum TokenDestinationRule {
         return d
     }
 
-    /// The question in the panel.
+    /// The question in the panel: the whole address (scheme, port and path), since Use approves all of it.
     public static func question(current: TokenDestination, remembered: TokenDestination?) -> String {
-        if let r = remembered, r.url == current.url, r.tokenName != current.tokenName {
-            return "The Home Assistant token name changed to “\(current.tokenName)”. Send that token to \(current.host)?"
+        guard let r = remembered else { return "Send this Mac’s Home Assistant token to \(current.shown)?" }
+        if r.url == current.url, r.tokenName != current.tokenName {
+            return "The Home Assistant token name changed to “\(current.tokenName)”. Send that token to \(current.shown)?"
         }
-        return "Home Assistant address changed to \(current.host). Send the token there?"
+        return "Home Assistant address changed to \(current.shown). Send the token there?"
     }
 
     /// The log line when a change is first held back (never the token).
-    public static func heldLine(current: TokenDestination) -> String {
-        "home assistant: address or token name changed (now \(current.host), token \"\(current.tokenName)\"); not sending the token until Use is chosen in the panel"
+    public static func heldLine(current: TokenDestination, remembered: TokenDestination?) -> String {
+        if remembered == nil {
+            return "home assistant: no address approved for the token on this Mac yet (now \(current.host), token \"\(current.tokenName)\"); not sending the token until Use is chosen in the panel"
+        }
+        return "home assistant: address or token name changed (now \(current.host), token \"\(current.tokenName)\"); not sending the token until Use is chosen in the panel"
     }
 
     /// "Not now" hides the question for this long; then it shows again. Nothing is sent meanwhile.

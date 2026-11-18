@@ -137,7 +137,8 @@ computer right now, or no token stored yet) and which config entry matched which
 - Home Assistant: the app asks for a long-lived token (HA profile → Security) and the user pastes it.
   Windows keeps it in Credential Manager, macOS in the keychain. On macOS the user can also store it
   from Terminal: `security add-generic-password -s daylit-home-assistant -a homeassistant -w` (it prompts);
-  Daylit then moves it to a keychain item only Daylit can read. With *Keep settings in iCloud Drive*, a
+  Daylit then moves it to a keychain item only Daylit can read, and the panel asks once (**Use**) before
+  sending it to the configured address. With *Keep settings in iCloud Drive*, a
   `homeAssistant.url` or `tokenName` changed on another Mac (or by hand in the file) waits for the user to
   choose **Use** in the panel before the token goes there; a URL changed in the Settings window does not.
 - Hotkeys default to `Ctrl+Alt+PgUp/PgDn` on Windows and `⌃⌥⌘↑/↓` on macOS (+Shift for steps of 1);

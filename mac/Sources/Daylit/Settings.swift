@@ -696,10 +696,16 @@ struct SettingsView: View {
         if let bad = ids.first(where: { !Config.isEntityId($0) }) { error = "\"\(bad)\" is not an entity id like light.office."; return }
         var ha = m.config.homeAssistant ?? HAConfig()
         ha.url = haURL.trimmingCharacters(in: .whitespaces)
+        let approved = urlEdited
+        if approved, let typed = TokenDestination(url: ha.url, tokenName: tokenNameLoaded) {
+            // A URL typed here may get the token, but only the token name already approved on this Mac (as Save
+            // remembers it), not one the file changed to underneath.
+            ha.tokenName = TokenDestinationRule.afterURLEdit(current: typed, remembered: TokenGate.remembered).tokenName
+        }
         let template = ids.isEmpty ? "ok" : ids.map { "{{ '\($0)' if states('\($0)') in ['unknown', 'unavailable'] else '' }}" }.joined(separator: " ")
         testing = true; error = nil; note = nil
         Task { @MainActor in
-            let r = await HAClient.call(ha, "/api/template", ["template": template], approved: urlEdited)
+            let r = await HAClient.call(ha, "/api/template", ["template": template], approved: approved)
             testing = false
             switch r {
             case .success(let d):

@@ -137,6 +137,8 @@ struct SystemKeychain: TokenKeychain {
 
 struct TokenView: View {
     let service: String
+    /// Where the token may go once saved (`TokenDestination.shown`); saving approves exactly this address.
+    let destination: String?
     let done: (Bool) -> Void
     @State private var token = ""
     @State private var error: String? = nil
@@ -146,6 +148,11 @@ struct TokenView: View {
             Text("Paste a Home Assistant long-lived access token.")
             Text("In Home Assistant: your profile → Security → Long-lived access tokens → Create token. Daylit keeps it in your keychain as “\(service)”.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let destination {
+                Text("Saving lets this Mac send it to \(destination).")
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Saving lets this Mac send the token to \(destination)")
+            }
             SecureField("Token", text: $token)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Home Assistant token")
@@ -178,12 +185,12 @@ struct TokenView: View {
         StatusController.shared?.close()
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let service = model.config.homeAssistant?.tokenName ?? "daylit-home-assistant"
-        // The address shown when the window opened: a token pasted here is approved for that one only. If the
-        // config changes while the window is open, the new address still gets the Use / Not now question.
+        // The address written in the window when it opened: a token pasted here is approved for that one only. If
+        // the config changes while the window is open, the new address still gets the Use / Not now question.
         let opened = TokenGate.destination(model.config.homeAssistant)
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Home Assistant Token"; w.isReleasedWhenClosed = false
-        w.contentViewController = NSHostingController(rootView: TokenView(service: service) { saved in
+        w.contentViewController = NSHostingController(rootView: TokenView(service: service, destination: opened?.shown) { saved in
             window?.close()
             if saved {
                 TokenGate.trust(opened)

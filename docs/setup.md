@@ -231,12 +231,14 @@ The Settings window's *Home Assistant* pane has the field and shows what the sen
 - **A changed Home Assistant address (macOS).** Each Mac remembers the address (scheme, host, port
   and path) and the token name it last used with its token. If they change in the file underneath
   it (another Mac through *Keep settings in iCloud Drive*, or a hand edit), Daylit sends the token
-  nowhere and the panel asks: "Home Assistant address changed to *host*. Send the token there?"
+  nowhere and the panel asks: "Home Assistant address changed to *address*. Send the token there?"
   **Use** approves it on this Mac; **Not now** keeps waiting and asks again in an hour. Meanwhile
   the sun stands in, as when Home Assistant is down (with a `location`), and push updates stay off.
-  A URL typed in this Mac's Settings window and a token pasted in *Home Assistant token…* are
-  approved at once; so is the address in use when you first start this version. Windows has no
-  synced config and doesn't ask.
+  A URL typed in this Mac's Settings window is approved at once, and so is the address shown in
+  *Home Assistant token…* when you paste a token there. A token stored before any address was
+  approved on this Mac (added from Terminal, or kept from a version without this check) is asked
+  about once: "Send this Mac's Home Assistant token to *address*?" Windows has no synced config and
+  doesn't ask.
 - **The config file is trusted.** Whoever can edit `config.json` already runs code as you, so
   Daylit doesn't try to defend against a hostile config beyond rejecting malformed values (entity
   ids and the URL above).

@@ -38,23 +38,49 @@ final class TokenDestinationTests: XCTestCase {
         XCTAssertEqual(d("http://[fd00::5]:8123").host, "fd00::5")
     }
 
-    func testNothingRememberedRemembersTheCurrentOneWithoutAsking() {
-        XCTAssertEqual(TokenDestinationRule.decide(current: d("http://ha.example.local"), remembered: nil), .remember)
+    func decide(_ current: TokenDestination?, _ remembered: TokenDestination?, stored: Bool = true) -> TokenDestinationRule.Decision {
+        TokenDestinationRule.decide(current: current, remembered: remembered) { stored }
+    }
+
+    func testAStoredTokenWithNoApprovedAddressAsksFirst() {
+        XCTAssertEqual(decide(d("http://ha.example.local"), nil, stored: true), .ask)
+        XCTAssertFalse(TokenDestinationRule.allows(.ask))
+    }
+
+    func testFirstSetupWithNoTokenNeitherAsksNorRemembers() {
+        XCTAssertEqual(decide(d("http://ha.example.local"), nil, stored: false), .noToken)
+        XCTAssertFalse(TokenDestinationRule.allows(.noToken), "a token that appears later is still asked about")
+        XCTAssertTrue(TokenDestinationRule.allows(.send))
+    }
+
+    func testTheKeychainIsOnlyCheckedWhenNothingIsRemembered() {
+        var asked = 0
+        _ = TokenDestinationRule.decide(current: d("http://ha.example.local"), remembered: d("http://ha.example.local")) { asked += 1; return true }
+        _ = TokenDestinationRule.decide(current: nil, remembered: nil) { asked += 1; return true }
+        XCTAssertEqual(asked, 0)
+    }
+
+    func testTheShownAddressDropsOnlyTheDefaultPort() {
+        XCTAssertEqual(d("https://HA.example.local/ha/").shown, "https://ha.example.local/ha")
+        XCTAssertEqual(d("http://ha.example.local").shown, "http://ha.example.local")
+        XCTAssertEqual(d("http://ha.example.local:8123").shown, "http://ha.example.local:8123")
+        XCTAssertEqual(d("https://ha.example.local:80").shown, "https://ha.example.local:80")
+        XCTAssertEqual(d("http://[fd00::5]").shown, "http://[fd00::5]")
     }
 
     func testTheRememberedDestinationIsSent() {
-        XCTAssertEqual(TokenDestinationRule.decide(current: d("http://ha.example.local/"), remembered: d("http://HA.example.local")), .send)
+        XCTAssertEqual(decide(d("http://ha.example.local/"), d("http://HA.example.local")), .send)
     }
 
     func testAChangedAddressOrTokenNameAsksFirst() {
         let was = d("http://ha.example.local:8123")
-        XCTAssertEqual(TokenDestinationRule.decide(current: d("https://evil.example.com"), remembered: was), .ask)
-        XCTAssertEqual(TokenDestinationRule.decide(current: d("http://ha.example.local:8123", "other"), remembered: was), .ask)
+        XCTAssertEqual(decide(d("https://other.example.com"), was), .ask)
+        XCTAssertEqual(decide(d("http://ha.example.local:8123", "other"), was), .ask)
     }
 
     func testNoValidAddressSendsNothing() {
-        XCTAssertEqual(TokenDestinationRule.decide(current: nil, remembered: nil), .hold)
-        XCTAssertEqual(TokenDestinationRule.decide(current: nil, remembered: d("http://ha.example.local")), .hold)
+        XCTAssertEqual(decide(nil, nil), .hold)
+        XCTAssertEqual(decide(nil, d("http://ha.example.local")), .hold)
     }
 
     func testEditingTheURLInSettingsKeepsTheRememberedTokenName() {
@@ -62,22 +88,29 @@ final class TokenDestinationTests: XCTestCase {
         let r = TokenDestinationRule.afterURLEdit(current: now, remembered: d("http://old.example.local"))
         XCTAssertEqual(r, d("http://new.example.local"))
         // So a token name changed in the file is still asked about.
-        XCTAssertEqual(TokenDestinationRule.decide(current: now, remembered: r), .ask)
+        XCTAssertEqual(decide(now, r), .ask)
         // With nothing remembered the file's name is taken as it is.
         XCTAssertEqual(TokenDestinationRule.afterURLEdit(current: now, remembered: nil), now)
     }
 
-    func testTheQuestionNamesTheNewHostOrTheNewTokenName() {
+    func testTheQuestionNamesTheWholeNewAddressOrTheNewTokenName() {
         let was = d("http://ha.example.local")
         XCTAssertEqual(TokenDestinationRule.question(current: d("https://other.example.local:8123/x"), remembered: was),
-                       "Home Assistant address changed to other.example.local. Send the token there?")
+                       "Home Assistant address changed to https://other.example.local:8123/x. Send the token there?")
         XCTAssertTrue(TokenDestinationRule.question(current: d("http://ha.example.local", "spare"), remembered: was).contains("“spare”"))
     }
 
+    func testTheFirstQuestionAsksWhetherToSendTheTokenAtAll() {
+        XCTAssertEqual(TokenDestinationRule.question(current: d("https://ha.example.local"), remembered: nil),
+                       "Send this Mac’s Home Assistant token to https://ha.example.local?")
+    }
+
     func testTheLogLineNamesTheHostAndNeverAToken() {
-        let line = TokenDestinationRule.heldLine(current: d("https://other.example.local"))
-        XCTAssertTrue(line.contains("other.example.local"))
-        XCTAssertTrue(line.contains("not sending the token"))
+        for was in [d("http://ha.example.local"), nil] {
+            let line = TokenDestinationRule.heldLine(current: d("https://other.example.local"), remembered: was)
+            XCTAssertTrue(line.contains("other.example.local"))
+            XCTAssertTrue(line.contains("not sending the token"))
+        }
     }
 
     func testNotNowHidesTheQuestionForAnHourForThatDestinationOnly() {
