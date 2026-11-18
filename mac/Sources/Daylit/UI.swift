@@ -476,7 +476,7 @@ struct ShortcutsView: View {
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Keyboard Shortcuts"; w.isReleasedWhenClosed = false
         w.contentViewController = NSHostingController(rootView: ShortcutsView(up: HotKeys.shared.up, down: HotKeys.shared.down, theme: HotKeys.shared.theme) { window?.close() })
-        w.center(); window = w
+        w.center(); window = w; AppMenu.opened(w)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
             Task { @MainActor in window = nil; StatusController.shared?.model.objectWillChange.send() }
         }

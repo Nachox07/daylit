@@ -363,6 +363,16 @@ struct SettingsView: View {
     var appPane: some View {
         Form {
             Section {
+                LabeledContent("Version") {
+                    HStack(spacing: 10) {
+                        Text(verbatim: UpdateCheck.versionLine(Daylit.appVersion)).textSelection(.enabled)
+                        if let page = UpdateCheck.releasePage(Daylit.appVersion), let url = URL(string: page) {
+                            Link("Release notes", destination: url)
+                        }
+                    }
+                }
+            } header: { Text("About") }
+            Section {
                 if m.hasBattery {
                     Toggle(isOn: Binding(get: { m.pauseOnBattery }, set: { m.setPause($0) })) {
                         Row("Pause on battery", "battery.50")
@@ -387,16 +397,6 @@ struct SettingsView: View {
                 Text("Once a day Daylit asks GitHub whether a newer version is out and shows it in the panel. Nothing about you or your setup is sent. Check for Updates… in the gear menu works either way.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section {
-                LabeledContent("Version") {
-                    HStack(spacing: 10) {
-                        Text(verbatim: UpdateCheck.versionLine(Daylit.appVersion)).textSelection(.enabled)
-                        if let page = UpdateCheck.releasePage(Daylit.appVersion), let url = URL(string: page) {
-                            Link("Release notes", destination: url)
-                        }
-                    }
-                }
-            } header: { Text("About") }
             Section {
                 LabeledContent("config.json") {
                     Button("Open Config File") { m.openConfig() }
@@ -738,7 +738,7 @@ struct SettingsView: View {
         w.title = "Daylit Settings"; w.isReleasedWhenClosed = false
         w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden   // the pane's own title sits there
         w.contentViewController = NSHostingController(rootView: SettingsView(m: model, close: { window?.close() }, locator: Locator()))
-        w.center(); window = w
+        w.center(); window = w; AppMenu.opened(w)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
             Task { @MainActor in window = nil }
         }

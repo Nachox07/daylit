@@ -117,9 +117,9 @@ sealed class SettingsWindow : Window {
                 Hint("Windows has no automatic light/dark mode of its own; this follows the sun, and with Home Assistant your blind and lights.")),
             Card("Today's sun", themeCurve, Hint("Drag a line: light mode once the sun is above the orange one, dark below the purple one. Times are for today.")),
             Card(null, new Expander { Header = "Exact values", Content = TuningRows(TuningField.Appearance) }));
-        var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
+        var appPane = Pane(Card("About", AboutRow()),
+            Card(null, pause, login, Hint("These apply right away.")),
             Card("Updates", checkUpdatesBox, Hint("Once a day Daylit asks GitHub whether a newer version is out and shows it in the panel. Nothing about you or your setup is sent. Check for updates… in the gear menu works either way.")),
-            Card("About", AboutRow()),
             Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")));
 
         panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));

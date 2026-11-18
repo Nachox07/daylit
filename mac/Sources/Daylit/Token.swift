@@ -202,7 +202,7 @@ struct TokenView: View {
                 model.refresh()
             }
         })
-        w.center(); window = w
+        w.center(); window = w; AppMenu.opened(w)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
             Task { @MainActor in window = nil }
         }
