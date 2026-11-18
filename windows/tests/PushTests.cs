@@ -344,6 +344,50 @@ public class PushTimingTests {
     }
 
     [Fact]
+    public void NoAuthReplyWithinTenSecondsOfConnectingIsLost() {
+        Assert.Null(PushRule.SetupLost(9.9, false, false));
+        Assert.Equal("no auth reply", PushRule.SetupLost(10, false, false));
+    }
+
+    [Fact]
+    public void NoSubscribeResultWithinTenSecondsOfAuthOkIsLost() {
+        Assert.Equal(10, PushRule.SubscribeTimeout);
+        Assert.Null(PushRule.SetupLost(9.9, true, false));
+        Assert.Equal("no subscribe reply", PushRule.SetupLost(10, true, false));
+    }
+
+    [Fact]
+    public void ASubscribedConnectionIsLeftToThePings() {
+        Assert.Null(PushRule.SetupLost(3600, true, true));
+    }
+
+    [Fact]
+    public void EachSetupStepWaitsForItsOwnDeadline() {
+        Assert.Equal(PushRule.AuthTimeout, PushRule.SetupDeadline(false));
+        Assert.Equal(PushRule.SubscribeTimeout, PushRule.SetupDeadline(true));
+    }
+
+    [Fact]
+    public void EventsArrivingBeforeTheUiRunsJoinOneDispatch() {
+        var b = new EventBatch();
+        Assert.True(b.Add(["light.office"]));    // first: dispatch
+        Assert.False(b.Add(["cover.office"]));   // pending: joins it
+        Assert.False(b.Add(["light.office"]));
+        Assert.Equal(new HashSet<string> { "light.office", "cover.office" }, b.Take().ToHashSet());
+        Assert.True(b.Add(["sun.sun"]));         // after Take: a new dispatch
+        Assert.Equal(new HashSet<string> { "sun.sun" }, b.Take().ToHashSet());
+        Assert.Empty(b.Take());
+    }
+
+    [Fact]
+    public void OnlyMessagesTheClientActsOnReachTheUiThread() {
+        foreach (var k in new[] { PushKind.AuthOk, PushKind.AuthInvalid, PushKind.Result, PushKind.Event, PushKind.Pong })
+            Assert.True(PushRule.Dispatches(k));
+        Assert.False(PushRule.Dispatches(PushKind.Other));
+        Assert.False(PushRule.Dispatches(PushKind.AuthRequired));   // answered in the receive loop itself
+    }
+
+    [Fact]
     public void TheSocketIsOpenOnlyWhenEverythingAllowsIt() {
         Assert.True(PushRule.Wanted(true, Source.HomeAssistant, false, true, true));
         Assert.False(PushRule.Wanted(null, Source.HomeAssistant, false, true, true));

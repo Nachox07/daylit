@@ -299,6 +299,25 @@ final class PushAuthTimeoutTests: XCTestCase {
     }
 }
 
+final class PushSetupDeadlineTests: XCTestCase {
+    func testNoAuthReplyWithinTenSecondsOfConnectingIsLost() {
+        XCTAssertNil(PushRule.setupLost(elapsed: 9.9, authenticated: false, subscribed: false))
+        XCTAssertEqual(PushRule.setupLost(elapsed: 10, authenticated: false, subscribed: false), "no auth reply")
+    }
+    func testNoSubscribeResultWithinTenSecondsOfAuthOkIsLost() {
+        XCTAssertEqual(PushRule.subscribeTimeout, 10)
+        XCTAssertNil(PushRule.setupLost(elapsed: 9.9, authenticated: true, subscribed: false))
+        XCTAssertEqual(PushRule.setupLost(elapsed: 10, authenticated: true, subscribed: false), "no subscribe reply")
+    }
+    func testASubscribedConnectionIsLeftToThePings() {
+        XCTAssertNil(PushRule.setupLost(elapsed: 3600, authenticated: true, subscribed: true))
+    }
+    func testEachSetupStepWaitsForItsOwnDeadline() {
+        XCTAssertEqual(PushRule.setupDeadline(authenticated: false), PushRule.authTimeout)
+        XCTAssertEqual(PushRule.setupDeadline(authenticated: true), PushRule.subscribeTimeout)
+    }
+}
+
 final class PushSettingsEditTests: XCTestCase {
     func ha(_ e: SettingsEdit, _ original: String?) throws -> [String: Any] {
         let out = try ConfigPatch.apply(e, to: original.map { Data($0.utf8) })

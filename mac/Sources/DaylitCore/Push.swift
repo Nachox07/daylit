@@ -117,6 +117,18 @@ extension PushRule {
     /// auth_required/auth_ok must arrive within this many seconds of connecting, else the connection counts as lost.
     public static let authTimeout: Double = 10
     public static func authTimedOut(elapsed: Double, authenticated: Bool) -> Bool { !authenticated && elapsed >= authTimeout }
+    /// After auth_ok, the subscribe result must arrive within this many seconds. Without it no event ever comes
+    /// and the pings never start, so the connection would sit there, open and useless, with nothing to notice.
+    public static let subscribeTimeout: Double = 10
+    /// Why a connection that is still setting up counts as lost, or nil while it may still wait. `elapsed`: seconds
+    /// since its current step began (the connect, or auth_ok). A subscribed connection is watched by the pings instead.
+    public static func setupLost(elapsed: Double, authenticated: Bool, subscribed: Bool) -> String? {
+        if subscribed { return nil }
+        if !authenticated { return elapsed >= authTimeout ? "no auth reply" : nil }
+        return elapsed >= subscribeTimeout ? "no subscribe reply" : nil
+    }
+    /// The longest a setup step may take: the wait for its deadline.
+    public static func setupDeadline(authenticated: Bool) -> Double { authenticated ? subscribeTimeout : authTimeout }
     /// Waits before each reconnect attempt; the last one repeats.
     public static let backoff: [Double] = [2, 5, 15, 60]
 

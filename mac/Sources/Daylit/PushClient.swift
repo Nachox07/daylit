@@ -34,7 +34,7 @@ import DaylitCore
     private var nextId = 1, subscribeId = 0
     private var awaitingPong = false
     private var authenticated = false
-    private var authTask: Task<Void, Never>?
+    private var setupTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?, pingTask: Task<Void, Never>?, tickTask: Task<Void, Never>?
     private var timer = PushTimer()
     /// The once-then-every-10-minutes rule (HAErrorRule.shouldLog) for "lost" lines.
@@ -112,7 +112,7 @@ import DaylitCore
             self.task = ws
             self.authenticated = false
             ws.resume()
-            self.startAuthTimer(c)
+            self.startSetupTimer(c)
             self.receive(ws, c, token, t)
         }
     }
@@ -135,7 +135,9 @@ import DaylitCore
                     token = nil
                     self.send(ws, PushRule.authMessage(token: tk), c)
                 case .authOk:
-                    self.authenticated = true; self.authTask?.cancel()
+                    guard !self.authenticated else { continue }   // one subscription per connection
+                    self.authenticated = true
+                    self.startSetupTimer(c)   // the subscribe result now has its own deadline
                     self.subscribeId = self.nextId; self.nextId += 1
                     self.send(ws, PushRule.subscribeMessage(id: self.subscribeId, entities: t.entities), c)
                 case .authInvalid:
@@ -143,6 +145,7 @@ import DaylitCore
                     return
                 case .result(let id, let ok) where id == self.subscribeId:
                     guard ok else { self.lost("subscribe refused", c); return }
+                    self.setupTask?.cancel()
                     self.healthy = true
                     Log.write(PushRule.connectedLine(t.entities.count))
                     self.startPing(ws, c)
@@ -157,14 +160,17 @@ import DaylitCore
         }
     }
 
-    /// No auth_required/auth_ok within PushRule.authTimeout of connecting: treat the connection as lost.
-    private func startAuthTimer(_ c: Int) {
-        let started = Date()
-        authTask?.cancel()
-        authTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(PushRule.authTimeout * 1_000_000_000))
+    /// Each setup step has a deadline (PushRule.setupLost): auth_ok within authTimeout of connecting, then the
+    /// subscribe result within subscribeTimeout of auth_ok. A missed one counts as lost and retries on the backoff.
+    private func startSetupTimer(_ c: Int) {
+        let started = ProcessInfo.processInfo.systemUptime   // monotonic: a clock change cannot cut the deadline short or skip it
+        let wait = PushRule.setupDeadline(authenticated: authenticated)
+        setupTask?.cancel()
+        setupTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard c == self.conn, !Task.isCancelled else { return }
-            if PushRule.authTimedOut(elapsed: Date().timeIntervalSince(started), authenticated: self.authenticated) { self.lost("no auth reply", c) }
+            if let why = PushRule.setupLost(elapsed: ProcessInfo.processInfo.systemUptime - started, authenticated: self.authenticated,
+                                            subscribed: self.healthy) { self.lost(why, c) }
         }
     }
 
@@ -242,8 +248,8 @@ import DaylitCore
         conn += 1
         healthy = false; awaitingPong = false
         task?.cancel(with: .goingAway, reason: nil); task = nil
-        retryTask?.cancel(); pingTask?.cancel(); tickTask?.cancel(); authTask?.cancel()
-        authTask = nil; retryTask = nil; pingTask = nil; tickTask = nil
+        retryTask?.cancel(); pingTask?.cancel(); tickTask?.cancel(); setupTask?.cancel()
+        setupTask = nil; retryTask = nil; pingTask = nil; tickTask = nil
         timer.clear()
     }
 
