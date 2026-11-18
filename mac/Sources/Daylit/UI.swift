@@ -305,29 +305,60 @@ struct Panel: View {
     }
 }
 
+/// The indicator shown by the brightness keys and hotkeys. Like macOS's own: it fades in, the bar glides to each
+/// new level (a held key retargets the glide mid-way), and it fades out a moment after the last press.
+/// With Reduce Motion on, the bar jumps and nothing fades in.
 @MainActor enum HUD {
     static var panel: NSPanel?
     static var hide: DispatchWorkItem?
+    static let state = HUDState()
+    static var shownOn: CGDirectDisplayID?
     static func show(_ label: String, _ v: Double, on id: CGDirectDisplayID) {
         guard let screen = NSScreen.screens.first(where: {
             ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == id
         }) else { return }
         let size = NSSize(width: 240, height: 70)
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let p = panel ?? {
             let p = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.level = .statusBar; p.isOpaque = false; p.backgroundColor = .clear; p.ignoresMouseEvents = true; p.hasShadow = true
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            p.alphaValue = 0
+            p.contentView = NSHostingView(rootView: HUDLive(state: state).frame(width: size.width, height: size.height))
+            if let cv = p.contentView { roundCorners(cv, 18) }
             panel = p; return p
         }()
-        p.contentView = NSHostingView(rootView: HUDView(label: label, value: v).frame(width: size.width, height: size.height))
-        if let cv = p.contentView { roundCorners(cv, 18) }
+        // Shown again (hidden or fading out: alphaValue is the animation's target) or for another monitor, even one with
+        // the same name: start at the new level, no glide from the old one.
+        let appearing = !p.isVisible || p.alphaValue < 0.5 || shownOn != id
+        shownOn = id
+        state.label = label
+        state.animate = !appearing && !reduce
+        state.value = v
         let f = screen.frame
         p.setFrame(NSRect(x: f.midX - size.width / 2, y: f.minY + f.height * 0.12, width: size.width, height: size.height), display: true)
-        p.alphaValue = 1; p.orderFrontRegardless()
+        p.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { $0.duration = appearing && !reduce ? 0.15 : 0; p.animator().alphaValue = 1 }
         DispatchQueue.main.async { p.invalidateShadow() }
         hide?.cancel()
         let w = DispatchWorkItem { NSAnimationContext.runAnimationGroup { $0.duration = 0.3; p.animator().alphaValue = 0 } }
         hide = w; DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
+    }
+}
+
+/// What the live indicator shows; `animate` is false for the first level after it appears.
+@MainActor final class HUDState: ObservableObject {
+    @Published var label = ""
+    @Published var value: Double = 0
+    var animate = false
+}
+
+/// The live indicator: HUDView driven by HUDState, gliding between levels.
+struct HUDLive: View {
+    @ObservedObject var state: HUDState
+    var body: some View {
+        HUDView(label: state.label, value: state.value)
+            .animation(state.animate ? .easeOut(duration: 0.18) : nil, value: state.value)
     }
 }
 
@@ -342,6 +373,7 @@ struct HUDView: View {
                 Text(label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
                 Text("\(Int(value))%").font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: value))
             }
             HStack(spacing: 8) {
                 Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)

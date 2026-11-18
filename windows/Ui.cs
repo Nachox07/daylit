@@ -443,8 +443,16 @@ sealed class Flyout : Window {
     }
 }
 
-/// The brightness indicator shown by the hotkeys, centred near the bottom of that monitor.
+/// The brightness indicator shown by the hotkeys, centred near the bottom of that monitor. Like Windows' own: it
+/// fades in, the bar glides to each new level (a held key retargets the glide mid-way) and it fades out a moment
+/// after the last press. With animations off in Windows (Settings → Accessibility → Visual effects) the bar jumps.
 sealed class Osd : Window {
+    /// The level the bar shows right now, animated towards the real one.
+    static readonly DependencyProperty ShownProperty = DependencyProperty.Register(nameof(Shown), typeof(double), typeof(Osd),
+        new PropertyMetadata(0.0, (d, e) => ((Osd)d).SetBar((double)e.NewValue)));
+    double Shown { get => (double)GetValue(ShownProperty); set => SetValue(ShownProperty, value); }
+    string shownOn = "";   // the monitor (GDI name) the bar shows: names can repeat
+    bool fadingOut;
     readonly TextBlock label = new() { FontSize = 14, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     readonly TextBlock pct = new() { FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock icon = new() { Text = Palette.SunHigh, FontFamily = Palette.Icons, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
@@ -457,6 +465,7 @@ sealed class Osd : Window {
         WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent;
         ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; Topmost = true; ShowActivated = false; Focusable = false;
         Width = 260; SizeToContent = SizeToContent.Height; Left = -32000; Top = -32000;
+        Opacity = 0;   // the first Flash fades it in
         FontFamily = Palette.Ui;
         var top = new Grid();
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -475,6 +484,7 @@ sealed class Osd : Window {
         SourceInitialized += (_, _) => { hwnd = new WindowInteropHelper(this).Handle; Win.MakeOverlay(hwnd); };
         hideT.Tick += (_, _) => {
             hideT.Stop();
+            fadingOut = true;
             var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(300));
             fade.Completed += (_, _) => { if (!hideT.IsEnabled) Hide(); };
             BeginAnimation(OpacityProperty, fade);
@@ -482,8 +492,14 @@ sealed class Osd : Window {
     }
 
     public void Flash(string name, int v, string gdi) {
-        Fill(name, v);
-        BeginAnimation(OpacityProperty, null); Opacity = 1;
+        var motion = SystemParameters.ClientAreaAnimation;
+        // Shown again (hidden or fading out), or another monitor: start at the new level, no glide from the old one.
+        // Not Opacity: during the fade-in it is still low, and a held key would make the bar jump.
+        var appearing = !IsVisible || fadingOut || gdi != shownOn;
+        shownOn = gdi; fadingOut = false;
+        Fill(name, v, animate: motion && !appearing);
+        if (appearing && motion) BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+        else { BeginAnimation(OpacityProperty, null); Opacity = 1; }
         if (!IsVisible) Show();
         var b = (WF.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == gdi) ?? WF.Screen.PrimaryScreen!).Bounds;
         if (hwnd != IntPtr.Zero) Win.Place(hwnd, (w, h) => (b.Left + (b.Width - w) / 2, b.Bottom - (int)(b.Height * 0.12) - h));
@@ -493,13 +509,24 @@ sealed class Osd : Window {
     /// The indicator's content alone, filled in and detached from the window (snapshots).
     public FrameworkElement Detach(string name, int v) { Fill(name, v); Content = null; panel.Width = Width; return panel; }
 
-    void Fill(string name, int v) {
+    void Fill(string name, int v, bool animate = false) {
         panel.Background = Palette.Osd; panel.BorderBrush = Palette.CardBorder;
         Foreground = Palette.Text; track.Background = Palette.Track; fill.Background = Palette.Accent;
         label.Text = name; pct.Text = v + "%";
+        if (animate) {
+            // No From: a key held down starts each glide where the last one is, so it never jumps back.
+            BeginAnimation(ShownProperty, new DoubleAnimation(v, TimeSpan.FromMilliseconds(180)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
+        } else {
+            BeginAnimation(ShownProperty, null);
+            Shown = v;
+            SetBar(v);   // also when Shown already had this value (the callback runs only on a change)
+        }
+    }
+
+    void SetBar(double v) {
         bar.ColumnDefinitions[0].Width = new GridLength(Math.Max(v, 0.0001), GridUnitType.Star);
         bar.ColumnDefinitions[1].Width = new GridLength(Math.Max(100 - v, 0.0001), GridUnitType.Star);
-        fill.Visibility = v > 0 ? Visibility.Visible : Visibility.Hidden;
+        fill.Visibility = v > 0.5 ? Visibility.Visible : Visibility.Hidden;
     }
 }
 
