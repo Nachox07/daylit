@@ -449,6 +449,7 @@ sealed partial class Controller {
                 m.LastSet = m.LastTarget = m.Published = null;   // not a hand-set level: apply the target again
                 m.Offset = null; m.OffsetSun = null; m.OffsetAt = null;   // and an offset on the old scale means nothing on the new one
                 m.ContrastSet = null;   // back on DDC: write the configured contrast again
+                m.Reads = ReadState.Unknown;   // a DDC refusal says nothing about the other control (as on macOS)
             }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;

@@ -1,0 +1,29 @@
+{
+  "about": "Numbers in Home Assistant's answer, held to their real ranges (HABounds / HaBounds), and the lights note built from them. Text numbers: \"NaN\", \"Infinity\", \"-Infinity\".",
+  "cases": [
+    {"name": "an elevation that is not a number is night", "fn": "bound", "in": {"kind": "elevation", "v": "NaN"}, "out": -10},
+    {"name": "an elevation above 90 is 90", "fn": "bound", "in": {"kind": "elevation", "v": 1e+30}, "out": 90},
+    {"name": "an elevation below -90 is -90", "fn": "bound", "in": {"kind": "elevation", "v": -200}, "out": -90},
+    {"name": "a blind below 0 has no position", "fn": "bound", "in": {"kind": "position", "v": -5}, "out": -1},
+    {"name": "a blind above 100 is open", "fn": "bound", "in": {"kind": "position", "v": 150}, "out": 100},
+    {"name": "a blind that is not a number has no position", "fn": "bound", "in": {"kind": "position", "v": "NaN"}, "out": -1},
+    {"name": "a huge brightness is 255", "fn": "bound", "in": {"kind": "brightness", "v": 1e+30}, "out": 255},
+    {"name": "an infinite brightness is 255", "fn": "bound", "in": {"kind": "brightness", "v": "Infinity"}, "out": 255},
+    {"name": "a negative brightness is 0", "fn": "bound", "in": {"kind": "brightness", "v": -1}, "out": 0},
+    {"name": "a brightness that is not a number is 0", "fn": "bound", "in": {"kind": "brightness", "v": "NaN"}, "out": 0},
+    {"name": "saturation above 100 is 100", "fn": "bound", "in": {"kind": "saturation", "v": 120}, "out": 100},
+    {"name": "a sensor reading of two billion is no reading", "fn": "bound", "in": {"kind": "reading", "v": 2000000000.0}, "out": -1},
+    {"name": "an ordinary sensor reading is kept", "fn": "bound", "in": {"kind": "reading", "v": 500}, "out": 500},
+    {"name": "a negative age is unknown", "fn": "bound", "in": {"kind": "age", "v": -3}, "out": -1},
+    {"name": "a huge age is capped", "fn": "bound", "in": {"kind": "age", "v": 1e+20}, "out": 100000000000.0},
+    {"name": "a monitor row is held to its ranges", "fn": "row", "in": {"r": [50, -1, 1e+30, "NaN", 70, 1e+20]}, "out": [50, -1, 100, -1, 70, 100000000000.0]},
+    {"name": "lights off: no note", "fn": "lightsNote", "in": {"lights": false, "bri": 200, "sat": 0}, "out": ""},
+    {"name": "lights on with no brightness", "fn": "lightsNote", "in": {"lights": true, "bri": 0, "sat": 0}, "out": " · lights on"},
+    {"name": "lights on with a brightness that is not a number", "fn": "lightsNote", "in": {"lights": true, "bri": "NaN", "sat": 0}, "out": " · lights on"},
+    {"name": "full white light", "fn": "lightsNote", "in": {"lights": true, "bri": 255, "sat": 0}, "out": " · lights 100% white"},
+    {"name": "warm light at half", "fn": "lightsNote", "in": {"lights": true, "bri": 127.5, "sat": 80}, "out": " · lights 50% warm"},
+    {"name": "in-between colour has no tone", "fn": "lightsNote", "in": {"lights": true, "bri": 255, "sat": 40}, "out": " · lights 100%"},
+    {"name": "a brightness past 255 shows 100%", "fn": "lightsNote", "in": {"lights": true, "bri": 1e+30, "sat": 0}, "out": " · lights 100% white"},
+    {"name": "half a percent rounds up", "fn": "lightsNote", "in": {"lights": true, "bri": 6.375, "sat": 0}, "out": " · lights 3% white"}
+  ]
+}

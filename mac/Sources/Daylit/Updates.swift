@@ -19,7 +19,7 @@ extension Daylit {
             try? await Task.sleep(nanoseconds: UInt64(UpdateCheck.startDelay * 1_000_000_000))
             while !Task.isCancelled {
                 guard let self else { return }
-                let due = self.updateLastCheck.map { Date().timeIntervalSince($0) >= UpdateCheck.interval } ?? true
+                let due = UpdateCheck.due(elapsed: self.updateLastCheck.map { Date().timeIntervalSince($0) })
                 if self.checkUpdates && due { await self.checkForUpdates(manual: false) }
                 try? await Task.sleep(nanoseconds: 3600 * 1_000_000_000)
             }

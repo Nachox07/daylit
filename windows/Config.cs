@@ -76,19 +76,31 @@ sealed class Config {
     public static (Config cfg, string? error) Load() => Load(PathName);
 
     public static (Config cfg, string? error) Load(string path) {
-        Config c; string? err;
+        string? text;
+        try { text = File.Exists(path) ? File.ReadAllText(path) : null; }
+        catch (Exception e) { return (Resolve(new Config(), out _), "config.json is not valid: " + Short(e.Message)); }
+        var (c, err, _) = Parse(text);
+        return (c, err);
+    }
+
+    /// What a problem with the file is about: not JSON for a config, a value that fails a check, or a source it cannot use.
+    public enum Problem { None, Json, Value, Source }
+
+    /// The config in the file's text (null: no file), the problem to show, and what kind of problem it is.
+    public static (Config cfg, string? error, Problem problem) Parse(string? text) {
+        Config c;
         try {
-            if (!File.Exists(path)) c = new Config();
-            else c = JsonSerializer.Deserialize<Config>(File.ReadAllText(path), Json) ?? new Config();
+            c = text == null ? new Config() : JsonSerializer.Deserialize<Config>(text, Json) ?? throw new JsonException("the file holds null, not an object");
         } catch (Exception e) {
-            return (Resolve(new Config(), out _), "config.json is not valid: " + Short(e.Message));
+            return (Resolve(new Config(), out _), "config.json is not valid: " + Short(e.Message), Problem.Json);
         }
-        err = Validate(c);
+        var err = Validate(c);
         if (err != null) {   // keep what is safe: monitors and local settings; drop the source settings
             var safe = new Config { PauseOnBattery = c.PauseOnBattery, CheckUpdates = c.CheckUpdates, Monitors = c.Monitors?.Where(m => !string.IsNullOrWhiteSpace(m?.Match)).ToArray() };
-            return (Resolve(safe, out _), err);
+            return (Resolve(safe, out _), err, Problem.Value);
         }
-        return (Resolve(c, out err), err);
+        var r = Resolve(c, out err);
+        return (r, err, err == null ? Problem.None : Problem.Source);
     }
 
     static Config Resolve(Config c, out string? err) {
@@ -299,12 +311,7 @@ static class ConfigPatch {
         if (tune.Count > 0) root["tuning"] = tune;
 
         var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
-        string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
-        try {
-            File.WriteAllText(tmp, text);
-            var (_, err) = Config.Load(tmp);
-            if (err != null) throw new InvalidDataException(err.Replace("config.json: ", ""));
-        } finally { File.Delete(tmp); }
+        Check(text);
         return text;
     }
 
@@ -331,13 +338,15 @@ static class ConfigPatch {
             if (k is "day" or "blindDown" or "night" or "nightLights") entry[k] = Math.Clamp(v, 0, 100);
         root["monitors"] = list;
         var text = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
-        string tmp = Path.Combine(Path.GetTempPath(), $"daylit-check-{Guid.NewGuid():N}.json");
-        try {
-            File.WriteAllText(tmp, text);
-            var (_, err) = Config.Load(tmp);
-            if (err != null) throw new InvalidDataException(err.Replace("config.json: ", ""));
-        } finally { File.Delete(tmp); }
+        Check(text);
         return text;
+    }
+
+    /// Throws when the saved text would not load: not JSON for a config, or a value that fails a check. A source it
+    /// cannot use yet (Home Assistant mode with no address) still saves; the panel says what is missing (as on macOS).
+    static void Check(string text) {
+        var (_, err, problem) = Config.Parse(text);
+        if (problem is Config.Problem.Json or Config.Problem.Value) throw new InvalidDataException(err!.Replace("config.json: ", ""));
     }
 
     /// Two decimals, written exactly as shown in the window.

@@ -1,0 +1,26 @@
+{
+  "about": "Update checks: version numbers and when the daily check is due (UpdateCheck on both apps).",
+  "cases": [
+    {"name": "a minor version 10 is newer than 9", "fn": "isNewer", "in": {"a": "1.10.0", "b": "1.9.0"}, "out": true},
+    {"name": "a missing part counts as 0", "fn": "isNewer", "in": {"a": "1.9", "b": "1.9.0"}, "out": false},
+    {"name": "a leading v is allowed", "fn": "isNewer", "in": {"a": "v2", "b": "1.99.99"}, "out": true},
+    {"name": "a fourth part counts", "fn": "isNewer", "in": {"a": "1.0.0.1", "b": "1.0.0"}, "out": true},
+    {"name": "a pre-release is not a version", "fn": "isNewer", "in": {"a": "1.5-beta", "b": "1.4"}, "out": false},
+    {"name": "an empty version is never newer", "fn": "isNewer", "in": {"a": "", "b": "1.0"}, "out": false},
+    {"name": "v1.2.3 reads as three numbers", "fn": "parse", "in": {"s": "v1.2.3"}, "out": [1, 2, 3]},
+    {"name": "a capital V is allowed", "fn": "parse", "in": {"s": "V1"}, "out": [1]},
+    {"name": "spaces around a version are ignored", "fn": "parse", "in": {"s": " 1.2 "}, "out": [1, 2]},
+    {"name": "five parts are too many", "fn": "parse", "in": {"s": "1.2.3.4.5"}, "out": null},
+    {"name": "an empty part is not a version", "fn": "parse", "in": {"s": "1..2"}, "out": null},
+    {"name": "letters are not a version", "fn": "parse", "in": {"s": "1.2a"}, "out": null},
+    {"name": "a part over nine digits is not a version", "fn": "parse", "in": {"s": "1234567890"}, "out": null},
+    {"name": "no version is a dev build", "fn": "isDevBuild", "in": {"v": null}, "out": true},
+    {"name": "0.0.0 is a dev build", "fn": "isDevBuild", "in": {"v": "0.0.0"}, "out": true},
+    {"name": "a release is not a dev build", "fn": "isDevBuild", "in": {"v": "1.8.0"}, "out": false},
+    {"name": "text that is not a version is a dev build", "fn": "isDevBuild", "in": {"v": "local"}, "out": true},
+    {"name": "never checked: due now", "fn": "due", "in": {"elapsed": null}, "out": true},
+    {"name": "checked a minute ago: not due", "fn": "due", "in": {"elapsed": 60}, "out": false},
+    {"name": "checked a day ago: due", "fn": "due", "in": {"elapsed": 86400}, "out": true},
+    {"name": "the clock went back since the last check: due now", "fn": "due", "in": {"elapsed": -60}, "out": true}
+  ]
+}

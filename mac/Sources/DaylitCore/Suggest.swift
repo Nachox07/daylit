@@ -131,9 +131,13 @@ public struct NumberStep: Equatable {
 
     /// From the answer to GET /api/states/<input_number>: its min, max and step attributes. nil when one is missing.
     public static func parse(_ d: Data) -> NumberStep? {
+        // true / false are numbers to JSONSerialization; they are not a min, max or step (as on Windows).
+        func number(_ v: Any?) -> Double? {
+            guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+            return n.doubleValue
+        }
         guard let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let a = o["attributes"] as? [String: Any],
-              let lo = (a["min"] as? NSNumber)?.doubleValue, let hi = (a["max"] as? NSNumber)?.doubleValue,
-              let st = (a["step"] as? NSNumber)?.doubleValue, st > 0, hi >= lo else { return nil }
+              let lo = number(a["min"]), let hi = number(a["max"]), let st = number(a["step"]), st > 0, hi >= lo else { return nil }
         return NumberStep(min: lo, max: hi, step: st)
     }
 }

@@ -149,6 +149,9 @@ import DaylitCore
         suggestDirty = true; stepCache = [:]; notNumber = []; suggestEpoch += 1; suggestion = nil; suggestError = nil
         let (src, srcErr) = c.resolvedSource()
         source = src
+        // Outside Home Assistant mode the local Automatic setting decides again, not the switch HA last gave
+        // (as on Windows); in it, the next tick takes HA's switch.
+        if src != .homeAssistant { auto = UserDefaults.standard.object(forKey: "auto") as? Bool ?? true }
         let ddcNote = DDC.configure(c.ddcTool)
         if let ddcNote { log(ddcNote) }
         configProblem = err ?? srcErr ?? ddcNote   // shown in the panel too: an ignored ddcTool is easy to miss in the file
