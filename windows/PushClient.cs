@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push). A WebSocket subscribed to the
+// Push updates from Home Assistant (config homeAssistant.push, on unless false). A WebSocket subscribed to the
 // entities the tick reads; a change only asks for a tick (PushRule in Push.cs decides when). The receive loop runs
 // on the thread pool and hands each message to the UI thread; everything else here runs on the UI thread. The token
 // is sent once in the auth message and never logged or put in a URL. Twin of mac/Sources/Daylit/PushClient.swift.
@@ -46,11 +46,13 @@ sealed class PushClient {
         this.ui = ui; this.tick = tick; this.lastTick = lastTick; this.token = token;
         this.onBattery = onBattery; this.daylightLimit = daylightLimit;
         auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout);
+        // Each setup step has a deadline (PushRule.SetupLost): auth_ok within AuthTimeout of connecting, then the
+        // subscribe result within SubscribeTimeout of auth_ok. A missed one counts as lost and retries on the backoff.
         auth.Tick += (_, _) => {
             auth.Stop();
-            double elapsed = (DateTime.UtcNow - started).TotalSeconds;
-            if (PushRule.AuthTimedOut(elapsed, authenticated)) Lost("no auth reply", conn);
-            else if (!authenticated) { auth.Interval = TimeSpan.FromSeconds(Math.Max(0.1, PushRule.AuthTimeout - elapsed)); auth.Start(); }   // fired a hair early
+            double elapsed = (Environment.TickCount64 - started) / 1000.0;   // monotonic: a clock change cannot skip the deadline
+            if (PushRule.SetupLost(elapsed, authenticated, Healthy) is { } why) Lost(why, conn);
+            else if (!Healthy) { auth.Interval = TimeSpan.FromSeconds(Math.Max(0.1, PushRule.SetupDeadline(authenticated) - elapsed)); auth.Start(); }   // fired a hair early
         };
         retry.Tick += (_, _) => { retry.Stop(); Open(); };
         ping.Tick += (_, _) => SendPing();
@@ -103,7 +105,7 @@ sealed class PushClient {
         network.Stop(); network.Interval = TimeSpan.FromSeconds(seconds); network.Start();
     }
     string reconnectWhy = "network change";
-    DateTime started; bool authenticated;   // this connection: when it began, and whether auth_ok arrived
+    long started; bool authenticated;   // this connection: when its current setup step began, and whether auth_ok arrived
 
     void Open() {
         if (target is not { } t || stopped) return;
@@ -124,13 +126,14 @@ sealed class PushClient {
         var source = new CancellationTokenSource();
         var gate = new SemaphoreSlim(1, 1);
         ws = socket; cts = source; sendGate = gate;
-        started = DateTime.UtcNow; authenticated = false;
+        started = Environment.TickCount64; authenticated = false;
         auth.Stop(); auth.Interval = TimeSpan.FromSeconds(PushRule.AuthTimeout); auth.Start();   // auth_ok must follow within PushRule.AuthTimeout
-        _ = Run(socket, source.Token, gate, c, secret, t);
+        _ = Run(socket, source.Token, gate, c, secret, t, new EventBatch());
     }
 
     /// The receive loop, on the thread pool. auth_required is answered here, so the token never leaves this method.
-    async Task Run(ClientWebSocket socket, CancellationToken stop, SemaphoreSlim gate, int c, string? secret, Target t) {
+    async Task Run(ClientWebSocket socket, CancellationToken stop, SemaphoreSlim gate, int c, string? secret, Target t, EventBatch events) {
+        int pongPending = 0;   // 1 while a pong waits for the UI thread: more pongs before it runs add nothing
         string reason;
         try {
             await socket.ConnectAsync(t.Url, stop).ConfigureAwait(false);
@@ -148,6 +151,19 @@ sealed class PushClient {
                 var m = PushRule.Parse(text);
                 if (m.Kind == PushKind.AuthRequired) {
                     if (secret is { } s) { secret = null; await Send(socket, gate, PushRule.AuthMessage(s), stop).ConfigureAwait(false); }
+                    continue;
+                }
+                // Only what the client acts on reaches the UI thread, and a burst of events or pongs is one queued call,
+                // so a chatty or hostile server cannot fill the UI queue.
+                if (!PushRule.Dispatches(m.Kind)) continue;
+                if (m.Kind == PushKind.Result && m.Id != Volatile.Read(ref subscribeId)) continue;   // set before the subscribe is sent
+                if (m.Kind == PushKind.Event) {
+                    if (events.Add(m.Ids ?? new HashSet<string>())) _ = ui.BeginInvoke(() => Request(events.Take(), c, t));
+                    continue;
+                }
+                if (m.Kind == PushKind.Pong) {
+                    if (Interlocked.Exchange(ref pongPending, 1) == 0)
+                        _ = ui.BeginInvoke(() => { Volatile.Write(ref pongPending, 0); Handle(m, c, t); });
                     continue;
                 }
                 _ = ui.BeginInvoke(() => Handle(m, c, t));
@@ -180,8 +196,11 @@ sealed class PushClient {
         if (c != conn) return;
         switch (m.Kind) {
             case PushKind.AuthOk:
-                auth.Stop(); authenticated = true;
-                subscribeId = nextId++;
+                if (authenticated) break;   // one subscription per connection
+                authenticated = true;
+                started = Environment.TickCount64;   // the subscribe result now has its own deadline
+                auth.Stop(); auth.Interval = TimeSpan.FromSeconds(PushRule.SubscribeTimeout); auth.Start();
+                Volatile.Write(ref subscribeId, nextId++);
                 _ = SendOrLose(PushRule.SubscribeMessage(subscribeId, t.Entities), c);
                 break;
             case PushKind.AuthInvalid:
@@ -189,13 +208,11 @@ sealed class PushClient {
                 break;
             case PushKind.Result when m.Id == subscribeId:
                 if (!m.Ok) { Lost("subscribe refused", c); break; }
+                auth.Stop();
                 SetHealthy(true);
                 Log.Write(PushRule.ConnectedLine(t.Entities.Length));
                 ping.Interval = TimeSpan.FromSeconds(PushRule.PingInterval(onBattery()));
                 ping.Start();
-                break;
-            case PushKind.Event:
-                Request(m.Ids ?? new HashSet<string>(), t);
                 break;
             case PushKind.Pong:
                 awaitingPong = false;
@@ -211,7 +228,8 @@ sealed class PushClient {
         _ = SendOrLose(PushRule.PingMessage(nextId++), conn);
     }
 
-    void Request(IReadOnlySet<string> ids, Target t) {
+    void Request(IReadOnlySet<string> ids, int c, Target t) {
+        if (c != conn) return;   // a batch from a connection that has since closed
         double now = Secs(DateTime.UtcNow);
         var last = lastTick();
         var d = PushRule.Decide(ids, t.Entities.ToHashSet(), t.Daylight, last == DateTime.MinValue ? null : (double?)Secs(last), now, daylightLimit());

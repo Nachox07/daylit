@@ -23,7 +23,7 @@ sealed class HaConfig {
     public string? Cover { get; set; }
     public string? Lights { get; set; }
     public string? Light { get; set; }        // optional outdoor light sensor (solar power W, or lux): a cloudy day dims the monitors
-    public bool? Push { get; set; }           // experimental: Home Assistant says when something changed (Push.cs); default off
+    public bool? Push { get; set; }           // Home Assistant says when something changed (Push.cs); on unless false
 }
 
 sealed class MonitorHa {
@@ -205,7 +205,7 @@ sealed record SettingsEdit(string Source, double? Latitude, double? Longitude, I
     /// homeAssistant.light: the daylight sensor.
     public string Light { get; init; } = "";
     /// `PushEditable`: the window shows the Instant updates switch; otherwise homeAssistant.push in the file is kept.
-    /// `Push` null removes the key (off is the default); false is written as false.
+    /// `Push` null removes the key (on is the default); true or false is written as is.
     public bool PushEditable { get; init; }
     public bool? Push { get; init; }
     /// `CheckUpdatesEditable`: the window shows the Automatically check for updates switch; otherwise checkUpdates in

@@ -347,7 +347,7 @@ struct SettingsView: View {
             }
             Section {
                 Toggle(isOn: $pushOn) { Row("Instant updates", "bolt") }
-                Text("Home Assistant tells Daylit when the blind, lights or a level changes, so the screen follows in about a second. Experimental.")
+                Text("Home Assistant tells Daylit when the blind, lights or a level changes, so the screen follows in about a second.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Updates") }
             Section {
@@ -578,7 +578,7 @@ struct SettingsView: View {
         if let l = c.location { lat = String(format: "%.2f", l.latitude); lon = String(format: "%.2f", l.longitude) } else { lat = ""; lon = "" }
         let h = c.homeAssistant
         haURL = h?.url ?? ""; haURLLoaded = haURL; tokenNameLoaded = h?.tokenName; autoSwitch = h?.autoSwitch ?? ""; sun = h?.sun ?? ""; cover = h?.cover ?? ""; lights = h?.lights ?? ""; daylightSensor = h?.light ?? ""
-        pushLoaded = h?.push; pushOn = h?.push ?? false
+        pushLoaded = h?.push; pushOn = PushRule.isOn(h?.push)
         checkUpdatesOn = c.checkUpdates ?? true
         tune = (c.tuning?.setValues ?? [:]).mapValues(Self.fmt)
         themeRoom = c.tuning?.theme?.room ?? true
@@ -631,7 +631,7 @@ struct SettingsView: View {
                             haURL: haURL, autoSwitch: autoSwitch, sun: sun, cover: cover, lights: lights)
         e.light = daylightSensor
         e.pushEditable = source == "homeAssistant"
-        e.push = pushOn ? true : (pushLoaded == false ? false : nil)
+        e.push = PushRule.saved(on: pushOn, loaded: pushLoaded)
         e.checkUpdatesEditable = true
         e.checkUpdates = checkUpdatesOn ? nil : false
         e.tuning = values

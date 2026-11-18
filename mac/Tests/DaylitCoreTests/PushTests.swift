@@ -279,7 +279,7 @@ final class PushTimingTests: XCTestCase {
     }
     func testTheSocketIsOpenOnlyWhenEverythingAllowsIt() {
         XCTAssertTrue(PushRule.wanted(push: true, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
-        XCTAssertFalse(PushRule.wanted(push: nil, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
+        XCTAssertTrue(PushRule.wanted(push: nil, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))   // no key: on
         XCTAssertFalse(PushRule.wanted(push: false, source: .homeAssistant, paused: false, auto: true, hasMonitors: true))
         XCTAssertFalse(PushRule.wanted(push: true, source: .sun, paused: false, auto: true, hasMonitors: true))
         XCTAssertFalse(PushRule.wanted(push: true, source: .homeAssistant, paused: true, auto: true, hasMonitors: true))
@@ -296,6 +296,40 @@ final class PushAuthTimeoutTests: XCTestCase {
     }
     func testAnAuthenticatedConnectionNeverTimesOut() {
         XCTAssertFalse(PushRule.authTimedOut(elapsed: 60, authenticated: true))
+    }
+}
+
+final class PushDefaultTests: XCTestCase {
+    func testPushIsOnUnlessTheFileSaysFalse() {
+        XCTAssertTrue(PushRule.isOn(nil))
+        XCTAssertTrue(PushRule.isOn(true))
+        XCTAssertFalse(PushRule.isOn(false))
+    }
+    func testSettingsWritesNothingForOnAndFalseForOff() {
+        XCTAssertNil(PushRule.saved(on: true, loaded: nil))
+        XCTAssertNil(PushRule.saved(on: true, loaded: false))     // turned back on: back to the default
+        XCTAssertEqual(PushRule.saved(on: true, loaded: true), true)   // an explicit true in the file stays
+        XCTAssertEqual(PushRule.saved(on: false, loaded: nil), false)
+        XCTAssertEqual(PushRule.saved(on: false, loaded: true), false)
+    }
+}
+
+final class PushSetupDeadlineTests: XCTestCase {
+    func testNoAuthReplyWithinTenSecondsOfConnectingIsLost() {
+        XCTAssertNil(PushRule.setupLost(elapsed: 9.9, authenticated: false, subscribed: false))
+        XCTAssertEqual(PushRule.setupLost(elapsed: 10, authenticated: false, subscribed: false), "no auth reply")
+    }
+    func testNoSubscribeResultWithinTenSecondsOfAuthOkIsLost() {
+        XCTAssertEqual(PushRule.subscribeTimeout, 10)
+        XCTAssertNil(PushRule.setupLost(elapsed: 9.9, authenticated: true, subscribed: false))
+        XCTAssertEqual(PushRule.setupLost(elapsed: 10, authenticated: true, subscribed: false), "no subscribe reply")
+    }
+    func testASubscribedConnectionIsLeftToThePings() {
+        XCTAssertNil(PushRule.setupLost(elapsed: 3600, authenticated: true, subscribed: true))
+    }
+    func testEachSetupStepWaitsForItsOwnDeadline() {
+        XCTAssertEqual(PushRule.setupDeadline(authenticated: false), PushRule.authTimeout)
+        XCTAssertEqual(PushRule.setupDeadline(authenticated: true), PushRule.subscribeTimeout)
     }
 }
 
@@ -318,7 +352,7 @@ final class PushSettingsEditTests: XCTestCase {
         XCTAssertEqual(h["push"] as? Bool, true)
         XCTAssertEqual(h["tokenName"] as? String, "kc")
     }
-    func testTurningPushOffRemovesTheKey() throws {
+    func testANilEditRemovesTheKeyWhichMeansOn() throws {
         XCTAssertNil(try ha(edit(push: nil), file(#", "push": true"#))["push"])
     }
     func testAnExplicitFalseStaysFalse() throws {

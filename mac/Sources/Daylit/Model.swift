@@ -102,7 +102,7 @@ import DaylitCore
     var lastTick = Date.distantPast
     var timer: Timer?
     var screenDebounce: DispatchWorkItem?
-    /// Push updates from Home Assistant (experimental): says when to tick. Created on first use, so previews have none.
+    /// Push updates from Home Assistant (on unless homeAssistant.push is false): says when to tick. Created on first use, so previews have none.
     lazy var push = PushClient(tick: { [weak self] in self?.refresh() }, lastTick: { [weak self] in self?.lastTick ?? .distantPast },
                                  daylightLimit: { [weak self] in PushRule.daylightLimit(onBattery: Power.onBattery, tuning: self?.config.tuned ?? Tuning()) })
 

@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push): the WebSocket only says *when*
+// Push updates from Home Assistant (config homeAssistant.push, on unless false): the WebSocket only says *when*
 // to tick; the tick still reads everything through the REST template. Twin of mac/Sources/DaylitCore/Push.swift.
 // No WPF or Win32 here: the test project compiles this file. The socket itself is PushClient.cs.
 using System.Text.Json;
@@ -38,6 +38,20 @@ static class PushRule {
     /// connection counts as lost.
     public const double AuthTimeout = 10;
     public static bool AuthTimedOut(double elapsed, bool authenticated) => !authenticated && elapsed >= AuthTimeout;
+    /// After auth_ok, the subscribe result must arrive within this many seconds. Without it no event ever comes and
+    /// the pings never start, so the connection would sit there, open and useless, with nothing to notice.
+    public const double SubscribeTimeout = 10;
+    /// Why a connection that is still setting up counts as lost, or null while it may still wait. `elapsed`: seconds
+    /// since its current step began (the connect, or auth_ok). A subscribed connection is watched by the pings instead.
+    public static string? SetupLost(double elapsed, bool authenticated, bool subscribed) =>
+        subscribed ? null
+        : !authenticated ? (elapsed >= AuthTimeout ? "no auth reply" : null)
+        : elapsed >= SubscribeTimeout ? "no subscribe reply" : null;
+    /// The longest a setup step may take: the wait for its deadline.
+    public static double SetupDeadline(bool authenticated) => authenticated ? SubscribeTimeout : AuthTimeout;
+    /// Whether a message from the receive loop needs the UI thread at all. Anything else (other results, unknown types)
+    /// is dropped where it arrives, so a chatty server cannot fill the UI queue with work that does nothing.
+    public static bool Dispatches(PushKind kind) => kind is PushKind.AuthOk or PushKind.AuthInvalid or PushKind.Result or PushKind.Event or PushKind.Pong;
     /// Waits before each reconnect attempt; the last one repeats.
     public static readonly double[] Backoff = [2, 5, 15, 60];
 
@@ -132,7 +146,12 @@ static class PushRule {
     /// Whether the socket should be open: push on, Home Assistant the source, Automatic on, not paused on battery,
     /// and a monitor to drive.
     public static bool Wanted(bool? push, Source source, bool paused, bool auto, bool hasMonitors) =>
-        push == true && source == Source.HomeAssistant && !paused && auto && hasMonitors;
+        IsOn(push) && source == Source.HomeAssistant && !paused && auto && hasMonitors;
+    /// homeAssistant.push: on unless the file says false (no key means on).
+    public static bool IsOn(bool? push) => push != false;
+    /// What the Settings window writes for its Instant updates switch: nothing when on (the default), unless the file
+    /// already said true; false when off, so it stays off.
+    public static bool? Saved(bool on, bool? loaded) => on ? (loaded == true ? true : null) : false;
 
     /// The log lines (Log.Write adds the time). None of them can carry the token.
     public static string ConnectedLine(int count) => $"push: connected ({count} entities)";
@@ -173,4 +192,19 @@ sealed class PushTimer {
     }
     /// The timer fired (or the socket closed): nothing pending.
     public void Clear() { Due = null; immediate = false; }
+}
+
+/// Entity changes from the receive loop waiting for the UI thread. Changes that arrive while a dispatch is pending join
+/// it, so a stream of events is at most one queued UI call however fast it comes. One per connection.
+sealed class EventBatch {
+    readonly object gate = new();
+    HashSet<string>? ids;
+    /// Adds changed ids (receive loop). True when nothing was pending, so the caller must dispatch one Take.
+    public bool Add(IEnumerable<string> changed) {
+        lock (gate) { bool first = ids == null; (ids ??= new()).UnionWith(changed); return first; }
+    }
+    /// Takes everything pending (UI thread); the next Add starts a new batch and a new dispatch.
+    public IReadOnlySet<string> Take() {
+        lock (gate) { var r = ids ?? new HashSet<string>(); ids = null; return r; }
+    }
 }

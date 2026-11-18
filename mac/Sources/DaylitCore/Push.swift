@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push): the WebSocket only says
+// Push updates from Home Assistant (config homeAssistant.push, on unless false): the WebSocket only says
 // *when* to tick. The tick still reads everything through the REST template. The app side is
 // mac/Sources/Daylit/PushClient.swift; windows/Push.cs is the twin of this file.
 import Foundation
@@ -117,6 +117,18 @@ extension PushRule {
     /// auth_required/auth_ok must arrive within this many seconds of connecting, else the connection counts as lost.
     public static let authTimeout: Double = 10
     public static func authTimedOut(elapsed: Double, authenticated: Bool) -> Bool { !authenticated && elapsed >= authTimeout }
+    /// After auth_ok, the subscribe result must arrive within this many seconds. Without it no event ever comes
+    /// and the pings never start, so the connection would sit there, open and useless, with nothing to notice.
+    public static let subscribeTimeout: Double = 10
+    /// Why a connection that is still setting up counts as lost, or nil while it may still wait. `elapsed`: seconds
+    /// since its current step began (the connect, or auth_ok). A subscribed connection is watched by the pings instead.
+    public static func setupLost(elapsed: Double, authenticated: Bool, subscribed: Bool) -> String? {
+        if subscribed { return nil }
+        if !authenticated { return elapsed >= authTimeout ? "no auth reply" : nil }
+        return elapsed >= subscribeTimeout ? "no subscribe reply" : nil
+    }
+    /// The longest a setup step may take: the wait for its deadline.
+    public static func setupDeadline(authenticated: Bool) -> Double { authenticated ? subscribeTimeout : authTimeout }
     /// Waits before each reconnect attempt; the last one repeats.
     public static let backoff: [Double] = [2, 5, 15, 60]
 
@@ -149,10 +161,15 @@ extension PushRule {
         return healthy ? max(healthyPollSeconds, normal) : normal
     }
 
+    /// homeAssistant.push: on unless the file says false (no key means on).
+    public static func isOn(_ push: Bool?) -> Bool { push != false }
+    /// What the Settings window writes for its Instant updates switch: nothing when on (the default), unless the
+    /// file already said true; false when off, so it stays off.
+    public static func saved(on: Bool, loaded: Bool?) -> Bool? { on ? (loaded == true ? true : nil) : false }
     /// Whether the socket should be open: push on, Home Assistant the source, Automatic on, not paused on
     /// battery, and a monitor to drive.
     public static func wanted(push: Bool?, source: Source, paused: Bool, auto: Bool, hasMonitors: Bool) -> Bool {
-        push == true && source == .homeAssistant && !paused && auto && hasMonitors
+        isOn(push) && source == .homeAssistant && !paused && auto && hasMonitors
     }
 }
 

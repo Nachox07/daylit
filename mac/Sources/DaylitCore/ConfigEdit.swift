@@ -78,7 +78,7 @@ public struct SettingsEdit: Equatable {
     public var light = ""                     // homeAssistant.light: the daylight sensor
     /// The window shows the Instant updates switch. When false, `homeAssistant.push` in the file is kept as it is.
     public var pushEditable = false
-    /// homeAssistant.push (experimental); nil removes the key (off is the default), false is written as false.
+    /// homeAssistant.push; nil removes the key (on is the default), true or false is written as is.
     public var push: Bool? = nil
     /// The window shows the "Automatically check for updates" switch. When false, `checkUpdates` in the file is kept as it is.
     public var checkUpdatesEditable = false

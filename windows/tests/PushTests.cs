@@ -344,9 +344,69 @@ public class PushTimingTests {
     }
 
     [Fact]
+    public void PushIsOnUnlessTheFileSaysFalse() {
+        Assert.True(PushRule.IsOn(null));
+        Assert.True(PushRule.IsOn(true));
+        Assert.False(PushRule.IsOn(false));
+    }
+
+    [Fact]
+    public void SettingsWritesNothingForOnAndFalseForOff() {
+        Assert.Null(PushRule.Saved(true, null));
+        Assert.Null(PushRule.Saved(true, false));     // turned back on: back to the default
+        Assert.Equal(true, PushRule.Saved(true, true));   // an explicit true in the file stays
+        Assert.Equal(false, PushRule.Saved(false, null));
+        Assert.Equal(false, PushRule.Saved(false, true));
+    }
+
+    [Fact]
+    public void NoAuthReplyWithinTenSecondsOfConnectingIsLost() {
+        Assert.Null(PushRule.SetupLost(9.9, false, false));
+        Assert.Equal("no auth reply", PushRule.SetupLost(10, false, false));
+    }
+
+    [Fact]
+    public void NoSubscribeResultWithinTenSecondsOfAuthOkIsLost() {
+        Assert.Equal(10, PushRule.SubscribeTimeout);
+        Assert.Null(PushRule.SetupLost(9.9, true, false));
+        Assert.Equal("no subscribe reply", PushRule.SetupLost(10, true, false));
+    }
+
+    [Fact]
+    public void ASubscribedConnectionIsLeftToThePings() {
+        Assert.Null(PushRule.SetupLost(3600, true, true));
+    }
+
+    [Fact]
+    public void EachSetupStepWaitsForItsOwnDeadline() {
+        Assert.Equal(PushRule.AuthTimeout, PushRule.SetupDeadline(false));
+        Assert.Equal(PushRule.SubscribeTimeout, PushRule.SetupDeadline(true));
+    }
+
+    [Fact]
+    public void EventsArrivingBeforeTheUiRunsJoinOneDispatch() {
+        var b = new EventBatch();
+        Assert.True(b.Add(["light.office"]));    // first: dispatch
+        Assert.False(b.Add(["cover.office"]));   // pending: joins it
+        Assert.False(b.Add(["light.office"]));
+        Assert.Equal(new HashSet<string> { "light.office", "cover.office" }, b.Take().ToHashSet());
+        Assert.True(b.Add(["sun.sun"]));         // after Take: a new dispatch
+        Assert.Equal(new HashSet<string> { "sun.sun" }, b.Take().ToHashSet());
+        Assert.Empty(b.Take());
+    }
+
+    [Fact]
+    public void OnlyMessagesTheClientActsOnReachTheUiThread() {
+        foreach (var k in new[] { PushKind.AuthOk, PushKind.AuthInvalid, PushKind.Result, PushKind.Event, PushKind.Pong })
+            Assert.True(PushRule.Dispatches(k));
+        Assert.False(PushRule.Dispatches(PushKind.Other));
+        Assert.False(PushRule.Dispatches(PushKind.AuthRequired));   // answered in the receive loop itself
+    }
+
+    [Fact]
     public void TheSocketIsOpenOnlyWhenEverythingAllowsIt() {
         Assert.True(PushRule.Wanted(true, Source.HomeAssistant, false, true, true));
-        Assert.False(PushRule.Wanted(null, Source.HomeAssistant, false, true, true));
+        Assert.True(PushRule.Wanted(null, Source.HomeAssistant, false, true, true));   // no key: on
         Assert.False(PushRule.Wanted(false, Source.HomeAssistant, false, true, true));
         Assert.False(PushRule.Wanted(true, Source.Sun, false, true, true));
         Assert.False(PushRule.Wanted(true, Source.HomeAssistant, true, true, true));
@@ -373,7 +433,7 @@ public class PushSettingsEditTests {
     }
 
     [Fact]
-    public void TurningPushOffRemovesTheKey() => Assert.Null(Ha(Edit(null), WithPush(""", "push": true"""))["push"]);
+    public void ANullEditRemovesTheKeyWhichMeansOn() => Assert.Null(Ha(Edit(null), WithPush(""", "push": true"""))["push"]);
 
     [Fact]
     public void AnExplicitFalseStaysFalse() => Assert.False((bool)Ha(Edit(false), WithPush(""", "push": false"""))["push"]!);
