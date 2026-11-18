@@ -180,3 +180,51 @@ computer right now, or no token stored yet) and which config entry matched which
 - Keep the two apps behaving the same (README → *How it works*). The HDR rule matters: with HDR on,
   Windows brightness goes through the SDR white level (undocumented `DisplayConfigSetDeviceInfo`
   type `0xFFFFFFEE`), not DDC.
+
+### Done means
+
+Commands and the waiver format: [CONTRIBUTING.md](CONTRIBUTING.md) → *Checks: local and CI*. The order to
+work in: the skill [`.agents/skills/change-daylit/SKILL.md`](.agents/skills/change-daylit/SKILL.md).
+
+- `scripts/check.sh` passes **and** the pull request's CI is green (CI adds the UI snapshots, the universal
+  Mac build and the Windows build on Windows).
+- A behaviour change lands in both apps, in README → *How it works*, in docs/setup.md when a setting
+  changes, and as a case in `tests/parity/`.
+- A change right on one side only carries a waiver naming the file and the reason
+  (`Parity: <file> — <why>`) in a commit message. `scripts/twins.json` tells you each file's twin. It is
+  a map to read, not proof: the shared cases are the proof.
+
+### Code layout and naming
+
+- **Pure decisions** (no AppKit, WPF, Win32, network or files) go in `mac/Sources/DaylitCore` and the
+  Windows files `Rules.cs`, `Config.cs`, `Suggest.cs`, `Update.cs`, `Push.cs`, `Light.cs`, `Chart.cs`. The
+  app files (`Model.swift` / `App.cs`, displays, keys, windows, Home Assistant calls) only gather inputs,
+  call those decisions and do the I/O. New logic in a controller is untestable on both sides: extract it.
+- Twins share names in each language's style: Swift `lowerCamelCase` functions and properties
+  (`Suggest.applyClearsOffset`), C# `PascalCase` methods, properties and types (`Suggest.ApplyClearsOffset`),
+  `camelCase` private fields with no underscore. Types are `UpperCamelCase` on both sides.
+- Comments say why, in plain sentences, at the top of each file and above a non-obvious rule. Match the
+  surrounding style (`.editorconfig`: 4 spaces in code, 2 in JSON/YAML; C# braces on the same line,
+  short one-line members kept on one line). Don't reformat code you are not changing.
+
+### Pitfalls we have hit
+
+Each of these shipped once. Check for them in any change that touches the same kind of code.
+
+- **Await, then write.** After any `await` (Home Assistant, a DDC call, a sleep) the config may have been
+  reloaded, the machine paused on battery or Automatic turned off. Recheck the generation and pause
+  before writing a level, publishing or recording state.
+- **Outside input is untrusted.** Bound every number from Home Assistant or GitHub (finite, in range)
+  before arithmetic or `Int(...)`; a huge value crashed the Mac app.
+- **Everything external gets a deadline.** Subprocesses (`m1ddc`), socket setup (auth *and* subscribe),
+  HTTP calls. A call that never returns must not block the tick or other monitors.
+- **The token goes only to an address approved on this machine** (macOS `TokenGate`). Never approve an
+  address the user did not see; never let a synced config pick the token name.
+- **Settings never rewrites what the user didn't touch.** Keep unknown keys, keep values untouched in
+  the window (no rounding or truncating on save), keep comments or refuse to save.
+- **A first observation is not a command.** A Home Assistant helper's current value, seen for the first
+  time or after an entity change, must not move a monitor.
+- **A failed write is not a success.** Don't record a level, clear an offset or mark a suggestion
+  applied unless the write went through.
+- **Both apps, same rule.** When the two disagree, README → *How it works* decides; fix the other side
+  and add the case to `tests/parity/`.

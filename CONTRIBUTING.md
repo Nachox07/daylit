@@ -119,6 +119,42 @@ plain background so they look the same on every macOS version.
   changed for the user, then a body with the why when it isn't obvious. One logical change per
   commit.
 
+## Checks: local and CI
+
+`scripts/check.sh` runs the local checks on a Mac: the parity guard and its tests, `swift test`,
+`dotnet test`, and both builds with 0 warnings (a clean Mac compile, so a warning in a cached file is not
+missed). `--quick` skips the builds. It finds `dotnet` on the `PATH` or in `~/.dotnet`. On Windows, run the
+two `dotnet` commands above.
+
+CI on the pull request adds what a Mac cannot check locally: the UI snapshot comparison (baselines come
+from CI's machines), the universal Mac build and the Windows build on Windows, all with 0 warnings. A change
+is done when `scripts/check.sh` passes and the pull request's checks are green.
+
+### Parity guard
+
+`scripts/twins.json` pairs each macOS source file with the Windows file that does the same job
+(`Rules.swift`, `Sun.swift` and `HATemplate.swift` with `Rules.cs`; `Model.swift` with `App.cs`; …).
+`scripts/parity-guard.py` (in `scripts/check.sh`, and the `parity` workflow on every pull request) fails when:
+
+- a file on one side changed and none of its twins did. When the other app really needs nothing, add a
+  waiver naming the file and the reason, preferably as a line in the commit message:
+
+  ```
+  Parity: mac/Sources/Daylit/Token.swift — Mac-only, Windows has no keychain
+  ```
+
+  Targets are paths, directories ending in `/`, or globs, separated by commas or spaces, then ` — ` (or
+  ` - `) and the reason. A waiver excuses only the files it names. The pull request description works too
+  (editing it re-runs the check); HTML comments, like the template's, are ignored. Locally the guard reads
+  commit messages, or `PARITY_PR_BODY` if you set it;
+- a source file (`mac/Sources/**/*.swift`, `windows/*.cs`) is missing from `twins.json`. Add a new file to
+  the group of its twin, or to `macOnly` / `windowsOnly` with the reason;
+- `twins.json` names a file that no longer exists.
+
+The map is a navigation aid, not proof of parity. A file in several groups is matched by a change to any
+of its twins, so `App.cs` changed with only `Keys.swift` passes. The shared cases in `tests/parity/` are
+what show that both apps behave the same. `python3 -I scripts/test_parity_guard.py` tests the guard itself.
+
 ## Releases and signing
 
 A `v*` tag builds and publishes both apps (`.github/workflows/release.yml`). The macOS app is signed

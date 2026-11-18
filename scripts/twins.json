@@ -1,0 +1,40 @@
+{
+  "about": "Which macOS and Windows source files do the same job: a map for finding a file's twin, not proof that the two apps behave the same (tests/parity/ is that). scripts/parity-guard.py fails a change that touches one side of a group and none of the other, unless a waiver names the file: 'Parity: <file> — <why>' in a commit message or the pull request. Every .swift file under mac/Sources and every .cs file directly in windows/ must appear here: in a group, or in macOnly / windowsOnly with the reason. A file in several groups is matched when any file on the other side of any of its groups changed too.",
+  "groups": [
+    { "name": "brightness rules, sun, Home Assistant template", "mac": ["mac/Sources/DaylitCore/Rules.swift", "mac/Sources/DaylitCore/Sun.swift", "mac/Sources/DaylitCore/HATemplate.swift"], "windows": ["windows/Rules.cs"] },
+    { "name": "config file: model, reading, saving, tuning", "mac": ["mac/Sources/DaylitCore/Config.swift", "mac/Sources/DaylitCore/ConfigEdit.swift", "mac/Sources/DaylitCore/Tuning.swift"], "windows": ["windows/Config.cs"] },
+    { "name": "chart and 'how Daylit decides' (pure)", "mac": ["mac/Sources/DaylitCore/Chart.swift"], "windows": ["windows/Chart.cs"] },
+    { "name": "light sensor (pure)", "mac": ["mac/Sources/DaylitCore/Light.swift"], "windows": ["windows/Light.cs"] },
+    { "name": "push rules (pure)", "mac": ["mac/Sources/DaylitCore/Push.swift"], "windows": ["windows/Push.cs"] },
+    { "name": "push client", "mac": ["mac/Sources/Daylit/PushClient.swift"], "windows": ["windows/PushClient.cs"] },
+    { "name": "suggested levels (pure)", "mac": ["mac/Sources/DaylitCore/Suggest.swift"], "windows": ["windows/Suggest.cs"] },
+    { "name": "suggested levels (app)", "mac": ["mac/Sources/Daylit/Suggestions.swift"], "windows": ["windows/Suggestions.cs"] },
+    { "name": "update check (pure)", "mac": ["mac/Sources/DaylitCore/Update.swift"], "windows": ["windows/Update.cs"] },
+    { "name": "update check (app)", "mac": ["mac/Sources/Daylit/Updates.swift"], "windows": ["windows/Updates.cs"] },
+    { "name": "controller and the tick", "mac": ["mac/Sources/Daylit/Model.swift"], "windows": ["windows/App.cs"] },
+    { "name": "app shell: menu-bar / tray item, startup", "mac": ["mac/Sources/Daylit/App.swift"], "windows": ["windows/App.cs", "windows/Ui.cs"] },
+    { "name": "panel, indicator, shortcuts window", "mac": ["mac/Sources/Daylit/UI.swift"], "windows": ["windows/Ui.cs"] },
+    { "name": "brightness keys and global shortcuts", "mac": ["mac/Sources/Daylit/Keys.swift"], "windows": ["windows/Ui.cs", "windows/App.cs"] },
+    { "name": "token dialog and credential store", "mac": ["mac/Sources/Daylit/Token.swift"], "windows": ["windows/Ui.cs", "windows/Sources.cs"] },
+    { "name": "Home Assistant calls", "mac": ["mac/Sources/Daylit/Sources.swift"], "windows": ["windows/Sources.cs"] },
+    { "name": "settings window", "mac": ["mac/Sources/Daylit/Settings.swift"], "windows": ["windows/Settings.cs"] },
+    { "name": "brightness chart view", "mac": ["mac/Sources/Daylit/BrightnessChart.swift"], "windows": ["windows/BrightnessChart.cs"] },
+    { "name": "sun curve view", "mac": ["mac/Sources/Daylit/SunCurve.swift"], "windows": ["windows/SunCurve.cs"] },
+    { "name": "command line", "mac": ["mac/Sources/Daylit/Cli.swift"], "windows": ["windows/Cli.cs"] },
+    { "name": "monitor I/O, idle time, power source", "mac": ["mac/Sources/Daylit/Displays.swift"], "windows": ["windows/Displays.cs", "windows/Win.cs"] },
+    { "name": "UI snapshots", "mac": ["mac/Sources/Daylit/Snapshots.swift"], "windows": ["windows/Snapshots.cs"] },
+    { "name": "log file", "mac": ["mac/Sources/Daylit/Log.swift"], "windows": ["windows/Win.cs"] },
+    { "name": "light/dark mode switching", "mac": ["mac/Sources/Daylit/Look.swift"], "windows": ["windows/Win.cs"] }
+  ],
+  "macOnly": {
+    "mac/Sources/DaylitCore/AccessibilityPrompt.swift": "macOS needs the Accessibility permission for the brightness keys; Windows needs none",
+    "mac/Sources/DaylitCore/ConfigLocation.swift": "the iCloud Drive config location and its last-good reload; Windows has one %APPDATA% path",
+    "mac/Sources/DaylitCore/DDCTool.swift": "which m1ddc program may run; Windows talks DDC/CI through Win32 directly",
+    "mac/Sources/DaylitCore/LocalNetwork.swift": "macOS's Local Network permission; Windows has no such permission",
+    "mac/Sources/Daylit/LocalNetworkProbe.swift": "macOS's Local Network permission; Windows has no such permission",
+    "mac/Sources/DaylitCore/TokenDestination.swift": "a synced iCloud config can change the address on another Mac; the Windows config is never synced",
+    "mac/Sources/DaylitCore/TokenKeychain.swift": "moving the token to a keychain item only Daylit can read; Windows Credential Manager has no per-app items",
+    "mac/Sources/Daylit/Demo.swift": "scripted panel demo for README recordings, made on the Mac"
+  },
+  "windowsOnly": {}
+}
