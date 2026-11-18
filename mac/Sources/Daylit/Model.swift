@@ -915,12 +915,18 @@ import DaylitCore
             }
             if tokenQuestion != nil { tokenQuestion = nil }
             tokenHeld = nil
+            // A config reload during a wait below makes this answer (or failure) belong to the old config: record
+            // nothing from it (outage time, cached levels, errors). The tick drops it too; a new tick follows.
+            let gen = generation
             var result = await HAClient.state(ha, mons)
+            guard gen == generation else { return nil }
             for delay in HAErrorRule.retryDelays {   // a first failure after launch, wake or docking is usually brief
                 guard case .failure(let failure) = result, failure.isTransient else { break }
                 if haDownSince == nil { Log.write("home assistant: retrying in \(Int(delay)) s (\(HAClient.lastCause ?? "no answer"))") }   // once, not every tick of an outage
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard gen == generation else { return nil }
                 result = await HAClient.state(ha, mons)
+                guard gen == generation else { return nil }
             }
             switch result {
             case .success(let s):
@@ -984,7 +990,10 @@ import DaylitCore
                 return i
             case .failure(let f):
                 var blocked = false
-                if f == .unreachable { blocked = await LocalNetworkProbe.blocked(url: ha.url, errorCode: HAClient.lastCode) }
+                if f == .unreachable {
+                    blocked = await LocalNetworkProbe.blocked(url: ha.url, errorCode: HAClient.lastCode)
+                    guard gen == generation else { return nil }
+                }
                 let message = blocked ? LocalNetworkBlock.message : HAClient.describe(f, ha)
                 let logMessage = blocked ? LocalNetworkBlock.logMessage : message
                 if HAErrorRule.shouldLog(message: logMessage, lastMessage: lastHAError, lastLogged: haLoggedAt?.timeIntervalSince1970,
