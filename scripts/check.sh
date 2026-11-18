@@ -2,6 +2,8 @@
 # The local checks for a change, in one command (macOS; the Windows app builds and tests here too).
 #   scripts/check.sh            parity guard and its tests, both test suites, both builds with 0 warnings
 #   scripts/check.sh --quick    the same without the builds
+# It also fails when a file git ignores is committed (build output, bytecode) or when the checks rewrite a
+# committed file: either means something generated slipped into the repo.
 #   PARITY_BASE=<ref>           what the parity guard compares against (default origin/main)
 #   PARITY_PR_BODY=<text>       a pull request description to read waivers from (CI passes the real one;
 #                               locally, put waivers in a commit message instead)
@@ -10,6 +12,7 @@
 # done when this passes AND the pull request's checks are green.
 set -u
 cd "$(dirname "$0")/.."
+export PYTHONDONTWRITEBYTECODE=1   # the guard scripts leave no __pycache__ behind
 quick=false
 [ "${1:-}" = "--quick" ] && quick=true
 
@@ -53,7 +56,19 @@ win_build() {
   no_warnings "$tmp/win-build.out"
 }
 
+nothing_ignored_tracked() {   # a committed file that .gitignore matches is generated output added by mistake
+  local tracked; tracked=$(git ls-files -ci --exclude-standard)
+  [ -z "$tracked" ] || { echo "committed files that .gitignore matches (git rm --cached them):"; echo "$tracked"; return 1; }
+}
+
+unchanged_by_checks() {   # the checks must not rewrite committed files
+  local now; now=$(git status --porcelain --untracked-files=no)
+  [ "$now" = "$before" ] || { echo "the checks changed committed files:"; diff <(echo "$before") <(echo "$now"); return 1; }
+}
+
+before=$(git status --porcelain --untracked-files=no)
 base=${PARITY_BASE:-origin/main}
+step "no generated files committed" nothing_ignored_tracked
 step "parity guard tests" python3 -I scripts/test_parity_guard.py
 step "parity guard" python3 -I scripts/parity-guard.py --base "$base" --worktree
 step "mac tests (swift test)" bash -c 'cd mac && swift test'
@@ -66,6 +81,7 @@ if ! $quick; then
   step "mac build, 0 warnings" mac_build
   if [ -n "$DOTNET" ]; then step "windows build, 0 warnings" win_build; fi
 fi
+step "checks left committed files alone" unchanged_by_checks
 
 echo
 printf '%s\n' "${results[@]}"
