@@ -131,6 +131,10 @@ class GuardScenarios(unittest.TestCase):
         self.repo.commit("one", "mac/Sources/Core/Rules.swift")
         self.assertPasses("Parity: mac/Sources/Core/Rules.swift — needs macOS >= 14, Windows < 11 not affected")
 
+    def test_less_than_before_greater_than_in_a_reason_is_fine(self):
+        self.repo.commit("one", "mac/Sources/Core/Rules.swift")
+        self.assertPasses("Parity: mac/Sources/Core/Rules.swift — Windows < 11 only; macOS >= 14 unaffected")
+
     def test_file_in_several_groups_passes_with_any_twin(self):
         self.repo.commit("w", "windows/Win.cs", "mac/Sources/App/Log.swift")
         self.assertPasses()

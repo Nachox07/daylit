@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TWINS = ROOT / "scripts" / "twins.json"
 PARITY_LINE = re.compile(r"^[ \t]*Parity:[ \t]*(.*)$", re.MULTILINE)
 SEPARATOR = re.compile(r"\s+(?:—|–|--|-)\s+")
-PLACEHOLDER = re.compile(r"<[^<>\n]*>")   # a template slot like <why> or <file>
+PLACEHOLDER = re.compile(r"<[A-Za-z][A-Za-z .,_/-]{0,40}>")   # a template slot like <why> or <file>, not "< 11 ... >= 14"
 PLACEHOLDERS = {"why", "reason", "todo", "tbd", "n/a", "na", "none", "-"}
 
 
