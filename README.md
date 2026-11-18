@@ -60,6 +60,7 @@ silicon). The first open still needs **Open Anyway** in System Settings → Priv
   publisher: **More info → Run anyway**. It needs the
   [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
   (`winget install Microsoft.DotNet.DesktopRuntime.10`).
+- To check a download against the release's `SHA256SUMS`: [Checking a download](docs/setup.md#checking-a-download).
 
 **New versions.** Once a day Daylit asks GitHub's public releases list whether a newer version is out; the
 request carries nothing about you, only `Daylit/<version>` as its User-Agent. When there is one, the panel

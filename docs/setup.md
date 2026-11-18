@@ -414,6 +414,24 @@ Daylit does not update itself; it tells you when a new version is out.
   `update: check failed` line, once and then every 10 minutes while it keeps failing, and Daylit tries
   again within the hour.
 
+### Checking a download
+
+Every release after 1.8.0 has a `SHA256SUMS` file next to the zips, written by the release workflow from
+the zips it built. Download it into the same folder as the zip, then:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS / Linux: "Daylit-mac-….zip: OK"
+```
+
+```powershell
+Get-FileHash Daylit-windows-*.zip                 # Windows: compare the hash with the line in SHA256SUMS
+```
+
+The same hashes are in the release notes, and Homebrew and winget check theirs on install. The macOS app
+is also always signed with the same Daylit certificate: `codesign -dv Daylit.app` shows its name
+(today `Authority=Daylit Signing`). Neither replaces Apple notarization or a Windows code signature, which
+Daylit does not have; building from source is the way to trust only what you have read.
+
 ## Permissions (macOS)
 
 | Permission | Asked when | Needed for |

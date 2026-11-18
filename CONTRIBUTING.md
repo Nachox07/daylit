@@ -65,7 +65,8 @@ monitors, two and three linked, one set by hand, none; no hardware and no Home A
 pull request that changes the UI shows the before and after in GitHub's image diff (side by side,
 swipe, onion skin).
 
-CI renders them on every push and compares with the baselines: an image fails when more than 0.5%
+CI renders them on every push, and again in the release jobs, and compares with the baselines
+(`mac/snapshots.sh` and `windows/snapshots.ps1`, the same scripts for both workflows): an image fails when more than 0.5%
 of its pixels change (anti-aliasing noise stays well below). The `snapshots-mac` /
 `snapshots-windows` artifacts of the run hold the new renders and, for a failure, `diff-*.png`
 with the changed pixels in red.
@@ -102,8 +103,9 @@ plain background so they look the same on every macOS version.
 ## Releases and signing
 
 A `v*` tag builds and publishes both apps (`.github/workflows/release.yml`). The macOS app is signed
-with a stable certificate when the secrets `MAC_CERT_P12` and `MAC_CERT_PASSWORD` exist, else ad-hoc:
-see [docs/release-signing.md](docs/release-signing.md).
+with the stable certificate in the secrets `MAC_CERT_P12` and `MAC_CERT_PASSWORD`; without them the
+release fails rather than sign ad-hoc (see [docs/release-signing.md](docs/release-signing.md)). The
+release jobs also run the tests and the UI snapshot comparison, and publish `SHA256SUMS` beside the zips.
 
 The release notes (and the app's *What's new*) list every pull request merged since the last release
 (`.github/release.yml`). Label a pull request `internal` when users won't notice it (release process, CI,

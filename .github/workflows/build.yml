@@ -22,11 +22,8 @@ jobs:
         run: DAYLIT_UNIVERSAL=1 mac/build.sh "$RUNNER_TEMP"
       - name: UI snapshots
         env:
-          RECORD: ${{ inputs.record }}
-        run: |
-          app="$RUNNER_TEMP/Daylit.app/Contents/MacOS/Daylit"
-          "$app" --render-snapshots "$RUNNER_TEMP/snapshots"
-          if [ "$RECORD" != "true" ]; then "$app" --compare-snapshots mac/Tests/Snapshots "$RUNNER_TEMP/snapshots"; fi
+          RECORD: ${{ inputs.record && 'record' || '' }}
+        run: mac/snapshots.sh "$RUNNER_TEMP/Daylit.app" "$RUNNER_TEMP/snapshots" ${RECORD:+"$RECORD"}
       - name: Upload UI snapshots (renders, and diff-*.png when they differ)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -55,14 +52,7 @@ jobs:
         shell: pwsh
         env:
           RECORD: ${{ inputs.record }}
-        run: |
-          $out = Join-Path $env:RUNNER_TEMP 'snapshots'
-          ./out/Daylit.exe --render-snapshots $out | Out-String
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($env:RECORD -ne 'true') {
-            ./out/Daylit.exe --compare-snapshots windows/tests/Snapshots $out | Out-String
-            exit $LASTEXITCODE
-          }
+        run: ./windows/snapshots.ps1 ./out/Daylit.exe (Join-Path $env:RUNNER_TEMP 'snapshots') -Record:($env:RECORD -eq 'true')
       - name: Upload UI snapshots (renders, and diff-*.png when they differ)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

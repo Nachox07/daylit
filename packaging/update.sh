@@ -25,6 +25,23 @@ trap 'rm -rf "$TMP"' EXIT
 for f in "$MAC_ZIP" "$WIN_ZIP"; do
   curl -fsSL -o "$TMP/$f" "$BASE/$f" || { echo "could not download $BASE/$f (is v$VERSION published?)" >&2; exit 1; }
 done
+# Releases after v1.8.0 carry SHA256SUMS, written by the release workflow from the zips it built.
+# Both downloads must match it, so a zip replaced on the release page afterwards is caught here.
+has_sums() { echo "$VERSION" | awk -F. '{ exit !($1 > 1 || ($1 == 1 && ($2 > 8 || ($2 == 8 && $3 > 0)))) }'; }
+if has_sums; then
+  curl -fsSL -o "$TMP/SHA256SUMS" "$BASE/SHA256SUMS" \
+    || { echo "could not download $BASE/SHA256SUMS: do not publish unchecked zips" >&2; exit 1; }
+  for f in "$MAC_ZIP" "$WIN_ZIP"; do
+    want="$(awk -v f="$f" '$2 == f || $2 == "*" f { print $1 }' "$TMP/SHA256SUMS")"
+    [ -n "$want" ] && [ "$(printf '%s\n' "$want" | wc -l | tr -d ' ')" = 1 ] \
+      || { echo "SHA256SUMS of v$VERSION must list $f exactly once" >&2; exit 1; }
+    [ "$(shasum -a 256 "$TMP/$f" | cut -d' ' -f1)" = "$want" ] \
+      || { echo "$f does not match SHA256SUMS of v$VERSION: do not publish" >&2; exit 1; }
+  done
+  echo "checked both zips against SHA256SUMS"
+else
+  echo "v$VERSION predates SHA256SUMS: zips not cross-checked" >&2
+fi
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 MAC_SHA="$(sha "$TMP/$MAC_ZIP")"
 WIN_SHA="$(sha "$TMP/$WIN_ZIP" | tr '[:lower:]' '[:upper:]')"

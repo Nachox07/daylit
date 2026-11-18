@@ -1,13 +1,15 @@
 # Signing the macOS release
 
 macOS ties its privacy permissions (Local Network, Accessibility, Automation) to the app's code
-signature. The release is signed ad-hoc by default, and an ad-hoc signature is different for every
+signature. The first releases were signed ad-hoc, and an ad-hoc signature is different for every
 build. So after an update macOS can treat Daylit as a new app and the permissions are gone: Home
 Assistant requests fail until the user turns Daylit off and on again in System Settings → Privacy &
 Security → Local Network.
 
-Signing every release with the same certificate should fix that. The release workflow does it when
-two repository secrets exist, and keeps the ad-hoc signature when they do not.
+Signing every release with the same certificate should fix that. The release workflow does it with
+two repository secrets, and **fails without them**: a release is never signed ad-hoc. After the
+build it checks that `Daylit.app` carries exactly that certificate (the leaf certificate's SHA-1 must
+equal the identity's hash) before running the UI snapshots and zipping it.
 
 **What is and is not known.** A stable certificate keeps the Accessibility and Automation grants
 across updates. For Local Network it is *expected* to help, but this is not verified for a
