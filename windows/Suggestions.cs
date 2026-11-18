@@ -167,9 +167,13 @@ partial class Controller {
             if (panel.IsVisible) panel.Sync();   // the card hides at once
             var local = new Dictionary<string, int>();
             var failed = new List<string>();
-            foreach (var ch in sg.Changes) {
+            bool? mainApplied = null;   // null: the main level is a local one, written with the file below
+            for (int n = 0; n < sg.Changes.Count; n++) {
+                var ch = sg.Changes[n];
                 if (HaEntity(ch.Level, m) is { } e) {
-                    if (await HAClient.SetNumber(Cfg, e, ch.To) is { } why) failed.Add($"{e} failed: {why}");
+                    bool ok = true;
+                    if (await HAClient.SetNumber(Cfg, e, ch.To) is { } why) { failed.Add($"{e} failed: {why}"); ok = false; }
+                    if (n == 0) mainApplied = ok;
                 } else local[ch.Level.Key()] = (int)Math.Round(ch.To, MidpointRounding.AwayFromZero);
             }
             bool wroteFile = false;
@@ -186,11 +190,15 @@ partial class Controller {
                     wroteFile = true;
                 } catch (Exception ex) { failed.Add("config.json failed: " + ex.Message); }
             }
-            offsetCleared[sg.Monitor] = offsetCleared.GetValueOrDefault(sg.Monitor) + 1;   // a tick in flight merges this clear into its own result
-            var cleared = Suggest.AfterApply(new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt, m.RemoteValue));
-            (m.LastSet, m.Offset, m.OffsetSun, m.OffsetAt) = (cleared.LastSet, cleared.Offset, cleared.OffsetSun, cleared.OffsetAt);
-            m.Manual = false;
-            recorder.Drop(sg.Monitor);
+            // Nothing changed where it matters (Home Assistant refused the main level, or config.json could not be
+            // written): the hand-set level stays as it is, or the next tick would undo it.
+            if (Suggest.ApplyClearsOffset(mainApplied, wroteFile)) {
+                offsetCleared[sg.Monitor] = offsetCleared.GetValueOrDefault(sg.Monitor) + 1;   // a tick in flight merges this clear into its own result
+                var cleared = Suggest.AfterApply(new Hold(m.RemoteSeen, m.LastSet, m.LastTarget, m.Offset, m.OffsetSun, m.OffsetAt, m.RemoteValue));
+                (m.LastSet, m.Offset, m.OffsetSun, m.OffsetAt) = (cleared.LastSet, cleared.Offset, cleared.OffsetSun, cleared.OffsetAt);
+                m.Manual = false;
+                recorder.Drop(sg.Monitor);
+            }
             foreach (var f in failed) Log.Write($"suggest: {m.Label} {f}");
             if (failed.Count == 0) Log.Write($"suggest: {m.Label} applied");
             else SuggestError = "Could not apply the suggestion: " + string.Join("; ", failed);

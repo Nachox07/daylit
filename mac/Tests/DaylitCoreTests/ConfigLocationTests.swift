@@ -181,11 +181,20 @@ final class ConfigLocationTests: XCTestCase {
         XCTAssertTrue(r.kept); XCTAssertEqual(r.config.source, "sun"); XCTAssertNotNil(r.problem)
     }
 
-    func testAValidButWrongFileIsUsedSafelyNotKeptAside() throws {
-        try put(Data(#"{ "source": "sun", "homeAssistant": { "url": "file:///x" } }"#.utf8), loc().local)
-        var last = Config(); last.source = "off"
+    func testAFileWithABadValueKeepsTheLastGoodConfig() throws {
+        // Valid JSON, but latitude 100: a slip in a synced edit must not switch this Mac's automation off.
+        try put(Data(#"{ "source": "sun", "location": { "latitude": 100, "longitude": 0 } }"#.utf8), loc().local)
+        var last = Config(); last.source = "sun"; last.location = Location(latitude: 10, longitude: 20)
         let r = Config.reload(from: loc().local, lastGood: last)
-        XCTAssertFalse(r.kept, "validation problems follow load: safe parts only")
+        XCTAssertTrue(r.kept)
+        XCTAssertEqual(r.config.location?.latitude, 10)
+        XCTAssertTrue(r.problem?.contains("keeps the last settings") == true)
+    }
+
+    func testAFileWithABadValueAndNothingBeforeIsUsedSafely() throws {
+        try put(Data(#"{ "source": "sun", "homeAssistant": { "url": "file:///x" } }"#.utf8), loc().local)
+        let r = Config.reload(from: loc().local, lastGood: nil)
+        XCTAssertFalse(r.kept, "with nothing to keep, validation problems follow load: safe parts only")
         XCTAssertNil(r.config.homeAssistant)
         XCTAssertNotNil(r.problem)
     }

@@ -706,6 +706,8 @@ import DaylitCore
         guard !mons.isEmpty else { detail = ""; if live != nil { live = nil }; return }
         if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
         guard let inp = await inputs(), gen == generation else { return }
+        // On battery since the wait for Home Assistant began: nothing automatic from this answer.
+        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
 
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
@@ -727,6 +729,10 @@ import DaylitCore
         var linkedNow: [String: Int] = [:]   // linked followers: the level they land on (for the Settings chart)
         let now = Date().timeIntervalSince1970
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
+            if paused {   // on battery since an earlier monitor's write or publish: no more automatic writes
+                saveHolds()   // what the monitors before this one did is kept
+                detail = "Paused on battery"; for j in mons.indices { mons[j].manual = false }; if live != nil { live = nil }; return
+            }
             guard let read = cur[i] else { continue }
             let m = mons[i]
             // A slider or key change during the Home Assistant wait is newer than the reading: decide on that level.

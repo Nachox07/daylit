@@ -187,7 +187,8 @@ public struct ConfigLocation {
 
 extension Config {
     /// Loading again after the file changed, possibly on another Mac. Unlike `load`, a file that cannot
-    /// be used right now (not valid JSON, half written, or evicted by iCloud and still downloading)
+    /// be used right now (not valid JSON, a value that fails validation, half written, or evicted by iCloud
+    /// and still downloading)
     /// keeps the last config that loaded, with the problem to show. `kept` says the old one is still in use.
     public static func reload(from url: URL, lastGood: Config?) -> (config: Config, problem: String?, kept: Bool) {
         switch ConfigLocation.state(of: url) {
@@ -200,8 +201,10 @@ extension Config {
                 return (lastGood ?? Config(), "config.json could not be read", lastGood != nil)
             }
             let (c, err) = parse(d)
-            if let c { return (c, err, false) }
-            guard let lastGood else { return (Config(), err, false) }
+            if let c, err == nil { return (c, nil, false) }
+            // Not valid JSON, or a value that fails the checks (latitude 100, a bad entity id): keep the last
+            // settings that loaded rather than run on the safe parts. With nothing loaded before, load's safe parts.
+            guard let lastGood else { return (c ?? Config(), err, false) }
             return (lastGood, (err ?? "config.json is not valid") + ". Daylit keeps the last settings that loaded", true)
         }
     }

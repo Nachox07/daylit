@@ -603,6 +603,15 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(err!.hasPrefix("config.json is not valid"))
         XCTAssertNil(c.source)
     }
+    func testALocationNeedsBothCoordinates() {
+        // A missing longitude is not 0°: the sun would follow the wrong place.
+        for text in [#"{ "source": "sun", "location": { "latitude": 51.48 } }"#, #"{ "source": "sun", "location": { "longitude": 2 } }"#,
+                     #"{ "source": "sun", "location": {} }"#] {
+            let (c, err) = Config.load(from: write(text))
+            XCTAssertNotNil(err, text)
+            XCTAssertEqual(c.resolvedSource().0, .off, text)
+        }
+    }
     func testWrongTypeNamesTheKey() {
         let (_, err) = Config.load(from: write(#"{ "pauseOnBattery": "five" }"#))
         XCTAssertTrue(err?.contains("pauseOnBattery") ?? false, err ?? "")

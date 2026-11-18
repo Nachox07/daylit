@@ -10,8 +10,9 @@ namespace Daylit;
 enum Source { Off, Sun, HomeAssistant }
 
 sealed class Location {
-    public double Latitude { get; set; }
-    public double Longitude { get; set; }
+    // Both required, as on the Mac: a missing longitude is not 0° (the sun would follow the wrong place).
+    [JsonRequired] public double Latitude { get; set; }
+    [JsonRequired] public double Longitude { get; set; }
 }
 
 sealed class HaConfig {

@@ -305,6 +305,19 @@ public class SuggestRecorderTests {
         Assert.Null(cleared.Write);
         Assert.Null(cleared.State.Offset);
     }
+
+    [Fact]
+    public void AnApplyWhoseMainLevelFailedKeepsTheOffset() {
+        Assert.False(Suggest.ApplyClearsOffset(false, fileWritten: true));   // HA refused the main level
+        Assert.False(Suggest.ApplyClearsOffset(null, fileWritten: false));   // a local main level, file not written
+        Assert.True(Suggest.ApplyClearsOffset(true, fileWritten: false));    // only a secondary local level failed
+        Assert.True(Suggest.ApplyClearsOffset(null, fileWritten: true));
+        // Kept: target 85, the user set 70 (offset −15), and the target did not change, so the monitor stays at 70.
+        var held = new Hold(null, 70, 85, -15, 1, 1000);
+        var step = Rules.Decide(70, 85, null, held, true, true, 1, touched: false, now: 1060, dayOf: _ => 0);
+        Assert.Equal(70, step.Applied);
+        Assert.Null(step.Write);
+    }
 }
 
 public class SuggestStoreTests {
