@@ -82,9 +82,11 @@ extension Daylit {
         var current: [String: [Double]] = [:]
         for m in mons { current[m.uuid] = levels(of: m, inp) }
         if current != suggestLevels || inp.fromHA != suggestFromHA { suggestDirty = true }
+        let now = Date().timeIntervalSince1970
+        // A sample turning too old or a "Not now" ending changes the answer with nothing else changing.
+        if Suggest.due(suggestNext, now: now) { suggestDirty = true }
         guard suggestDirty else { return }
         suggestDirty = false; suggestLevels = current; suggestFromHA = inp.fromHA
-        let now = Date().timeIntervalSince1970
         // A monitor whose Home Assistant levels are unavailable this tick (Home Assistant down, or a helper
         // reads below 0) is left out of `current`: dropStale keeps the samples of monitors it does not know,
         // so they are not deleted for good just because the local levels stand in for a while.
@@ -92,6 +94,7 @@ extension Daylit {
         for m in mons where haLevelsUnavailable(of: m, inp) { known[m.uuid] = nil }
         let kept = Suggest.dropOld(Suggest.dropStale(corrections, current: known), now: now)
         if kept != corrections { corrections = kept; saveCorrections() }
+        suggestNext = Suggest.nextChange(samples: kept, dismissedUntil: Array(suggestDismissed.values), now: now)
         let gen = generation, epoch = suggestEpoch
         var found: Suggestion?
         for m in mons where kept.contains(where: { $0.monitor == m.uuid }) {
@@ -128,6 +131,13 @@ extension Daylit {
     /// top of the new level. A failed write keeps the ones that worked and shows in the problem line.
     func applySuggestion() async {
         guard let sg = suggestion, let m = mons.first(where: { $0.uuid == sg.monitor }) else { return }
+        if Suggest.due(suggestNext, now: Date().timeIntervalSince1970) {
+            // The samples behind it may have aged out since it was worked out: work it out again first.
+            suggestion = nil; suggestDirty = true; suggestEpoch += 1
+            Log.write("suggest: \(m.label) out of date, working it out again")
+            refresh()
+            return
+        }
         suggestion = nil; suggestError = nil; suggestEpoch += 1
         var local: [String: Int] = [:]
         var failed: [String] = []

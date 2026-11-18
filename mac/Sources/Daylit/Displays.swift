@@ -193,6 +193,7 @@ struct Mon: Identifiable {
     var touched = false   // moved with the slider or keys since the last tick
     var remoteSeen: Double? = nil    // last_changed of the HA "set" helper already acted on
     var remoteValue: Double? = nil   // its value then
+    var haURL: String? = nil         // the Home Assistant address these were seen at (HACacheRule)
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
     var writeFailing = false         // the last automatic write was refused (logged once, retried each tick)
 }

@@ -10,7 +10,7 @@ final class ParityTests: XCTestCase {
     /// Each file in tests/parity and the function that runs one of its cases (`fn`, `in`) → the result as JSON values.
     static let runners: [String: (String, [String: Any]) throws -> Any] = [
         "update.json": update, "ha-numbers.json": haNumbers, "levels.json": levels, "hold.json": hold,
-        "config-load.json": config, "config-edit.json": configEdit, "suggest.json": suggest,
+        "config-load.json": config, "config-edit.json": configEdit, "suggest.json": suggest, "ha-cache.json": haCache,
     ]
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -164,6 +164,25 @@ final class ParityTests: XCTestCase {
         case "numberStep":
             guard let st = NumberStep.parse(Data(str(i["json"]).utf8)) else { return NSNull() }
             return ["min": st.min, "max": st.max, "step": st.step]
+        case "settleHolds":
+            let c = i["context"] as? [String: Any] ?? [:]
+            let ctx = SampleContext(follower: bool(c["follower"]), writeFailed: bool(c["writeFailed"]), idle: bool(c["idle"]),
+                                    paused: bool(c["paused"]), sunFallback: bool(c["sunFallback"]))
+            return Suggest.settleHolds(auto: bool(i["auto"]), offsetHeld: bool(i["offsetHeld"]), context: ctx)
+        case "nextChange":
+            let samples = nums(i["at"]).map { Sample(monitor: "m", chosen: 50, auto: 60, s: 1, p: 1, elev: 20, lights: false, levels: [70, 40, 20], at: $0) }
+            return Suggest.nextChange(samples: samples, dismissedUntil: nums(i["dismissedUntil"]), now: num(i["now"])).map { $0 as Any } ?? NSNull()
+        case "due": return Suggest.due(optNum(i["next"]), now: num(i["now"]))
+        default: throw UnknownFunction(fn: fn)
+        }
+    }
+
+    static func haCache(_ fn: String, _ i: [String: Any]) throws -> Any {
+        switch fn {
+        case "stale": return HACacheRule.stale(oldURL: optStr(i["oldURL"]), newURL: optStr(i["newURL"]),
+                                               oldEntity: optStr(i["oldEntity"]), newEntity: optStr(i["newEntity"]))
+        case "levelsKey": return HACacheRule.levelsKey(day: optStr(i["day"]), blindDown: optStr(i["blindDown"]), night: optStr(i["night"]),
+                                                       nightLights: optStr(i["nightLights"])).map { $0 as Any } ?? NSNull()
         default: throw UnknownFunction(fn: fn)
         }
     }

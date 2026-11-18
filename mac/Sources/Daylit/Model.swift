@@ -62,6 +62,8 @@ import DaylitCore
     var corrections: [Sample] = []
     /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
     var suggestDirty = true
+    /// When time alone changes the suggestion (Suggest.nextChange): a sample aging out, a "Not now" ending.
+    var suggestNext: Double?
     /// Bumped by Apply and Not now. updateSuggestion drops its result when it changed during its Home
     /// Assistant reads, so a card the user already handled does not come back.
     var suggestEpoch = 0
@@ -140,8 +142,10 @@ import DaylitCore
         let (c, err, kept) = Config.reload(from: p, lastGood: lastGood)
         if !kept && ConfigLocation.state(of: p) == .present { lastGood = c }
         if kept { Log.write("config: keeping the last settings that loaded") }
-        // A removed or changed lights entity must not keep its last state alive through an outage.
-        if c.homeAssistant?.lights != config.homeAssistant?.lights { lastHALights = nil }
+        // A removed or changed entity (or another Home Assistant) must not keep its last state alive through an outage.
+        let (was, now) = (config.homeAssistant, c.homeAssistant)
+        if HACacheRule.stale(oldURL: was?.url, newURL: now?.url, oldEntity: was?.lights, newEntity: now?.lights) { lastHALights = nil }
+        if HACacheRule.stale(oldURL: was?.url, newURL: now?.url, oldEntity: was?.cover, newEntity: now?.cover) { lastHAPos = nil }
         config = c
         pauseOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? c.pauseOnBattery ?? true
         lookDark = nil; look = LookRule()
@@ -200,6 +204,7 @@ import DaylitCore
                         day: cfg?.day ?? 70, blindDown: cfg?.blindDown ?? 40, night: cfg?.night ?? 20, ha: cfg?.homeAssistant)
             m.contrast = cfg?.contrast
             m.nightLights = cfg?.nightLights
+            m.haURL = config.homeAssistant?.url
             if control == .ddc { m.level = 50 }   // a starting guess until the monitor reports (or a write sets it)
             if control == .native && !nativeOK {
                 m.noControl = "No brightness control right now. Turn on HDR for this display, or DDC/CI in its menu."
@@ -207,7 +212,14 @@ import DaylitCore
                 m.noControl = "No brightness control. Turn on HDR for this display, or DDC/CI in its menu (\(DDC.hint))."
             }
             if let o = old[s.uuid] {
-                m.level = o.level; m.remoteSeen = o.remoteSeen; m.remoteValue = o.remoteValue
+                m.level = o.level
+                // Another "set" helper, or another Home Assistant: its current value is not a command (HACacheRule).
+                if !HACacheRule.stale(oldURL: o.haURL, newURL: m.haURL, oldEntity: o.ha?.set, newEntity: m.ha?.set) {
+                    m.remoteSeen = o.remoteSeen; m.remoteValue = o.remoteValue
+                }
+                if HACacheRule.stale(oldURL: o.haURL, newURL: m.haURL, oldEntity: levelsKey(o.ha), newEntity: levelsKey(m.ha)) {
+                    lastHALevels[s.uuid] = nil   // the old helpers' row must not stand in for the new ones during an outage
+                }
                 if o.control == control {
                     m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.offset = o.offset; m.offsetSun = o.offsetSun; m.offsetAt = o.offsetAt
                     m.published = o.published; m.readState = o.readState
@@ -229,6 +241,11 @@ import DaylitCore
             return m
         }
         if mons.isEmpty { log("no external displays") }
+        // A monitor's cached Home Assistant row goes with it, as on Windows: when it comes back its helpers may have
+        // changed, and with nothing to compare them against the old row could stand in for the new ones.
+        let present = Set(mons.map(\.uuid))
+        lastHALevels = lastHALevels.filter { present.contains($0.key) }
+        for k in recorder.pending.keys where !present.contains(k) { recorder.drop(k) }   // an unplugged monitor's change did not hold
         builtIn = config.builtIn == false ? nil : builtInScreen()
         applyContrast()
         refresh()
@@ -281,6 +298,7 @@ import DaylitCore
             }
         }
         syncPush()   // pause, Automatic (also from Home Assistant) and monitors can change between checks
+        if paused { recorder.dropAll() }   // a change pending before the pause did not hold through it
         if paused || mons.isEmpty { return }   // nothing to do until power or a monitor comes back
         let here = idleSeconds() < config.tuned.idleSeconds
         if here && !wasHere {
@@ -291,7 +309,10 @@ import DaylitCore
             wasHere = here
             refresh(); return
         }
-        if !here && wasHere && source != .off { Log.write("idle: paused") }
+        if !here && wasHere {
+            if source != .off { Log.write("idle: paused") }
+            recorder.dropAll()   // a hand change pending when the Mac went idle did not hold while the user was away
+        }
         wasHere = here
         guard source != .off else { return }
         let interval = PushRule.pollInterval(healthy: push.healthy, onBattery: Power.onBattery, tuning: config.tuned)
@@ -707,10 +728,10 @@ import DaylitCore
         guard source != .off else { detail = ""; problem = configProblem; if live != nil { live = nil }; return }
         // Nothing to drive: no polling until a monitor appears (the display-change notification ticks again).
         guard !mons.isEmpty else { detail = ""; if live != nil { live = nil }; return }
-        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
+        if paused { detail = "Paused on battery"; recorder.dropAll(); for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
         guard let inp = await inputs(), gen == generation else { return }
         // On battery since the wait for Home Assistant began: nothing automatic from this answer.
-        if paused { detail = "Paused on battery"; for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
+        if paused { detail = "Paused on battery"; recorder.dropAll(); for i in mons.indices { mons[i].manual = false }; if live != nil { live = nil }; return }
 
         let sun = daylightFraction(elevation: inp.elev, tuning: config.tuned)
         let here = idleSeconds() < config.tuned.idleSeconds
@@ -734,7 +755,7 @@ import DaylitCore
         for i in leader.map({ l in [l] + mons.indices.filter { $0 != l } }) ?? Array(mons.indices) {
             if paused {   // on battery since an earlier monitor's write or publish: no more automatic writes
                 saveHolds()   // what the monitors before this one did is kept
-                detail = "Paused on battery"; for j in mons.indices { mons[j].manual = false }; if live != nil { live = nil }; return
+                detail = "Paused on battery"; recorder.dropAll(); for j in mons.indices { mons[j].manual = false }; if live != nil { live = nil }; return
             }
             guard let read = cur[i] else { continue }
             let m = mons[i]
@@ -820,7 +841,10 @@ import DaylitCore
             }
             mons[i].offset = st.offset; mons[i].offsetSun = st.offsetSun; mons[i].offsetAt = st.offsetAt
             noteHand(st, ok: ok)
-            if let done = recorder.settle(monitor: m.uuid, held: auto && st.offset != nil, levels: levels(of: m, inp), now: now) {
+            let settleCtx = SampleContext(follower: follower, writeFailed: !ok, idle: !here, paused: paused,
+                                          sunFallback: source == .homeAssistant && !inp.fromHA)
+            if let done = recorder.settle(monitor: m.uuid, held: Suggest.settleHolds(auto: auto, offsetHeld: st.offset != nil, context: settleCtx),
+                                          levels: levels(of: m, inp), now: now) {
                 corrections.append(done); saveCorrections(); suggestDirty = true
             }
             if let v = commit.level { mons[i].level = Double(v) }   // not over a level set by hand during our own write
@@ -1024,4 +1048,9 @@ import DaylitCore
             }
         }
     }
+}
+
+/// A monitor's Home Assistant level helpers as one key (HACacheRule.levelsKey).
+private func levelsKey(_ h: MonitorHA?) -> String? {
+    HACacheRule.levelsKey(day: h?.day, blindDown: h?.blindDown, night: h?.night, nightLights: h?.nightLights)
 }

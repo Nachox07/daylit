@@ -24,6 +24,23 @@
     {"name": "a missing step", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100}}"}, "out": null},
     {"name": "a step of 0", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 0, \"max\": 100, \"step\": 0}}"}, "out": null},
     {"name": "max below min", "fn": "numberStep", "in": {"json": "{\"attributes\": {\"min\": 50, \"max\": 10, \"step\": 1}}"}, "out": null},
-    {"name": "not JSON", "fn": "numberStep", "in": {"json": "unavailable"}, "out": null}
+    {"name": "not JSON", "fn": "numberStep", "in": {"json": "unavailable"}, "out": null},
+    {"name": "a held change settles while automatic and the offset stay", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {}}, "out": true},
+    {"name": "an idle tick does not count towards settling", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {"idle": true}}, "out": false},
+    {"name": "a paused tick does not count towards settling", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {"paused": true}}, "out": false},
+    {"name": "the sun standing in for Home Assistant does not count towards settling", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {"sunFallback": true}}, "out": false},
+    {"name": "a refused write does not count towards settling", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {"writeFailed": true}}, "out": false},
+    {"name": "a follower does not settle a change", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": true, "context": {"follower": true}}, "out": false},
+    {"name": "automatic off drops the change", "fn": "settleHolds", "in": {"auto": false, "offsetHeld": true, "context": {}}, "out": false},
+    {"name": "the offset gone drops the change", "fn": "settleHolds", "in": {"auto": true, "offsetHeld": false, "context": {}}, "out": false},
+    {"name": "the oldest sample turning 14 days old is the next change", "fn": "nextChange", "in": {"at": [1000, 5000], "dismissedUntil": [], "now": 6000}, "out": 1210600},
+    {"name": "a Not now ending first is the next change", "fn": "nextChange", "in": {"at": [1000], "dismissedUntil": [610800], "now": 6000}, "out": 610800},
+    {"name": "a Not now already over does not count", "fn": "nextChange", "in": {"at": [], "dismissedUntil": [5000], "now": 6000}, "out": null},
+    {"name": "a sample already too old does not count", "fn": "nextChange", "in": {"at": [0], "dismissedUntil": [], "now": 1296000}, "out": null},
+    {"name": "a sample dated more than a day ahead does not count (it is dropped as corrupt)", "fn": "nextChange", "in": {"at": [265200], "dismissedUntil": [], "now": 6000}, "out": null},
+    {"name": "nothing ahead", "fn": "nextChange", "in": {"at": [], "dismissedUntil": [], "now": 6000}, "out": null},
+    {"name": "the moment has come", "fn": "due", "in": {"next": 6000, "now": 6000}, "out": true},
+    {"name": "not yet", "fn": "due", "in": {"next": 6001, "now": 6000}, "out": false},
+    {"name": "nothing ahead is never due", "fn": "due", "in": {"next": null, "now": 6000}, "out": false}
   ]
 }

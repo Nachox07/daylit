@@ -127,6 +127,7 @@ sealed partial class Controller {
         idleWatch.Tick += (_, _) => {
             bool idle = Win.IdleSeconds() >= Cfg.Tuned.IdleSeconds;
             if (wasIdle && !idle) _ = Tick("back from idle");
+            if (idle && !wasIdle) recorder.DropAll();   // a hand change pending when the PC went idle did not hold while the user was away
             wasIdle = idle;
         };
         SystemEvents.PowerModeChanged += OnPower;
@@ -147,20 +148,32 @@ sealed partial class Controller {
     // MARK: configuration
 
     void Load() {
-        var previousLights = Cfg.HomeAssistant?.Lights;
+        var was = Cfg.HomeAssistant;
         (Cfg, ConfigError) = Config.Load();
         generation++;
-        // A removed or changed lights entity must not keep its last state alive through an outage.
-        if (Cfg.HomeAssistant?.Lights != previousLights) lastHaLights = null;
+        // A removed or changed entity (or another Home Assistant) must not keep its last state alive through an outage.
+        var now = Cfg.HomeAssistant;
+        if (HaCacheRule.Stale(was?.Url, now?.Url, was?.Lights, now?.Lights)) lastHaLights = null;
+        if (HaCacheRule.Stale(was?.Url, now?.Url, was?.Cover, now?.Cover)) lastHaPos = null;
         HAClient.Token = Source == Source.HomeAssistant ? Cred.ReadUsable(Cfg.TokenName) : null;
         HAClient.LastError = null;
         AutoOn = Settings.Auto;
         lookDark = null; look.Reset();
         // A suggestion worked out under the old config must not be applied under the new one.
         suggestDirty = true; stepCache.Clear(); notNumber.Clear(); suggestEpoch++; Suggestion = null; SuggestError = null;
-        foreach (var m in Mons) { m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; m.ContrastSet = null; }
+        foreach (var m in Mons) {
+            var before = m.Spec?.HomeAssistant;
+            m.Spec = Mon.Match(m.D, Cfg.Monitors); m.LastSet = m.LastTarget = m.Published = null; m.ContrastSet = null;
+            var after = m.Spec?.HomeAssistant;
+            // Another "set" helper, or another Home Assistant: its current value is not a command (HaCacheRule).
+            if (HaCacheRule.Stale(was?.Url, now?.Url, before?.Set, after?.Set)) { m.RemoteSeen = null; m.RemoteValue = null; }
+            // The old helpers' row must not stand in for the new ones during an outage.
+            if (HaCacheRule.Stale(was?.Url, now?.Url, LevelsKey(before), LevelsKey(after))) m.HaLevels = null;
+        }
         Log.Write($"config: source {Source}" + (ConfigError != null ? $" — {ConfigError}" : ""));
     }
+
+    static string? LevelsKey(MonitorHa? h) => HaCacheRule.LevelsKey(h?.Day, h?.BlindDown, h?.Night, h?.NightLights);
 
     public void Reload() {
         Load();
@@ -217,7 +230,10 @@ sealed partial class Controller {
     /// is no automatic source.
     void StartTimers() {
         SyncPush();
-        if (Source == Source.Off || Paused) { timer.Stop(); idleWatch.Stop(); return; }
+        if (Source == Source.Off || Paused) {
+            if (Paused) recorder.DropAll();   // a change pending before the pause did not hold through it
+            timer.Stop(); idleWatch.Stop(); return;
+        }
         timer.Interval = TimeSpan.FromSeconds(PushRule.PollInterval(push?.Healthy == true, Win.OnBattery, Cfg.Tuned));
         timer.Start(); idleWatch.Start();
     }
@@ -456,6 +472,7 @@ sealed partial class Controller {
         }).ToList();
         bool changed = next.Count != Mons.Count || next.Where((m, i) => !ReferenceEquals(m, Mons[i])).Any();
         Mons = next;
+        foreach (var k in recorder.Pending.Keys.Where(k => !next.Any(m => m.Key == k)).ToList()) recorder.Drop(k);   // an unplugged monitor's change did not hold
         if (changed) {
             Log.Write("monitors: " + (ext.Count == 0 ? "none" : string.Join(", ", ext.Select(d => $"{d.Friendly} [{d.Gdi}{(d.Hdr ? ", HDR" : "")}]"))));
             panel.Rebuild();
@@ -621,7 +638,7 @@ sealed partial class Controller {
         if (Source == Source.Off) { Subtitle = ""; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
         // Nothing to drive: no polling until a monitor appears (DisplaySettingsChanged ticks again).
         if (mons.Length == 0) { Subtitle = ""; ClearLive(); return; }
-        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
+        if (Paused) { Subtitle = "Paused on battery"; recorder.DropAll(); foreach (var m in mons) m.Manual = false; ClearLive(); return; }
 
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {
@@ -653,7 +670,7 @@ sealed partial class Controller {
             }
         } else s = SunInputs(mons);
         // On battery since the wait for Home Assistant began: nothing automatic from this answer.
-        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
+        if (Paused) { Subtitle = "Paused on battery"; recorder.DropAll(); foreach (var m in mons) m.Manual = false; ClearLive(); return; }
         var downFor = haDownSince is { } since ? (int)(DateTime.UtcNow - since).TotalMinutes : 0;
         if (!haDown) { haDownSince = null; haLoggedAt = null; }
         if (!haDown && Source == Source.HomeAssistant && s != null) {
@@ -703,7 +720,7 @@ sealed partial class Controller {
             if (gen != generation) return;
             if (Paused) {
                 if (holdsChanged) Settings.Holds = holds;   // what the monitors before this one did is kept
-                Subtitle = "Paused on battery"; foreach (var pm in mons) pm.Manual = false; ClearLive(); return;
+                Subtitle = "Paused on battery"; recorder.DropAll(); foreach (var pm in mons) pm.Manual = false; ClearLive(); return;
             }
             var m = mons[i];
             m.Manual = false;
@@ -766,7 +783,9 @@ sealed partial class Controller {
                     ? Suggest.MakeSample(m.Key, target + handOffset, target, s.Elev, s.Pos, roomLit, light, s.Levels[i], Cfg.Tuned, tickNow, sampleContext)
                     : null);
             }
-            if (recorder.Settle(m.Key, AutoOn && st.Offset != null, s.Levels[i], tickNow) is Sample settled) {
+            var settleContext = new SampleContext(Follower: follower, WriteFailed: !ok, Idle: !here, Paused: Paused,
+                                                  SunFallback: Source == Source.HomeAssistant && haDown);
+            if (recorder.Settle(m.Key, Suggest.SettleHolds(AutoOn, st.Offset != null, settleContext), s.Levels[i], tickNow) is Sample settled) {
                 corrections.Add(settled); SaveCorrections(); suggestDirty = true;
             }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
