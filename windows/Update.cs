@@ -20,6 +20,19 @@ static class UpdateCheck {
 
     public static string UserAgent(string? version) => "Daylit/" + (IsDevBuild(version) ? "dev" : version);
 
+    /// What Settings → App shows as the installed version: "Daylit 1.9.0", or a local build's own line.
+    public static string VersionLine(string? version) => IsDevBuild(version) ? "Daylit (local build)" : "Daylit " + Bare(version!);
+
+    /// The release page of the installed version, for its notes; null for a local build.
+    public static string? ReleasePage(string? version) =>
+        IsDevBuild(version) ? null : "https://github.com/Nachox07/daylit/releases/tag/v" + Bare(version!);
+
+    /// "v1.9.0 " → "1.9.0".
+    static string Bare(string v) {
+        var t = v.Trim();
+        return t.StartsWith('v') || t.StartsWith('V') ? t[1..] : t;
+    }
+
     /// "1.5.1", "v1.5.1" or "1.5" as numbers; null for anything else ("1.5-beta", "", "v").
     public static int[]? Parse(string? s) {
         var t = (s ?? "").Trim();

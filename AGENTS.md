@@ -146,7 +146,8 @@ computer right now, or no token stored yet) and which config entry matched which
   gear menu item). On macOS the brightness keys also work once the user grants
   Accessibility permission; on Windows a keyboard's own brightness keys work with no setup.
 - When a newer release is out the panel says so (*Download*, *What's new*, *Not now*); gear menu →
-  *Check for updates…* checks right away. Daylit never installs anything itself.
+  *Check for updates…* checks right away. Daylit never installs anything itself. Settings → App → *About*
+  shows the installed version; `--version` prints it.
 - The gear menu's *Settings…* window lets the user change the source, location, levels, contrast (DDC
   monitors) and Home Assistant entities later without editing JSON; it keeps every other key in the file.
 - "Open at sign-in" / "Open at login", *Pause on battery* and *Light or dark mode from daylight* are

@@ -66,7 +66,7 @@ silicon). The first open still needs **Open Anyway** in System Settings → Priv
 request carries nothing about you, only `Daylit/<version>` as its User-Agent. When there is one, the panel
 shows it with what changed, **Download** (the release page; with Homebrew, `brew upgrade --cask daylit`)
 and **Not now**. Turn it off in Settings → App → *Automatically check for updates*, or with
-`"checkUpdates": false` in the config; gear menu → **Check for updates…** still works ([details](docs/setup.md#updates)).
+`"checkUpdates": false` in the config; gear menu → **Check for updates…** still works ([details](docs/setup.md#updates)). Settings → App → *About* shows the version you have.
 
 **Or build it yourself**, if you prefer not to run unsigned downloads:
 
