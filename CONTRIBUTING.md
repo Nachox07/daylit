@@ -119,6 +119,27 @@ plain background so they look the same on every macOS version.
   changed for the user, then a body with the why when it isn't obvious. One logical change per
   commit.
 
+## One command, and the parity guard
+
+`scripts/check.sh` runs everything a change needs on a Mac: the parity guard, both test suites and both
+builds, each with 0 warnings (`--quick` skips the builds). It finds `dotnet` on the `PATH` or in
+`~/.dotnet`. On Windows, run the two `dotnet` commands above.
+
+The parity guard (`scripts/parity-guard.py`, also a CI job on every pull request) reads
+`scripts/twins.json`, which pairs each macOS source file with the Windows file that does the same job
+(`Rules.swift`, `Sun.swift` and `HATemplate.swift` with `Rules.cs`; `Model.swift` with `App.cs`; …). It
+fails when:
+
+- a file on one side changed and none of its twins did. When the other app really needs nothing, add a
+  line to the pull request description or a commit message that says why:
+  `Parity: Mac-only, Windows has no keychain` or `Parity: comment fix only`;
+- a source file (`mac/Sources/**/*.swift`, `windows/*.cs`) is missing from `twins.json`. Add a new file to
+  the group of its twin, or to `macOnly` / `windowsOnly` with the reason;
+- `twins.json` names a file that no longer exists.
+
+The guard only checks that both sides were touched. The shared cases in `tests/parity/` check that they
+behave the same.
+
 ## Releases and signing
 
 A `v*` tag builds and publishes both apps (`.github/workflows/release.yml`). The macOS app is signed

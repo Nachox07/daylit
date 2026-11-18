@@ -11,6 +11,23 @@ on:
 permissions:
   contents: read
 jobs:
+  parity:
+    # A change to one app's file needs its twin in the other app changed too, or a "Parity: <reason>"
+    # line in the pull request or a commit message (scripts/twins.json, CONTRIBUTING.md → Parity).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Parity guard
+        env:
+          # Through the environment, never pasted into the script: the body is text anyone can write.
+          PARITY_PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -I scripts/parity-guard.py --base "$BASE_SHA" --head "$HEAD_SHA"
   macos:
     runs-on: macos-15
     steps:

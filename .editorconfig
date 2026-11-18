@@ -1,0 +1,23 @@
+# The style the code already has, so editors and agents keep it. Nothing is reformatted by this file.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{swift,cs,ps1,py}]
+indent_size = 4
+
+[*.{json,yml,yaml,sh,csproj,xml,manifest,rb}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+trim_trailing_whitespace = false
+
+# Issue forms keep markdown text, where two trailing spaces can be a line break.
+[.github/ISSUE_TEMPLATE/*.yml]
+trim_trailing_whitespace = false
