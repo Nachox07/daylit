@@ -212,6 +212,14 @@ sealed partial class Controller {
         _ = Tick("token");
     }
 
+    /// A token was saved in the Settings window: use it now, and give push a fresh try (also after the old one
+    /// was rejected), as the tray's token dialog does.
+    public void TokenSaved(string token) {
+        HAClient.Token = token;
+        push?.TokenChanged();
+        _ = Tick("token");
+    }
+
     public void Quit() {
         timer.Stop(); idleWatch.Stop();
         if (push is { } p) { p.HealthChanged -= StartTimers; p.Update(null); push = null; }   // closing must not restart the timers or reopen
@@ -359,15 +367,18 @@ sealed partial class Controller {
     }
 
     public void UserSet(Mon m, int v) {
-        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.Touched = true; m.WriteSoon(v);
+        m.Cur = v; m.UserTouched = DateTime.UtcNow; m.Touched = true; m.WriteSoon(v, SliderReverted);
         if (!Settings.SyncMonitors || Mons.Count < 2) return;
         // Sync: the other monitors follow with the offsets captured when sync was switched on.
         AdoptSync();
         var follow = syncOffsets.Follow(m.Key, v, Mons.Select(x => x.Key));
         foreach (var o in Mons)
-            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.Touched = true; o.WriteSoon(lv); }
+            if (o != m && o.Usable && follow.TryGetValue(o.Key, out var lv) && o.Cur != lv) { o.Cur = lv; o.Touched = true; o.WriteSoon(lv, SliderReverted); }
         panel.Sync();
     }
+
+    /// A refused slider write on a write-only monitor put its level back (Mon.WriteSoon): show it.
+    void SliderReverted() { if (panel.IsVisible) panel.Sync(); }
 
     SyncOffsets syncOffsets = Settings.SyncOffsets;
     /// Hand-set state kept across restarts, so a restart doesn't jump the monitors to the automatic target.
@@ -466,6 +477,7 @@ sealed partial class Controller {
                 m.Offset = null; m.OffsetSun = null; m.OffsetAt = null;   // and an offset on the old scale means nothing on the new one
                 m.ContrastSet = null;   // back on DDC: write the configured contrast again
                 m.Reads = ReadState.Unknown;   // a DDC refusal says nothing about the other control (as on macOS)
+                m.Applied = null;              // nor does the level the other control last took
             }
             m.D = d; m.Spec = Mon.Match(d, Cfg.Monitors);
             return m;
@@ -759,6 +771,7 @@ sealed partial class Controller {
                     Log.Write(ok ? $"display: {m.Label} takes brightness changes again"
                                  : $"display: {m.Label} did not take brightness {v}%; trying again each tick");
                 m.WriteFailing = !ok;
+                m.Applied = ReadRules.AppliedAfter(ok, v, m.Applied);
                 // Reloaded during the write: Load already reset this monitor's hold, and the new config's tick
                 // decides again from the level it reads; publishing this old decision there would be wrong.
                 if (gen != generation) return;

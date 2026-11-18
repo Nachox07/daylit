@@ -654,7 +654,11 @@ sealed class SettingsWindow : Window {
         var (c, _) = Config.Load(path);
         var t = TokenDialog.Ask(c.TokenName);
         if (t == null) return;
-        if (Cred.Write(c.TokenName, "homeassistant", t)) { HAClient.Token = t; ShowTokenState(c.TokenName); Say("Token saved.", false); }
+        if (Cred.Write(c.TokenName, "homeassistant", t)) {
+            // The token the app uses now only when it is the one the running config names; another name waits for Save.
+            if (c.TokenName == app.Cfg.TokenName) app.TokenSaved(t);
+            ShowTokenState(c.TokenName); Say("Token saved.", false);
+        }
         else Say("Windows could not save the token in Credential Manager.", true);
     }
 

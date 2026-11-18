@@ -222,7 +222,7 @@ import DaylitCore
                 }
                 if o.control == control {
                     m.lastSet = o.lastSet; m.lastTarget = o.lastTarget; m.offset = o.offset; m.offsetSun = o.offsetSun; m.offsetAt = o.offsetAt
-                    m.published = o.published; m.readState = o.readState
+                    m.published = o.published; m.readState = o.readState; m.applied = o.applied
                 }
                 else {
                     // Another control reads on its own scale: the new reading is not a level set by hand.
@@ -395,16 +395,23 @@ import DaylitCore
             let ok = DDC.set(uuid, val)
             Task { @MainActor in
                 self.ddcBusy.remove(id)
-                self.userWrote(id, ok: ok)
+                self.userWrote(id, ok: ok, sent: val)
                 self.sendDDC(id, uuid)
             }
         }
     }
 
-    /// A slider or key write reached (or didn't reach) a DDC monitor that has never reported its level.
-    func userWrote(_ id: CGDirectDisplayID, ok: Bool) {
+    /// A slider or key write of `sent` reached (or didn't reach) a DDC monitor. One that never reports its level
+    /// keeps the slider as its only record, so a refused write puts the slider back where the monitor really is.
+    func userWrote(_ id: CGDirectDisplayID, ok: Bool, sent: Int) {
         guard let i = mons.firstIndex(where: { $0.id == id }) else { return }
         let before = mons[i].readState
+        // Not over a newer value still waiting to be sent, or a slider still held: those are newer than this write.
+        if let back = before.revertAfterUserWrite(ok: ok, applied: mons[i].applied), ddcWant[id] == nil, !dragging.contains(id) {
+            mons[i].level = Double(back)
+            Log.write("display: \(mons[i].label) did not take brightness \(sent)%; the slider is back at \(back)%")
+        }
+        mons[i].applied = ReadState.appliedAfter(ok: ok, sent: sent, applied: mons[i].applied)
         let after = before.afterUserWrite(ok: ok)
         guard after != before else { return }
         mons[i].readState = after
@@ -798,6 +805,7 @@ import DaylitCore
             }
             /// Logged once when a failure starts and once when it ends, not every tick while it lasts.
             func noteWrite(_ j: Int, ok: Bool, level v: Int) {
+                mons[j].applied = ReadState.appliedAfter(ok: ok, sent: v, applied: mons[j].applied)
                 if ok == mons[j].writeFailing {
                     Log.write(ok ? "display: \(m.label) takes brightness changes again"
                                  : "display: \(m.label) did not take brightness \(v)%; trying again each tick")

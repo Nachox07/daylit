@@ -15,6 +15,7 @@ public class ParityTests {
         ["update.json"] = Update, ["ha-numbers.json"] = HaNumbers, ["levels.json"] = Levels, ["hold.json"] = HoldCases,
         ["config-load.json"] = ConfigCases, ["config-edit.json"] = ConfigEdit, ["suggest.json"] = SuggestCases,
         ["ha-cache.json"] = HaCache,
+        ["read-state.json"] = ReadStateCases,
     };
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -171,6 +172,23 @@ public class ParityTests {
         "levelsKey" => HaCacheRule.LevelsKey(OptStr(i["day"]), OptStr(i["blindDown"]), OptStr(i["night"]), OptStr(i["nightLights"])),
         _ => throw new UnknownFunction(fn),
     };
+
+    static JsonNode? ReadStateCases(string fn, JsonObject i) {
+        var names = new Dictionary<string, ReadState> {
+            ["unknown"] = ReadState.Unknown, ["readable"] = ReadState.Readable, ["writeOnly"] = ReadState.WriteOnly, ["silent"] = ReadState.Silent,
+        };
+        string Name(ReadState r) => names.First(kv => kv.Value == r).Key;
+        var st = names.TryGetValue(Str(i["state"]), out var v) ? v : ReadState.Unknown;
+        return fn switch {
+            "afterRead" => Name(st.AfterRead(Bool(i["ok"]))),
+            "afterUserWrite" => Name(st.AfterUserWrite(Bool(i["ok"]))),
+            "current" => st.Current(OptInt(i["reading"]), (int)Num(i["slider"])),
+            "usable" => st.Usable(),
+            "appliedAfter" => ReadRules.AppliedAfter(Bool(i["ok"]), (int)Num(i["sent"]), OptInt(i["applied"])),
+            "revertAfterUserWrite" => st.RevertAfterUserWrite(Bool(i["ok"]), OptInt(i["applied"])),
+            _ => throw new UnknownFunction(fn),
+        };
+    }
 
     // MARK: JSON values
 

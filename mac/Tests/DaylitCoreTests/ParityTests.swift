@@ -10,7 +10,7 @@ final class ParityTests: XCTestCase {
     /// Each file in tests/parity and the function that runs one of its cases (`fn`, `in`) → the result as JSON values.
     static let runners: [String: (String, [String: Any]) throws -> Any] = [
         "update.json": update, "ha-numbers.json": haNumbers, "levels.json": levels, "hold.json": hold,
-        "config-load.json": config, "config-edit.json": configEdit, "suggest.json": suggest, "ha-cache.json": haCache,
+        "config-load.json": config, "config-edit.json": configEdit, "suggest.json": suggest, "ha-cache.json": haCache, "read-state.json": readState,
     ]
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -183,6 +183,21 @@ final class ParityTests: XCTestCase {
                                                oldEntity: optStr(i["oldEntity"]), newEntity: optStr(i["newEntity"]))
         case "levelsKey": return HACacheRule.levelsKey(day: optStr(i["day"]), blindDown: optStr(i["blindDown"]), night: optStr(i["night"]),
                                                        nightLights: optStr(i["nightLights"])).map { $0 as Any } ?? NSNull()
+        default: throw UnknownFunction(fn: fn)
+        }
+    }
+
+    static func readState(_ fn: String, _ i: [String: Any]) throws -> Any {
+        let states: [String: ReadState] = ["unknown": .unknown, "readable": .readable, "writeOnly": .writeOnly, "silent": .silent]
+        func name(_ r: ReadState) -> String { states.first { $0.value == r }!.key }
+        let st = states[str(i["state"])] ?? .unknown
+        switch fn {
+        case "afterRead": return name(st.afterRead(ok: bool(i["ok"])))
+        case "afterUserWrite": return name(st.afterUserWrite(ok: bool(i["ok"])))
+        case "current": return st.current(reading: optInt(i["reading"]), slider: int(i["slider"])).map { $0 as Any } ?? NSNull()
+        case "usable": return st.usable
+        case "appliedAfter": return ReadState.appliedAfter(ok: bool(i["ok"]), sent: int(i["sent"]), applied: optInt(i["applied"])).map { $0 as Any } ?? NSNull()
+        case "revertAfterUserWrite": return st.revertAfterUserWrite(ok: bool(i["ok"]), applied: optInt(i["applied"])).map { $0 as Any } ?? NSNull()
         default: throw UnknownFunction(fn: fn)
         }
     }

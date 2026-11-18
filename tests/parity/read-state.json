@@ -1,0 +1,24 @@
+{
+  "about": "Whether a DDC monitor reports its brightness, and what the slider shows after a write (ReadState on both apps). A write-only monitor never answers a read; the slider is its only record of the level.",
+  "cases": [
+    {"name": "a reading makes it readable", "fn": "afterRead", "in": {"state": "unknown", "ok": true}, "out": "readable"},
+    {"name": "a failed read changes nothing", "fn": "afterRead", "in": {"state": "writeOnly", "ok": false}, "out": "writeOnly"},
+    {"name": "a user write taken by an unreadable monitor makes it write-only", "fn": "afterUserWrite", "in": {"state": "unknown", "ok": true}, "out": "writeOnly"},
+    {"name": "a user write refused by an unreadable monitor makes it silent", "fn": "afterUserWrite", "in": {"state": "unknown", "ok": false}, "out": "silent"},
+    {"name": "a refused write leaves a write-only monitor write-only", "fn": "afterUserWrite", "in": {"state": "writeOnly", "ok": false}, "out": "writeOnly"},
+    {"name": "a readable monitor stays readable after a refused write", "fn": "afterUserWrite", "in": {"state": "readable", "ok": false}, "out": "readable"},
+    {"name": "a reading is the current level", "fn": "current", "in": {"state": "writeOnly", "reading": 40, "slider": 70}, "out": 40},
+    {"name": "a write-only monitor's current level is its slider", "fn": "current", "in": {"state": "writeOnly", "reading": null, "slider": 70}, "out": 70},
+    {"name": "an unknown monitor without a reading is left alone", "fn": "current", "in": {"state": "unknown", "reading": null, "slider": 70}, "out": null},
+    {"name": "a silent monitor cannot be used", "fn": "usable", "in": {"state": "silent"}, "out": false},
+    {"name": "a write-only monitor can be used", "fn": "usable", "in": {"state": "writeOnly"}, "out": true},
+    {"name": "a taken write is the level the monitor last took", "fn": "appliedAfter", "in": {"ok": true, "sent": 80, "applied": 40}, "out": 80},
+    {"name": "a refused write keeps the level it last took", "fn": "appliedAfter", "in": {"ok": false, "sent": 80, "applied": 40}, "out": 40},
+    {"name": "a refused write with nothing taken yet knows no level", "fn": "appliedAfter", "in": {"ok": false, "sent": 80, "applied": null}, "out": null},
+    {"name": "a write-only monitor's slider goes back after a refused write", "fn": "revertAfterUserWrite", "in": {"state": "writeOnly", "ok": false, "applied": 40}, "out": 40},
+    {"name": "a taken write leaves the slider where it is", "fn": "revertAfterUserWrite", "in": {"state": "writeOnly", "ok": true, "applied": 40}, "out": null},
+    {"name": "a readable monitor's next reading corrects the slider instead", "fn": "revertAfterUserWrite", "in": {"state": "readable", "ok": false, "applied": 40}, "out": null},
+    {"name": "a monitor that never took a write becomes silent, the slider stays", "fn": "revertAfterUserWrite", "in": {"state": "unknown", "ok": false, "applied": null}, "out": null},
+    {"name": "a write-only monitor with no level taken yet leaves the slider", "fn": "revertAfterUserWrite", "in": {"state": "writeOnly", "ok": false, "applied": null}, "out": null}
+  ]
+}
