@@ -388,6 +388,16 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                LabeledContent("Version") {
+                    HStack(spacing: 10) {
+                        Text(verbatim: UpdateCheck.versionLine(Daylit.appVersion)).textSelection(.enabled)
+                        if let page = UpdateCheck.releasePage(Daylit.appVersion), let url = URL(string: page) {
+                            Link("Release notes", destination: url)
+                        }
+                    }
+                }
+            } header: { Text("About") }
+            Section {
                 LabeledContent("config.json") {
                     Button("Open Config File") { m.openConfig() }
                 }

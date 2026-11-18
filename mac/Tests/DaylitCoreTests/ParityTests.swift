@@ -52,6 +52,8 @@ final class ParityTests: XCTestCase {
         case "isNewer": return UpdateCheck.isNewer(str(i["a"]), than: str(i["b"]))
         case "parse": return UpdateCheck.parse(str(i["s"])).map { $0 as Any } ?? NSNull()
         case "isDevBuild": return UpdateCheck.isDevBuild(optStr(i["v"]))
+        case "versionLine": return UpdateCheck.versionLine(optStr(i["v"]))
+        case "releasePage": return UpdateCheck.releasePage(optStr(i["v"])) ?? NSNull()
         case "due": return UpdateCheck.due(elapsed: optNum(i["elapsed"]))
         default: throw UnknownFunction(fn: fn)
         }

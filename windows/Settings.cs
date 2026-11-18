@@ -119,6 +119,7 @@ sealed class SettingsWindow : Window {
             Card(null, new Expander { Header = "Exact values", Content = TuningRows(TuningField.Appearance) }));
         var appPane = Pane(Card(null, pause, login, Hint("These apply right away.")),
             Card("Updates", checkUpdatesBox, Hint("Once a day Daylit asks GitHub whether a newer version is out and shows it in the panel. Nothing about you or your setup is sent. Check for updates… in the gear menu works either way.")),
+            Card("About", AboutRow()),
             Card("Advanced", Row(openFile, Hint(Config.DisplayPath)), Hint("Everything in this window is saved there; other keys are kept. How often Daylit checks, when it counts as idle and how long hand-set levels survive a restart are under \"tuning\" → \"timing\" in the file.")));
 
         panes.Add(("displays", "Displays", "\uE7F4", Color.FromRgb(0x2B, 0x88, 0xD8), displaysPane));
@@ -328,6 +329,16 @@ sealed class SettingsWindow : Window {
     public FrameworkElement Detach() { var c = (FrameworkElement)Content; Content = null; return c; }
 
     // MARK: layout helpers
+
+    /// The installed version, and a link to its release notes (none for a local build).
+    static FrameworkElement AboutRow() {
+        var line = new TextBox { Text = UpdateCheck.VersionLine(Controller.AppVersion), IsReadOnly = true, BorderThickness = new Thickness(0),
+                                 Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0) };   // selectable, for a bug report
+        if (UpdateCheck.ReleasePage(Controller.AppVersion) is not { } page) return line;
+        var notes = new Button { Content = "Release notes", Margin = new Thickness(12, 0, 0, 0) };
+        notes.Click += (_, _) => { try { Process.Start(new ProcessStartInfo(page) { UseShellExecute = true }); } catch { } };
+        return new StackPanel { Orientation = Orientation.Horizontal, Children = { line, notes } };
+    }
 
     static TextBlock Hint(string t) => new() { Text = t, TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 0) };
 

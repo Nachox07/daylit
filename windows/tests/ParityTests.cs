@@ -56,6 +56,8 @@ public class ParityTests {
         "isNewer" => UpdateCheck.IsNewer(Str(i["a"]), Str(i["b"])),
         "parse" => UpdateCheck.Parse(Str(i["s"])) is { } p ? new JsonArray(p.Select(n => (JsonNode)n).ToArray()) : null,
         "isDevBuild" => UpdateCheck.IsDevBuild(OptStr(i["v"])),
+        "versionLine" => UpdateCheck.VersionLine(OptStr(i["v"])),
+        "releasePage" => UpdateCheck.ReleasePage(OptStr(i["v"])),
         "due" => UpdateCheck.Due(OptNum(i["elapsed"])),
         _ => throw new UnknownFunction(fn),
     };

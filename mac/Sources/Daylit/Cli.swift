@@ -10,6 +10,7 @@ import DaylitCore
           Daylit                  start the menu-bar app
           Daylit --list-monitors  connected monitors as JSON (use "match" in config.json)
           Daylit --check-config   validate \(Config.path.path)
+          Daylit --version        the installed version
           Daylit --render-snapshots <dir>               UI snapshots for the visual tests
           Daylit --compare-snapshots <baseline> <dir>   compare them; exit 1 on a change
           Daylit --render-chart-frames <dir> [dark]     frames of the brightness chart animation (docs)
@@ -18,7 +19,8 @@ import DaylitCore
 
     static func run(_ args: [String]) -> Int32? {
         // Launch Services may pass -psn_… or -NSDocumentRevisionsDebugMode; only our flags count.
-        guard let cmd = args.first?.lowercased(), ["--list-monitors", "--check-config", "--render-snapshots", "--compare-snapshots", "--render-chart-frames", "--help", "-h"].contains(cmd) else { return nil }
+        guard let cmd = args.first?.lowercased(), ["--list-monitors", "--check-config", "--render-snapshots", "--compare-snapshots", "--render-chart-frames", "--version", "--help", "-h"].contains(cmd) else { return nil }
+        if cmd == "--version" { print(UpdateCheck.versionLine(Daylit.appVersion)); return 0 }   // no app object needed
         _ = NSApplication.shared   // NSScreen needs the app object
         switch cmd {
         case "--list-monitors": return emit(listMonitors(), 0)

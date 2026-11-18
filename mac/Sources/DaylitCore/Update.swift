@@ -21,6 +21,23 @@ public enum UpdateCheck {
 
     public static func userAgent(version: String?) -> String { "Daylit/" + (isDevBuild(version) ? "dev" : version!) }
 
+    /// What Settings → App shows as the installed version: "Daylit 1.9.0", or a local build's own line.
+    public static func versionLine(_ version: String?) -> String {
+        isDevBuild(version) ? "Daylit (local build)" : "Daylit " + bare(version!)
+    }
+
+    /// The release page of the installed version, for its notes; nil for a local build.
+    public static func releasePage(_ version: String?) -> String? {
+        isDevBuild(version) ? nil : "https://github.com/Nachox07/daylit/releases/tag/v" + bare(version!)
+    }
+
+    /// "v1.9.0 " → "1.9.0".
+    static func bare(_ v: String) -> String {
+        var t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.first == "v" || t.first == "V" { t.removeFirst() }
+        return t
+    }
+
     /// "1.5.1", "v1.5.1" or "1.5" as numbers; nil for anything else ("1.5-beta", "", "v").
     public static func parse(_ s: String) -> [Int]? {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
