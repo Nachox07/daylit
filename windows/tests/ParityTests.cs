@@ -14,6 +14,7 @@ public class ParityTests {
     static readonly Dictionary<string, Func<string, JsonObject, JsonNode?>> Runners = new() {
         ["update.json"] = Update, ["ha-numbers.json"] = HaNumbers, ["levels.json"] = Levels, ["hold.json"] = HoldCases,
         ["config-load.json"] = ConfigCases, ["config-edit.json"] = ConfigEdit, ["suggest.json"] = SuggestCases,
+        ["ha-cache.json"] = HaCache,
     };
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -153,9 +154,23 @@ public class ParityTests {
             case "sameLevels": return Suggest.SameLevels(Nums(i["a"]), Nums(i["b"]));
             case "numberStep":
                 return NumberStep.Parse(Str(i["json"])) is { } st ? new JsonObject { ["min"] = st.Min, ["max"] = st.Max, ["step"] = st.Step } : null;
+            case "settleHolds":
+                var c = i["context"]?.AsObject() ?? new JsonObject();
+                var ctx = new SampleContext(Bool(c["follower"]), Bool(c["writeFailed"]), Bool(c["idle"]), Bool(c["paused"]), Bool(c["sunFallback"]));
+                return Suggest.SettleHolds(Bool(i["auto"]), Bool(i["offsetHeld"]), ctx);
+            case "nextChange":
+                var samples = Nums(i["at"]).Select(at => new Sample("m", 50, 60, 1, 1, 20, false, new double[] { 70, 40, 20 }, at));
+                return Suggest.NextChange(samples, Nums(i["dismissedUntil"]), Num(i["now"]));
+            case "due": return Suggest.Due(OptNum(i["next"]), Num(i["now"]));
             default: throw new UnknownFunction(fn);
         }
     }
+
+    static JsonNode? HaCache(string fn, JsonObject i) => fn switch {
+        "stale" => HaCacheRule.Stale(OptStr(i["oldURL"]), OptStr(i["newURL"]), OptStr(i["oldEntity"]), OptStr(i["newEntity"])),
+        "levelsKey" => HaCacheRule.LevelsKey(OptStr(i["day"]), OptStr(i["blindDown"]), OptStr(i["night"]), OptStr(i["nightLights"])),
+        _ => throw new UnknownFunction(fn),
+    };
 
     // MARK: JSON values
 

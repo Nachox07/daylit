@@ -1,0 +1,16 @@
+{
+  "about": "What a config reload keeps of what Home Assistant last gave (HACacheRule / HaCacheRule on both apps). A cached value belongs to one address and one entity.",
+  "cases": [
+    {"name": "the same entity at the same address keeps its cache", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": "http://ha.local:8123", "oldEntity": "input_number.office_set", "newEntity": "input_number.office_set"}, "out": false},
+    {"name": "another set helper starts fresh", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": "http://ha.local:8123", "oldEntity": "input_number.office_set", "newEntity": "input_number.desk_set"}, "out": true},
+    {"name": "another Home Assistant starts fresh", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": "https://other.example", "oldEntity": "cover.office", "newEntity": "cover.office"}, "out": true},
+    {"name": "a trailing slash, case or spaces in the address change nothing", "fn": "stale", "in": {"oldURL": "http://HA.local:8123/", "newURL": " http://ha.local:8123 ", "oldEntity": "cover.office", "newEntity": " cover.office "}, "out": false},
+    {"name": "an entity removed from the config drops its cache", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": "http://ha.local:8123", "oldEntity": "light.office", "newEntity": null}, "out": true},
+    {"name": "an empty entity is the same as none", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": "http://ha.local:8123", "oldEntity": "", "newEntity": null}, "out": false},
+    {"name": "Home Assistant removed from the config drops the cache", "fn": "stale", "in": {"oldURL": "http://ha.local:8123", "newURL": null, "oldEntity": "cover.office", "newEntity": "cover.office"}, "out": true},
+    {"name": "nothing before and nothing now", "fn": "stale", "in": {"oldURL": null, "newURL": null, "oldEntity": null, "newEntity": null}, "out": false},
+    {"name": "the level helpers as one key", "fn": "levelsKey", "in": {"day": "input_number.day", "blindDown": "input_number.blind", "night": "input_number.night", "nightLights": null}, "out": "input_number.day|input_number.blind|input_number.night|"},
+    {"name": "a monitor without level helpers has no key", "fn": "levelsKey", "in": {"day": null, "blindDown": " ", "night": null, "nightLights": null}, "out": null},
+    {"name": "one helper is enough for a key", "fn": "levelsKey", "in": {"day": null, "blindDown": null, "night": null, "nightLights": "input_number.lit"}, "out": "|||input_number.lit"}
+  ]
+}

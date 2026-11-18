@@ -334,6 +334,10 @@ public struct Recorder: Equatable {
 
     /// Forget a monitor's pending change (Apply, Automatic switched, back to automatic).
     public mutating func drop(_ monitor: String) { pending[monitor] = nil }
+
+    /// Forget every pending change: automatic work stopped (paused on battery), so none of them held under
+    /// the conditions a sample needs.
+    public mutating func dropAll() { pending = [:] }
 }
 
 extension Suggest {
@@ -357,6 +361,27 @@ extension Suggest {
         return Sample(monitor: monitor, chosen: chosen, auto: auto, s: min(daylightFraction(elevation: elev, tuning: tuning), light),
                       p: min(max(pos, 0), 100) / 100, elev: elev, lights: lights, levels: levels, at: now)
     }
+
+    /// Whether a pending hand change still holds this tick (the `held` of Recorder.settle): Automatic on, the
+    /// offset still set, and none of the conditions that keep a change from becoming a sample (idle, paused,
+    /// Home Assistant down with the sun standing in, a follower, a refused write). Time spent in them must not
+    /// count towards the five minutes.
+    public static func settleHolds(auto: Bool, offsetHeld: Bool, context c: SampleContext) -> Bool {
+        auto && offsetHeld && !(c.follower || c.writeFailed || c.idle || c.paused || c.sunFallback)
+    }
+
+    /// The next moment time alone changes what `suggestion` can give: a sample turning `maxAge` old or a "Not now"
+    /// ending. nil: nothing ahead. Nothing else marks the suggestion for working out again on such a moment, so
+    /// the controller does when `due` says so. Samples dated more than a day ahead don't count: dropOld removes them.
+    public static func nextChange(samples: [Sample], dismissedUntil: [Double], now: Double) -> Double? {
+        var t: [Double] = []
+        for x in samples where now - x.at <= maxAge && x.at <= now + 86400 { t.append(x.at + maxAge) }
+        t += dismissedUntil.filter { $0 > now }
+        return t.min()
+    }
+
+    /// Whether the moment from `nextChange` has come: work the suggestion out again (and don't Apply the one shown).
+    public static func due(_ next: Double?, now: Double) -> Bool { next.map { now >= $0 } ?? false }
 
     /// Whether this tick's decide took a new hand-set level (moved by hand): it stamps offsetAt with now.
     /// A level from the Home Assistant "set" helper (`remote`) stamps it too, but is not a hand change.

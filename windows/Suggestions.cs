@@ -14,6 +14,7 @@ partial class Controller {
     List<Sample> corrections = new();
     /// Work the suggestion out again at the end of the next tick (start, reload, a new sample, Apply, Not now).
     bool suggestDirty = true;
+    double? suggestNext;   // when time alone changes the suggestion (Suggest.NextChange): a sample aging out, a "Not now" ending
     /// Bumped by Apply and Not now. UpdateSuggestion drops its result when it changed during its Home Assistant
     /// reads, so a card the user already handled does not come back.
     int suggestEpoch;
@@ -115,9 +116,11 @@ partial class Controller {
         bool same = current.Count == suggestLevels.Count
                     && current.All(kv => suggestLevels.TryGetValue(kv.Key, out var lv) && Suggest.SameLevels(lv, kv.Value));
         if (!same || fromHa != suggestFromHa) suggestDirty = true;
+        double now = Now;
+        // A sample turning too old or a "Not now" ending changes the answer with nothing else changing.
+        if (Suggest.Due(suggestNext, now)) suggestDirty = true;
         if (!suggestDirty) return;
         suggestDirty = false; suggestLevels = current; suggestFromHa = fromHa;
-        double now = Now;
         // A monitor whose Home Assistant levels are unavailable this tick is left out: DropStale keeps the samples
         // of monitors it does not know, so they are not deleted for good just because local levels stand in for a while.
         var known = new Dictionary<string, double[]>(current);
@@ -125,6 +128,7 @@ partial class Controller {
             if (HaLevelsUnavailable(mons[i], i, s, haDown)) known.Remove(mons[i].Key);
         var kept = Suggest.DropOld(Suggest.DropStale(corrections, known), now);
         if (kept.Count != corrections.Count) { corrections = kept; SaveCorrections(); }
+        suggestNext = Suggest.NextChange(kept, suggestDismissed.Values, now);
         int epoch = suggestEpoch;
         Suggestion? found = null;
         for (int i = 0; i < mons.Length && i < s.Levels.Length; i++) {
@@ -163,6 +167,14 @@ partial class Controller {
     public async void ApplySuggestion() {
         try {
             if (Suggestion is not { } sg || Mons.FirstOrDefault(x => x.Key == sg.Monitor) is not { } m) return;
+            if (Suggest.Due(suggestNext, Now)) {
+                // The samples behind it may have aged out since it was worked out: work it out again first.
+                Suggestion = null; suggestDirty = true; suggestEpoch++;
+                Log.Write($"suggest: {m.Label} out of date, working it out again");
+                if (panel.IsVisible) panel.Sync();
+                _ = Tick("suggestion");
+                return;
+            }
             Suggestion = null; SuggestError = null; suggestEpoch++;
             if (panel.IsVisible) panel.Sync();   // the card hides at once
             var local = new Dictionary<string, int>();

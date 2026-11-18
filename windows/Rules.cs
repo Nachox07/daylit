@@ -598,3 +598,29 @@ public static class HaBounds {
     public static double[] Row(double[] r) =>
         r.Select((v, i) => double.IsNaN(v) || v < 0 ? -1 : i == 5 ? Math.Min(v, MaxTimestamp) : Math.Min(v, 100)).ToArray();
 }
+
+/// What a config reload keeps of what Home Assistant last gave: the "set" helper already acted on, the last
+/// blind position, room lights and level row (used while Home Assistant is down). Each belongs to one Home
+/// Assistant (its address) and one entity; after either changes it is another helper's past. A kept "set"
+/// value would make the new helper's current value look like a command and move the monitor.
+/// Twin of mac/Sources/DaylitCore/HACache.swift; tests/parity/ha-cache.json holds the shared cases.
+static class HaCacheRule {
+    /// The address as compared here: trimmed, lower case, without trailing slashes; null when empty.
+    public static string? Address(string? url) {
+        var s = url?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.TrimEnd('/');
+    }
+
+    static string? Entity(string? e) { var s = e?.Trim(); return string.IsNullOrEmpty(s) ? null : s; }
+
+    /// Whether a value cached for `oldEntity` at `oldUrl` must go now that the config says `newEntity` at `newUrl`.
+    public static bool Stale(string? oldUrl, string? newUrl, string? oldEntity, string? newEntity) =>
+        Address(oldUrl) != Address(newUrl) || Entity(oldEntity) != Entity(newEntity);
+
+    /// A monitor's level helpers as one key for Stale: [day, blindDown, night, nightLights]; null when it has none.
+    public static string? LevelsKey(string? day, string? blindDown, string? night, string? nightLights) {
+        var parts = new[] { day, blindDown, night, nightLights }.Select(e => Entity(e) ?? "").ToArray();
+        return parts.All(p => p == "") ? null : string.Join("|", parts);
+    }
+}

@@ -315,6 +315,10 @@ sealed class Recorder {
 
     /// Forget a monitor's pending change.
     public void Drop(string monitor) => pending.Remove(monitor);
+
+    /// Forget every pending change: automatic work stopped (paused on battery), so none of them held under the
+    /// conditions a sample needs.
+    public void DropAll() => pending.Clear();
 }
 
 static partial class Suggest {
@@ -340,6 +344,27 @@ static partial class Suggest {
         if (BoostDecides(levels, elev, pos, lights, t, light)) return null;
         return new Sample(monitor, chosen, auto, Math.Min(t.Fraction(elev), light), Math.Clamp(pos, 0, 100) / 100, elev, lights, levels, now);
     }
+
+    /// Whether a pending hand change still holds this tick (the `held` of Recorder.Settle): Automatic on, the
+    /// offset still set, and none of the conditions that keep a change from becoming a sample (idle, paused, Home
+    /// Assistant down with the sun standing in, a follower, a refused write). Time spent in them must not count
+    /// towards the five minutes.
+    public static bool SettleHolds(bool auto, bool offsetHeld, SampleContext c) =>
+        auto && offsetHeld && !(c.Follower || c.WriteFailed || c.Idle || c.Paused || c.SunFallback);
+
+    /// The next moment time alone changes what SuggestionFor can give: a sample turning MaxAge old or a "Not now"
+    /// ending. null: nothing ahead. Nothing else marks the suggestion for working out again on such a moment, so the
+    /// controller does when Due says so. Samples dated more than a day ahead don't count: DropOld removes them.
+    public static double? NextChange(IEnumerable<Sample> samples, IEnumerable<double> dismissedUntil, double now) {
+        var t = new List<double>();
+        foreach (var x in samples)
+            if (now - x.At <= MaxAge && x.At <= now + 86400) t.Add(x.At + MaxAge);
+        t.AddRange(dismissedUntil.Where(d => d > now));
+        return t.Count == 0 ? null : t.Min();
+    }
+
+    /// Whether the moment from NextChange has come: work the suggestion out again (and don't Apply the one shown).
+    public static bool Due(double? next, double now) => next is double n && now >= n;
 
     /// Whether this tick's Decide took a new hand-set level (moved by hand): it stamps OffsetAt with now.
     /// A level from the Home Assistant "set" helper (`remote`) stamps it too, but is not a hand change.
