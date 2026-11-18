@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TWINS = ROOT / "scripts" / "twins.json"
 PARITY_LINE = re.compile(r"^[ \t]*Parity:[ \t]*(.*)$", re.MULTILINE)
 SEPARATOR = re.compile(r"\s+(?:—|–|--|-)\s+")
+PLACEHOLDER = re.compile(r"<[^<>\n]*>")   # a template slot like <why> or <file>
 PLACEHOLDERS = {"why", "reason", "todo", "tbd", "n/a", "na", "none", "-"}
 
 
@@ -93,7 +94,7 @@ def changed_files(base, head, worktree):
 
 
 def strip_comments(text):
-    return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    return re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.DOTALL)   # an unclosed comment runs to the end
 
 
 def parse_waivers(text):
@@ -107,11 +108,11 @@ def parse_waivers(text):
             continue
         targets = [t for t in re.split(r"[,\s]+", parts[0]) if t]
         reason = parts[1].strip()
-        bad_targets = [t for t in targets if "/" not in t and "*" not in t or "<" in t or ">" in t]
+        bad_targets = [t for t in targets if ("/" not in t and "*" not in t) or PLACEHOLDER.search(t)]
         letters = re.sub(r"[^A-Za-z]", "", reason)
         if not targets or bad_targets:
             problems.append(f"'{line}': name the files it excuses as paths, directories ('mac/Sources/Daylit/') or globs")
-        elif "<" in reason or ">" in reason or reason.lower().strip(" .") in PLACEHOLDERS or len(letters) < 6:
+        elif PLACEHOLDER.search(reason) or reason.lower().strip(" .") in PLACEHOLDERS or len(letters) < 6:
             problems.append(f"'{line}': give the real reason the other app needs no change")
         else:
             waivers.append((targets, reason, line))

@@ -123,6 +123,14 @@ class GuardScenarios(unittest.TestCase):
         self.repo.commit("one", "mac/Sources/Core/Rules.swift")
         self.assertFails("<!--\nParity: mac/Sources/Core/Rules.swift — comment wording only\n-->")
 
+    def test_waiver_inside_an_unclosed_html_comment_is_ignored(self):
+        self.repo.commit("one", "mac/Sources/Core/Rules.swift")
+        self.assertFails("text\n<!--\nParity: mac/Sources/Core/Rules.swift — comment wording only\n")
+
+    def test_comparison_signs_in_a_reason_are_fine(self):
+        self.repo.commit("one", "mac/Sources/Core/Rules.swift")
+        self.assertPasses("Parity: mac/Sources/Core/Rules.swift — needs macOS >= 14, Windows < 11 not affected")
+
     def test_file_in_several_groups_passes_with_any_twin(self):
         self.repo.commit("w", "windows/Win.cs", "mac/Sources/App/Log.swift")
         self.assertPasses()

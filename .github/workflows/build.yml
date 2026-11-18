@@ -20,6 +20,7 @@ jobs:
         working-directory: mac
       - name: Build Daylit.app (0 warnings)
         run: |
+          set -o pipefail   # tee must not hide a failed build
           DAYLIT_UNIVERSAL=1 mac/build.sh "$RUNNER_TEMP" 2>&1 | tee "$RUNNER_TEMP/build.log"
           if grep -E "warning:" "$RUNNER_TEMP/build.log"; then echo "::error::the Mac build has warnings"; exit 1; fi
       - name: UI snapshots
