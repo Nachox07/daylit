@@ -451,7 +451,8 @@ sealed class Osd : Window {
     static readonly DependencyProperty ShownProperty = DependencyProperty.Register(nameof(Shown), typeof(double), typeof(Osd),
         new PropertyMetadata(0.0, (d, e) => ((Osd)d).SetBar((double)e.NewValue)));
     double Shown { get => (double)GetValue(ShownProperty); set => SetValue(ShownProperty, value); }
-    string shownName = "";
+    string shownOn = "";   // the monitor (GDI name) the bar shows: names can repeat
+    bool fadingOut;
     readonly TextBlock label = new() { FontSize = 14, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     readonly TextBlock pct = new() { FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock icon = new() { Text = Palette.SunHigh, FontFamily = Palette.Icons, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
@@ -483,6 +484,7 @@ sealed class Osd : Window {
         SourceInitialized += (_, _) => { hwnd = new WindowInteropHelper(this).Handle; Win.MakeOverlay(hwnd); };
         hideT.Tick += (_, _) => {
             hideT.Stop();
+            fadingOut = true;
             var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(300));
             fade.Completed += (_, _) => { if (!hideT.IsEnabled) Hide(); };
             BeginAnimation(OpacityProperty, fade);
@@ -491,9 +493,10 @@ sealed class Osd : Window {
 
     public void Flash(string name, int v, string gdi) {
         var motion = SystemParameters.ClientAreaAnimation;
-        // Shown again, or another monitor: start at the new level, no glide from the old one.
-        var appearing = !IsVisible || Opacity < 0.5 || name != shownName;
-        shownName = name;
+        // Shown again (hidden or fading out), or another monitor: start at the new level, no glide from the old one.
+        // Not Opacity: during the fade-in it is still low, and a held key would make the bar jump.
+        var appearing = !IsVisible || fadingOut || gdi != shownOn;
+        shownOn = gdi; fadingOut = false;
         Fill(name, v, animate: motion && !appearing);
         if (appearing && motion) BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
         else { BeginAnimation(OpacityProperty, null); Opacity = 1; }

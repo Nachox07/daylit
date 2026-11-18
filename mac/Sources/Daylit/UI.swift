@@ -312,6 +312,7 @@ struct Panel: View {
     static var panel: NSPanel?
     static var hide: DispatchWorkItem?
     static let state = HUDState()
+    static var shownOn: CGDirectDisplayID?
     static func show(_ label: String, _ v: Double, on id: CGDirectDisplayID) {
         guard let screen = NSScreen.screens.first(where: {
             ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == id
@@ -327,8 +328,10 @@ struct Panel: View {
             if let cv = p.contentView { roundCorners(cv, 18) }
             panel = p; return p
         }()
-        // Shown again (or on another screen, or another monitor's level): start at the new level, no glide from the old one.
-        let appearing = !p.isVisible || p.alphaValue < 0.5 || state.label != label
+        // Shown again (hidden or fading out: alphaValue is the animation's target) or for another monitor, even one with
+        // the same name: start at the new level, no glide from the old one.
+        let appearing = !p.isVisible || p.alphaValue < 0.5 || shownOn != id
+        shownOn = id
         state.label = label
         state.animate = !appearing && !reduce
         state.value = v
