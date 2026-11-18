@@ -262,7 +262,7 @@ static class Rules {
         if (!lights) return "";
         if (bri <= 0) return " · lights on";
         string tone = sat <= t.WhiteSaturationMax ? " white" : sat > t.WarmSaturationMin ? " warm" : "";
-        return $" · lights {(int)Math.Round(bri / 2.55)}%{tone}";
+        return $" · lights {(int)Math.Round(HaBounds.Brightness(bri) / 2.55)}%{tone}";
     }
 }
 
@@ -569,4 +569,32 @@ static class BrightnessKeys {
     /// previous report and in this one.
     public static bool? Pressed(IReadOnlyCollection<ushort> before, IReadOnlyCollection<ushort> now) =>
         now.Contains(Up) && !before.Contains(Up) ? true : now.Contains(Down) && !before.Contains(Down) ? false : null;
+}
+
+/// The ranges Home Assistant's numbers can really have. Anything outside is clamped to the nearest end, or
+/// treated as "no value" (-1) where a huge number cannot be a real reading. The same rules as HABounds on macOS.
+public static class HaBounds {
+    /// The latest Unix time a set helper's last_changed is taken as (about the year 5100).
+    public const double MaxTimestamp = 1e11;
+    /// A light sensor reading above this is no real sensor (lux in full sun is ~120 000).
+    const double MaxReading = 1e9;
+
+    static double Clamp(double v, double lo, double hi) => double.IsNaN(v) ? lo : Math.Clamp(v, lo, hi);
+
+    /// The sun's elevation in degrees.
+    public static double Elevation(double v) => double.IsNaN(v) ? -10 : Clamp(v, -90, 90);
+    /// The blind's position 0–100; below 0 means it has none (-1).
+    public static double Position(double v) => double.IsNaN(v) || v < 0 ? -1 : Math.Min(v, 100);
+    /// Light brightness 0–255.
+    public static double Brightness(double v) => Clamp(v, 0, 255);
+    /// hs_color saturation 0–100.
+    public static double Saturation(double v) => Clamp(v, 0, 100);
+    /// A light sensor reading; -1 = none.
+    public static double Reading(double v) => double.IsNaN(v) || v < 0 || v > MaxReading ? -1 : v;
+    /// Seconds since the sensor reported; -1 = unknown.
+    public static double Age(double v) => double.IsNaN(v) || v < 0 ? -1 : Math.Min(v, MaxTimestamp);
+    /// A monitor row [day, blindDown, night, nightLights, set, setChanged]: levels 0–100 or -1 (none),
+    /// setChanged a Unix time or -1.
+    public static double[] Row(double[] r) =>
+        r.Select((v, i) => double.IsNaN(v) || v < 0 ? -1 : i == 5 ? Math.Min(v, MaxTimestamp) : Math.Min(v, 100)).ToArray();
 }

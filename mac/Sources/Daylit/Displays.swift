@@ -93,13 +93,47 @@ enum DDC {
         #endif
     }
 
-    static func run(_ args: [String]) -> String? {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: tool); p.arguments = args
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+    /// How long one m1ddc call may take. A normal read or write answers in well under a second; a call
+    /// still running after this is stuck (a monitor or adapter that never answers) and is stopped, so it
+    /// cannot hold the DDC queue, and with it every other monitor, forever.
+    static let deadline: TimeInterval = 10
+
+    /// Collects a pipe's bytes on a background thread.
+    private final class Drain: @unchecked Sendable {
+        private(set) var data = Data()
+        let done = DispatchSemaphore(value: 0)
+        init(_ pipe: Pipe) {
+            DispatchQueue.global(qos: .utility).async { [self] in
+                data = pipe.fileHandleForReading.readDataToEndOfFile()
+                done.signal()
+            }
+        }
+    }
+
+    static func run(_ args: [String]) -> String? { run(tool, args, deadline: deadline) }
+
+    /// Runs `executable` with `args`; its trimmed output when it exits 0 within `deadline`, else nil.
+    /// Both pipes are drained while it runs (a full stderr pipe would block it); a call past the deadline
+    /// is terminated, then killed, and counts as a failed read or write.
+    static func run(_ executable: String, _ args: [String], deadline: TimeInterval) -> String? {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: executable); p.arguments = args
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out; p.standardError = err
+        let exited = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in exited.signal() }
         do { try p.run() } catch { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdout = Drain(out), stderr = Drain(err)
+        if exited.wait(timeout: .now() + deadline) == .timedOut {
+            p.terminate()
+            if exited.wait(timeout: .now() + 1) == .timedOut { kill(p.processIdentifier, SIGKILL); exited.wait() }
+            Log.write("ddc: m1ddc \(args.joined(separator: " ")) gave no answer in \(Int(deadline)) s, stopped it")
+            _ = stdout.done.wait(timeout: .now() + 1); _ = stderr.done.wait(timeout: .now() + 1)
+            return nil
+        }
+        // A pipe a leftover child process still holds open must not block either: give the drains a moment.
+        _ = stderr.done.wait(timeout: .now() + 1)
+        guard stdout.done.wait(timeout: .now() + 1) == .success else { return nil }
+        let s = String(data: stdout.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return p.terminationStatus == 0 ? s : nil
     }
     static func get(_ uuid: String) -> Int? { run(["display", uuid, "get", "luminance"]).flatMap { Int($0) }.flatMap { (0...100).contains($0) ? $0 : nil } }   // a garbled DDC answer (48750) is no reading
