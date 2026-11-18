@@ -776,10 +776,13 @@ sealed partial class Controller {
                 // decides again from the level it reads; publishing this old decision there would be wrong.
                 if (gen != generation) return;
             }
-            var st = Rules.AfterWrite(step.State, ok, hold);   // a refused write is retried next tick
             // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.
             bool appliedMeanwhile = offsetCleared.GetValueOrDefault(m.Key) != clearedAt;
-            if (appliedMeanwhile) { st = Suggest.AfterApply(st); recorder.Drop(m.Key); }
+            // A refused write is retried next tick. Not a level set by hand during our own write, or while the slider is held.
+            var commit = Rules.WriteCommit(step.State, step.Current, hold, ok, appliedMeanwhile, controlChanged: false,
+                                           levelAtStart: c, levelNow: m.Cur, held: m.Dragging)!.Value;
+            var st = commit.State;
+            if (appliedMeanwhile) recorder.Drop(m.Key);
             if (i == li) groupBase = syncOffsets.Base(m.Key, ok ? step.Applied : c);   // followers go where the leader really is
             if (st.Offset != m.Offset && st.Offset is int o)
                 Log.Write($"manual: {m.Label} kept {(o > 0 ? "+" : "")}{o} from the automatic level");
@@ -802,8 +805,7 @@ sealed partial class Controller {
                 corrections.Add(settled); SaveCorrections(); suggestDirty = true;
             }
             if (holds.Record(m.Key, st, Now)) holdsChanged = true;
-            // Not while the slider is held, or when a hand change landed during the write: that level is newer.
-            if (Rules.LevelAfterWrite(step.Current, ok, c, m.Cur, m.Dragging) is int written) m.Cur = written;
+            if (commit.Level is int written) m.Cur = written;   // from WriteCommit above; nothing awaits in between, so m.Cur is unchanged
             m.Manual = step.Manual && !appliedMeanwhile;
             int applied = ok ? step.Applied : c;
             if (follower && here) linkedNow[m.Key] = applied;   // an idle PC sets nothing, so it shows the target instead

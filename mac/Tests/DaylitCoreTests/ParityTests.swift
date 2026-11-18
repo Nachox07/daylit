@@ -11,6 +11,7 @@ final class ParityTests: XCTestCase {
     static let runners: [String: (String, [String: Any]) throws -> Any] = [
         "update.json": update, "ha-numbers.json": haNumbers, "levels.json": levels, "hold.json": hold,
         "config-load.json": config, "config-edit.json": configEdit, "suggest.json": suggest, "ha-cache.json": haCache, "read-state.json": readState,
+        "write-commit.json": writeCommitCase,
     ]
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -101,21 +102,47 @@ final class ParityTests: XCTestCase {
         }
     }
 
+    static func holdState(_ v: Any?) -> HoldState {
+        let s = v as? [String: Any] ?? [:]
+        return HoldState(lastSet: optInt(s["lastSet"]), lastTarget: optInt(s["lastTarget"]), remoteSeen: optNum(s["remoteSeen"]),
+                         offset: optInt(s["offset"]), offsetSun: optNum(s["offsetSun"]), offsetAt: optNum(s["offsetAt"]),
+                         remoteValue: optNum(s["remoteValue"]))
+    }
+
+    static func holdJSON(_ st: HoldState) -> [String: Any] {
+        func n<T>(_ v: T?) -> Any { v.map { $0 as Any } ?? NSNull() }
+        return ["lastSet": n(st.lastSet), "lastTarget": n(st.lastTarget), "remoteSeen": n(st.remoteSeen), "remoteValue": n(st.remoteValue),
+                "offset": n(st.offset), "offsetSun": n(st.offsetSun), "offsetAt": n(st.offsetAt)]
+    }
+
+    /// Days are whole UTC days of the time, so the cases do not depend on the machine's time zone.
+    static func utcDay(_ t: Double) -> Int { Int((t / 86400).rounded(.down)) }
+
     static func hold(_ fn: String, _ i: [String: Any]) throws -> Any {
+        if fn == "offsetExpired" {
+            let place = (i["place"] as? [String: Any]).map { (latitude: num($0["lat"]), longitude: num($0["lon"])) }
+            return offsetExpired(holdState(i["state"]), now: num(i["now"]), sun: num(i["sun"]), dayOf: utcDay, place: place)
+        }
         guard fn == "decide" else { throw UnknownFunction(fn: fn) }
-        let s = i["state"] as? [String: Any] ?? [:]
-        let state = HoldState(lastSet: optInt(s["lastSet"]), lastTarget: optInt(s["lastTarget"]), remoteSeen: optNum(s["remoteSeen"]),
-                              offset: optInt(s["offset"]), offsetSun: optNum(s["offsetSun"]), offsetAt: optNum(s["offsetAt"]),
-                              remoteValue: optNum(s["remoteValue"]))
+        let state = holdState(i["state"])
         let remote = (i["remote"] as? [String: Any]).map { RemoteSet(value: num($0["value"]), changed: num($0["changed"])) }
         let step = decide(current: int(i["current"]), want: int(i["want"]), remote: remote, state: state, here: bool(i["here"]),
                           auto: bool(i["auto"]), dragging: bool(i["dragging"]), sun: num(i["sun"]), touched: bool(i["touched"]),
-                          now: num(i["now"]), dayOf: { Int(($0 / 86400).rounded(.down)) })
+                          now: num(i["now"]), dayOf: utcDay)
         func n<T>(_ v: T?) -> Any { v.map { $0 as Any } ?? NSNull() }
-        let st = step.state
         return ["write": n(step.write), "remote": n(step.remote), "applied": step.applied, "manual": step.manual,
-                "state": ["lastSet": n(st.lastSet), "lastTarget": n(st.lastTarget), "remoteSeen": n(st.remoteSeen), "remoteValue": n(st.remoteValue),
-                          "offset": n(st.offset), "offsetSun": n(st.offsetSun), "offsetAt": n(st.offsetAt)]] as [String: Any]
+                "state": holdJSON(step.state)] as [String: Any]
+    }
+
+    /// `level`: the new slider level the tick decided (null: none).
+    static func writeCommitCase(_ fn: String, _ i: [String: Any]) throws -> Any {
+        guard fn == "writeCommit" else { throw UnknownFunction(fn: fn) }
+        var step = Step(state: holdState(i["state"]), applied: 0)
+        step.level = optInt(i["level"])
+        guard let c = writeCommit(step: step, before: holdState(i["before"]), ok: bool(i["ok"]), clearedMeanwhile: bool(i["clearedMeanwhile"]),
+                                  controlChanged: bool(i["controlChanged"]), levelAtStart: optInt(i["levelAtStart"]),
+                                  levelNow: optInt(i["levelNow"]), held: bool(i["held"])) else { return NSNull() }
+        return ["state": holdJSON(c.state), "level": c.level.map { $0 as Any } ?? NSNull()] as [String: Any]
     }
 
     static func config(_ fn: String, _ i: [String: Any]) throws -> Any {
