@@ -349,6 +349,12 @@ static partial class Suggest {
     /// The hold state after Apply: the hand-set offset is cleared, or it would be applied again on top of the
     /// new level (target 85, set 70, new level gives 70: the monitor would go to 55).
     public static Hold AfterApply(Hold h) => h with { LastSet = null, Offset = null, OffsetSun = null, OffsetAt = null };
+
+    /// Whether Apply clears the offset (AfterApply): only when the main level (the one that moves most) was
+    /// written. Otherwise the target has not moved to where the user's hand was, and clearing the offset would
+    /// send the monitor back to the old level. `mainInHa`: its Home Assistant write worked, or null when it is a
+    /// local level, which lands with the config.json write (`fileWritten`).
+    public static bool ApplyClearsOffset(bool? mainInHa, bool fileWritten) => mainInHa ?? fileWritten;
 }
 
 /// corrections.json: {"samples": [...]}.

@@ -70,6 +70,8 @@ sealed partial class Controller {
     readonly DispatcherTimer timer = new(), idleWatch = new() { Interval = TimeSpan.FromSeconds(2) };
     DateTime panelHidden;
     bool busy, again, wasHere = true, wasIdle;
+    /// Bumped by every config load: a tick that started under the old config must not write under the new one.
+    int generation;
     bool? lookDark;
     readonly LookRule look = new();   // light/dark decision with hysteresis (Rules.cs)
     string? lastHaError;
@@ -147,6 +149,7 @@ sealed partial class Controller {
     void Load() {
         var previousLights = Cfg.HomeAssistant?.Lights;
         (Cfg, ConfigError) = Config.Load();
+        generation++;
         // A removed or changed lights entity must not keep its last state alive through an outage.
         if (Cfg.HomeAssistant?.Lights != previousLights) lastHaLights = null;
         HAClient.Token = Source == Source.HomeAssistant ? Cred.ReadUsable(Cfg.TokenName) : null;
@@ -597,6 +600,7 @@ sealed partial class Controller {
 
     async Task TickOnce() {
         lastTick = DateTime.UtcNow;
+        int gen = generation;
         RefreshDisplays(await Task.Run(Native.ActiveDisplays));
         var mons = Mons.ToArray();
         await ApplyContrast(mons);
@@ -621,11 +625,13 @@ sealed partial class Controller {
         Inputs? s; bool haDown = false;
         if (Source == Source.HomeAssistant) {
             s = await HAClient.State(Cfg, mons);
+            if (gen != generation) return;   // reloaded during the wait: this answer (or failure) belongs to the old config
             foreach (var delay in HaErrorRule.RetryDelays) {   // a first failure after start, wake or a network switch is usually brief
                 if (s != null || !HAClient.Transient) break;
                 if (haDownSince == null) Log.Write($"home assistant: retrying in {delay} s ({HAClient.LastCause ?? "no answer"})");   // once, not every tick of an outage
                 await Task.Delay(TimeSpan.FromSeconds(delay));
                 s = await HAClient.State(Cfg, mons);
+                if (gen != generation) return;
             }
             if (s == null) {
                 haDown = true;
@@ -645,6 +651,8 @@ sealed partial class Controller {
                 if (Cfg.Location != null && (DateTime.UtcNow - haDownSince.Value).TotalSeconds >= Cfg.Tuned.HaFallbackSeconds) s = SunInputs(mons);
             }
         } else s = SunInputs(mons);
+        // On battery since the wait for Home Assistant began: nothing automatic from this answer.
+        if (Paused) { Subtitle = "Paused on battery"; foreach (var m in mons) m.Manual = false; ClearLive(); return; }
         var downFor = haDownSince is { } since ? (int)(DateTime.UtcNow - since).TotalMinutes : 0;
         if (!haDown) { haDownSince = null; haLoggedAt = null; }
         if (!haDown && Source == Source.HomeAssistant && s != null) {
@@ -690,6 +698,12 @@ sealed partial class Controller {
         var linkedNow = new Dictionary<string, int>();   // linked followers: the level they land on (for the Settings chart)
         var order = li >= 0 ? new[] { li }.Concat(Enumerable.Range(0, mons.Length).Where(j => j != li)) : Enumerable.Range(0, mons.Length);
         foreach (int i in order) {
+            // Reloaded (its own tick follows) or on battery since an earlier monitor's write or publish: no more automatic work.
+            if (gen != generation) return;
+            if (Paused) {
+                if (holdsChanged) Settings.Holds = holds;   // what the monitors before this one did is kept
+                Subtitle = "Paused on battery"; foreach (var pm in mons) pm.Manual = false; ClearLive(); return;
+            }
             var m = mons[i];
             m.Manual = false;
             if (m.Cur is not int c) continue;
@@ -727,6 +741,9 @@ sealed partial class Controller {
                     Log.Write(ok ? $"display: {m.Label} takes brightness changes again"
                                  : $"display: {m.Label} did not take brightness {v}%; trying again each tick");
                 m.WriteFailing = !ok;
+                // Reloaded during the write: Load already reset this monitor's hold, and the new config's tick
+                // decides again from the level it reads; publishing this old decision there would be wrong.
+                if (gen != generation) return;
             }
             var st = Rules.AfterWrite(step.State, ok, hold);   // a refused write is retried next tick
             // Apply cleared this monitor's offset while the write was under way: merge that clear into our result.

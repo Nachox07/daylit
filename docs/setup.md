@@ -91,7 +91,8 @@ When you keep correcting a monitor the same way, the panel offers new levels:
   night is always offered alone.
 - **Apply** sets the level where it lives: its `input_number` in Home Assistant (rounded to the helper's
   step), otherwise `config.json` (`nightLights` for *Lights on*, like the others). A `config.json` with comments is not edited; set the level in
-  Settings instead. Your hand-set distance is cleared at the same time, so it is not added twice.
+  Settings instead. Your hand-set distance is cleared at the same time, so it is not added twice; when the
+  main level could not be set, the distance stays and the panel shows what failed.
   **Not now** hides that monitor's suggestions for 7 days.
 - The changes stay on this computer for 14 days (macOS `~/Library/Application Support/Daylit/corrections.json`,
   Windows `%LOCALAPPDATA%\Daylit\corrections.json`); nothing goes to Home Assistant or iCloud. When a

@@ -562,6 +562,9 @@ public class ConfigTests {
     [InlineData("""{ "source": "moon" }""", "Off")]
     [InlineData("""{ "homeAssistant": { "url": "ftp://x" } }""", "Off")]
     [InlineData("""{ "location": { "latitude": 120, "longitude": 2 } }""", "Off")]
+    [InlineData("""{ "source": "sun", "location": { "latitude": 51.48 } }""", "Off")]   // no longitude: not 0°
+    [InlineData("""{ "source": "sun", "location": { "longitude": 2 } }""", "Off")]
+    [InlineData("""{ "source": "sun", "location": {} }""", "Off")]
     [InlineData("""{ "monitors": [ { "label": "no match" } ] }""", "Off")]
     public void ProblemsAreReported(string json, string fallback) {
         var (c, err) = Config.Load(Write(json));

@@ -131,9 +131,12 @@ extension Daylit {
         suggestion = nil; suggestError = nil; suggestEpoch += 1
         var local: [String: Int] = [:]
         var failed: [String] = []
-        for c in sg.changes {
+        var mainApplied: Bool? = nil   // nil: the main level is a local one, written with the file below
+        for (n, c) in sg.changes.enumerated() {
             if let e = haEntity(c.level, of: m), let ha = config.homeAssistant {
-                if case .failure(let f) = await HAClient.setNumber(ha, e, c.to) { failed.append("\(e) failed: \(HAClient.describe(f, ha))") }
+                var ok = true
+                if case .failure(let f) = await HAClient.setNumber(ha, e, c.to) { failed.append("\(e) failed: \(HAClient.describe(f, ha))"); ok = false }
+                if n == 0 { mainApplied = ok }
             } else {
                 local[c.level.key] = Int(c.to.rounded())
             }
@@ -163,14 +166,18 @@ extension Daylit {
                 failed.append("config.json failed: \(error.localizedDescription)")
             }
         }
-        offsetCleared[sg.monitor, default: 0] += 1   // a tick in flight merges this clear into its own result
-        if let i = mons.firstIndex(where: { $0.uuid == sg.monitor }) {
-            let cleared = Suggest.afterApply(HoldState(lastSet: mons[i].lastSet, lastTarget: mons[i].lastTarget, offset: mons[i].offset,
-                                                       offsetSun: mons[i].offsetSun, offsetAt: mons[i].offsetAt))
-            mons[i].lastSet = cleared.lastSet; mons[i].offset = cleared.offset; mons[i].offsetSun = cleared.offsetSun
-            mons[i].offsetAt = cleared.offsetAt; mons[i].manual = false
+        // Nothing changed where it matters (Home Assistant refused the main level, or config.json could not be
+        // written): the hand-set level stays as it is, or the next tick would undo it.
+        if Suggest.applyClearsOffset(mainInHA: mainApplied, fileWritten: wroteFile) {
+            offsetCleared[sg.monitor, default: 0] += 1   // a tick in flight merges this clear into its own result
+            if let i = mons.firstIndex(where: { $0.uuid == sg.monitor }) {
+                let cleared = Suggest.afterApply(HoldState(lastSet: mons[i].lastSet, lastTarget: mons[i].lastTarget, offset: mons[i].offset,
+                                                           offsetSun: mons[i].offsetSun, offsetAt: mons[i].offsetAt))
+                mons[i].lastSet = cleared.lastSet; mons[i].offset = cleared.offset; mons[i].offsetSun = cleared.offsetSun
+                mons[i].offsetAt = cleared.offsetAt; mons[i].manual = false
+            }
+            recorder.drop(sg.monitor)
         }
-        recorder.drop(sg.monitor)
         for f in failed { Log.write("suggest: \(m.label) \(f)") }
         if failed.isEmpty { Log.write("suggest: \(m.label) applied") }
         let applyError = failed.isEmpty ? nil : "Could not apply the suggestion: " + failed.joined(separator: "; ")

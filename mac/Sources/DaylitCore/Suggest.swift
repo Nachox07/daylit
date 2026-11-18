@@ -362,6 +362,12 @@ extension Suggest {
 
     /// The hold state after Apply: the hand-set offset is cleared, or it would be applied again on top of
     /// the new level (target 85, set 70, new level gives 70: the monitor would go to 55).
+    /// Whether Apply clears the offset (afterApply): only when the main level (the one that moves most) was
+    /// written. Otherwise the target has not moved to where the user's hand was, and clearing the offset would
+    /// send the monitor back to the old level. `mainInHA`: its Home Assistant write worked, or nil when it is a
+    /// local level, which lands with the config.json write (`fileWritten`).
+    public static func applyClearsOffset(mainInHA: Bool?, fileWritten: Bool) -> Bool { mainInHA ?? fileWritten }
+
     public static func afterApply(_ s: HoldState) -> HoldState {
         var r = s
         r.lastSet = nil; r.offset = nil; r.offsetSun = nil; r.offsetAt = nil

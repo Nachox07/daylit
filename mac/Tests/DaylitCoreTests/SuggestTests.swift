@@ -305,6 +305,19 @@ final class SuggestRecorderTests: XCTestCase {
         XCTAssertNil(cleared.write)
         XCTAssertNil(cleared.state.offset)
     }
+
+    func testAnApplyWhoseMainLevelFailedKeepsTheOffset() {
+        XCTAssertFalse(Suggest.applyClearsOffset(mainInHA: false, fileWritten: true))   // HA refused the main level
+        XCTAssertFalse(Suggest.applyClearsOffset(mainInHA: nil, fileWritten: false))    // a local main level, file not written
+        XCTAssertTrue(Suggest.applyClearsOffset(mainInHA: true, fileWritten: false))    // only a secondary local level failed
+        XCTAssertTrue(Suggest.applyClearsOffset(mainInHA: nil, fileWritten: true))
+        // Kept: target 85, the user set 70 (offset −15), and the target did not change, so the monitor stays at 70.
+        let held = HoldState(lastSet: 70, lastTarget: 85, offset: -15, offsetSun: 1, offsetAt: 1000)
+        let step = decide(current: 70, want: 85, remote: nil, state: held, here: true, auto: true, dragging: false, sun: 1,
+                          touched: false, now: 1060, dayOf: { _ in 0 })
+        XCTAssertEqual(step.applied, 70)
+        XCTAssertNil(step.write)
+    }
 }
 
 final class SuggestStoreTests: XCTestCase {
