@@ -426,8 +426,8 @@ Get-FileHash Daylit-windows-*.zip                 # Windows: compare the hash wi
 ```
 
 The same hashes are in the release notes, and Homebrew and winget check theirs on install. The macOS app
-is also always signed with the same Daylit certificate: `codesign -dv Daylit.app` shows
-`Authority=Daylit Signing`. Neither replaces Apple notarization or a Windows code signature, which
+is also always signed with the same Daylit certificate: `codesign -dv Daylit.app` shows its name
+(today `Authority=Daylit Signing`). Neither replaces Apple notarization or a Windows code signature, which
 Daylit does not have; building from source is the way to trust only what you have read.
 
 ## Permissions (macOS)
