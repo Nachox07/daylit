@@ -66,6 +66,9 @@ record struct Hold(double? RemoteSeen, int? LastSet, int? LastTarget, int? Offse
 /// Current: the level after this tick; Write: what to send to the monitor; Remote: a "set" from HA that was applied.
 record struct Step(Hold State, int Current, int? Write, int? Remote, int Applied, bool Manual);
 
+/// What a finished write leaves on its monitor (Rules.WriteCommit): the hold state and the slider level (null: keep it).
+record struct WriteCommit(Hold State, int? Level);
+
 static class Rules {
     /// v = [day, blindDown, night], or with a fourth, nightLights (the level with the room lights on after sunset). The daytime value slides between "blind down" and "blind up" with the
     /// blind position; the sun then blends it with the night value; room lights at night add a little.
@@ -255,6 +258,20 @@ static class Rules {
     /// for a hand-set change and stops retrying. A Home Assistant "set" it carried stays pending, so
     /// the next tick applies it again too.
     public static Hold AfterWrite(Hold s, bool ok, Hold before) => ok ? s : s with { LastSet = null, RemoteSeen = before.RemoteSeen, RemoteValue = before.RemoteValue };
+
+    /// The result of one write for the monitor: the tick's state after the write (AfterWrite), with Apply's clear
+    /// merged in when Apply cleared the offset meanwhile (`clearedMeanwhile`), and the slider level (LevelAfterWrite).
+    /// Null when the monitor's control changed under the write (the old level is on another scale). `state` and
+    /// `level`: what the tick decided (Step.State, the new level); `before`: the state the tick started from.
+    /// On Windows the monitor list is only rebuilt inside the tick, so the control never changes mid-write there;
+    /// the Mac rebuilds it on a display change and uses that case.
+    public static global::Daylit.WriteCommit? WriteCommit(Hold state, int? level, Hold before, bool ok, bool clearedMeanwhile, bool controlChanged,
+                                                          int? levelAtStart, int? levelNow, bool held) {
+        if (controlChanged) return null;
+        var st = AfterWrite(state, ok, before);
+        if (clearedMeanwhile) st = Suggest.AfterApply(st);
+        return new global::Daylit.WriteCommit(st, LevelAfterWrite(level, ok, levelAtStart, levelNow, held));
+    }
 
     /// "lights 80% white" / "lights 40% warm": the colour matters for light/dark mode, so show it.
     public static string LightsNote(bool lights, double bri, double sat, Tuning? t = null) {

@@ -16,6 +16,7 @@ public class ParityTests {
         ["config-load.json"] = ConfigCases, ["config-edit.json"] = ConfigEdit, ["suggest.json"] = SuggestCases,
         ["ha-cache.json"] = HaCache,
         ["read-state.json"] = ReadStateCases,
+        ["write-commit.json"] = WriteCommitCases,
     };
 
     /// Every file in tests/parity runs: one with no runner fails, so a new area cannot be skipped by accident.
@@ -96,22 +97,42 @@ public class ParityTests {
         }
     }
 
+    static Hold HoldIn(JsonNode? n) {
+        var s = n as JsonObject ?? new JsonObject();
+        return new Hold(OptNum(s["remoteSeen"]), OptInt(s["lastSet"]), OptInt(s["lastTarget"]), OptInt(s["offset"]), OptNum(s["offsetSun"]),
+                        OptNum(s["offsetAt"]), OptNum(s["remoteValue"]));
+    }
+
+    static JsonObject HoldOut(Hold st) => new() {
+        ["lastSet"] = st.LastSet, ["lastTarget"] = st.LastTarget, ["remoteSeen"] = st.RemoteSeen, ["remoteValue"] = st.RemoteValue,
+        ["offset"] = st.Offset, ["offsetSun"] = st.OffsetSun, ["offsetAt"] = st.OffsetAt,
+    };
+
+    /// Days are whole UTC days of the time, so the cases do not depend on the machine's time zone.
+    static int UtcDay(double t) => (int)Math.Floor(t / 86400);
+
     static JsonNode? HoldCases(string fn, JsonObject i) {
+        (double, double)? place = i["place"] is JsonObject p ? (Num(p["lat"]), Num(p["lon"])) : null;   // optional in every case
+        if (fn == "offsetExpired") {
+            return Rules.OffsetExpired(HoldIn(i["state"]), Num(i["now"]), Num(i["sun"]), UtcDay, place);
+        }
         if (fn != "decide") throw new UnknownFunction(fn);
-        var s = i["state"]?.AsObject() ?? new JsonObject();
-        var hold = new Hold(OptNum(s["remoteSeen"]), OptInt(s["lastSet"]), OptInt(s["lastTarget"]), OptInt(s["offset"]), OptNum(s["offsetSun"]),
-                            OptNum(s["offsetAt"]), OptNum(s["remoteValue"]));
+        var hold = HoldIn(i["state"]);
         (double, double)? remote = i["remote"] is JsonObject r ? (Num(r["value"]), Num(r["changed"])) : null;
         var step = Rules.Decide(Int(i["current"]), Int(i["want"]), remote, hold, Bool(i["auto"]), Bool(i["here"]), Num(i["sun"]), Bool(i["touched"]),
-                                Bool(i["dragging"]), Num(i["now"]), x => (int)Math.Floor(x / 86400));
-        var st = step.State;
+                                Bool(i["dragging"]), Num(i["now"]), UtcDay, place);
         return new JsonObject {
             ["write"] = step.Write, ["remote"] = step.Remote, ["applied"] = step.Applied, ["manual"] = step.Manual,
-            ["state"] = new JsonObject {
-                ["lastSet"] = st.LastSet, ["lastTarget"] = st.LastTarget, ["remoteSeen"] = st.RemoteSeen, ["remoteValue"] = st.RemoteValue,
-                ["offset"] = st.Offset, ["offsetSun"] = st.OffsetSun, ["offsetAt"] = st.OffsetAt,
-            },
+            ["state"] = HoldOut(step.State),
         };
+    }
+
+    /// `level`: the new slider level the tick decided (null: none).
+    static JsonNode? WriteCommitCases(string fn, JsonObject i) {
+        if (fn != "writeCommit") throw new UnknownFunction(fn);
+        if (Rules.WriteCommit(HoldIn(i["state"]), OptInt(i["level"]), HoldIn(i["before"]), Bool(i["ok"]), Bool(i["clearedMeanwhile"]),
+                              Bool(i["controlChanged"]), OptInt(i["levelAtStart"]), OptInt(i["levelNow"]), Bool(i["held"])) is not { } c) return null;
+        return new JsonObject { ["state"] = HoldOut(c.State), ["level"] = c.Level };
     }
 
     static JsonNode? ConfigCases(string fn, JsonObject i) {
