@@ -34,6 +34,7 @@
     "mac/Sources/Daylit/LocalNetworkProbe.swift": "macOS's Local Network permission; Windows has no such permission",
     "mac/Sources/DaylitCore/TokenDestination.swift": "a synced iCloud config can change the address on another Mac; the Windows config is never synced",
     "mac/Sources/DaylitCore/TokenKeychain.swift": "moving the token to a keychain item only Daylit can read; Windows Credential Manager has no per-app items",
+    "mac/Sources/Daylit/AppMenu.swift": "the macOS menu bar (About Daylit, Settings…, Edit) while a window is open; Windows apps have no such menu",
     "mac/Sources/Daylit/Demo.swift": "scripted panel demo for README recordings, made on the Mac"
   },
   "windowsOnly": {}

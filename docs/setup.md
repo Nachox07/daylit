@@ -394,7 +394,8 @@ To stop it, turn the switch off or set the key to `false`. Without the key, or w
 Daylit does not update itself; it tells you when a new version is out.
 
 **Which version you have:** Settings → App → *About* shows it ("Daylit 1.9.0", or "Daylit (local build)" for a
-build from source) with a link to that version's release notes; `Daylit --version` prints the same line.
+build from source) with a link to that version's release notes; `Daylit --version` prints the same line. On macOS, while a
+Daylit window is open, the menu bar also has the Daylit menu with **About Daylit**.
 
 - **What is sent.** A minute after start and then once a day, one request to
   `https://api.github.com/repos/Nachox07/daylit/releases?per_page=20`, GitHub's public list of releases.
