@@ -11,7 +11,18 @@ import DaylitCore
     /// Call once a window is created: switches to a regular app and back when the last of these windows closes.
     static func opened(_ w: NSWindow) {
         if !installed { NSApp.mainMenu = build(); installed = true }
-        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+            // An app that turns regular while it is already frontmost gets a menu bar that draws but ignores
+            // clicks until it is activated again. Hand the focus to the Dock for a moment and take it back.
+            DispatchQueue.main.async {
+                NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.activate()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    w.makeKeyAndOrderFront(nil)
+                }
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { n in
             let closing = n.object as? NSWindow
             Task { @MainActor in
