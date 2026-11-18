@@ -119,8 +119,8 @@ final class ParityTests: XCTestCase {
     static func utcDay(_ t: Double) -> Int { Int((t / 86400).rounded(.down)) }
 
     static func hold(_ fn: String, _ i: [String: Any]) throws -> Any {
+        let place = (i["place"] as? [String: Any]).map { (latitude: num($0["lat"]), longitude: num($0["lon"])) }   // optional in every case
         if fn == "offsetExpired" {
-            let place = (i["place"] as? [String: Any]).map { (latitude: num($0["lat"]), longitude: num($0["lon"])) }
             return offsetExpired(holdState(i["state"]), now: num(i["now"]), sun: num(i["sun"]), dayOf: utcDay, place: place)
         }
         guard fn == "decide" else { throw UnknownFunction(fn: fn) }
@@ -128,7 +128,7 @@ final class ParityTests: XCTestCase {
         let remote = (i["remote"] as? [String: Any]).map { RemoteSet(value: num($0["value"]), changed: num($0["changed"])) }
         let step = decide(current: int(i["current"]), want: int(i["want"]), remote: remote, state: state, here: bool(i["here"]),
                           auto: bool(i["auto"]), dragging: bool(i["dragging"]), sun: num(i["sun"]), touched: bool(i["touched"]),
-                          now: num(i["now"]), dayOf: utcDay)
+                          now: num(i["now"]), dayOf: utcDay, place: place)
         func n<T>(_ v: T?) -> Any { v.map { $0 as Any } ?? NSNull() }
         return ["write": n(step.write), "remote": n(step.remote), "applied": step.applied, "manual": step.manual,
                 "state": holdJSON(step.state)] as [String: Any]

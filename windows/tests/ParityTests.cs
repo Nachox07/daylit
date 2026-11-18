@@ -112,15 +112,15 @@ public class ParityTests {
     static int UtcDay(double t) => (int)Math.Floor(t / 86400);
 
     static JsonNode? HoldCases(string fn, JsonObject i) {
+        (double, double)? place = i["place"] is JsonObject p ? (Num(p["lat"]), Num(p["lon"])) : null;   // optional in every case
         if (fn == "offsetExpired") {
-            (double, double)? place = i["place"] is JsonObject p ? (Num(p["lat"]), Num(p["lon"])) : null;
             return Rules.OffsetExpired(HoldIn(i["state"]), Num(i["now"]), Num(i["sun"]), UtcDay, place);
         }
         if (fn != "decide") throw new UnknownFunction(fn);
         var hold = HoldIn(i["state"]);
         (double, double)? remote = i["remote"] is JsonObject r ? (Num(r["value"]), Num(r["changed"])) : null;
         var step = Rules.Decide(Int(i["current"]), Int(i["want"]), remote, hold, Bool(i["auto"]), Bool(i["here"]), Num(i["sun"]), Bool(i["touched"]),
-                                Bool(i["dragging"]), Num(i["now"]), UtcDay);
+                                Bool(i["dragging"]), Num(i["now"]), UtcDay, place);
         return new JsonObject {
             ["write"] = step.Write, ["remote"] = step.Remote, ["applied"] = step.Applied, ["manual"] = step.Manual,
             ["state"] = HoldOut(step.State),
