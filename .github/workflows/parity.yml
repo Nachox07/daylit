@@ -15,6 +15,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: No generated files committed
+        # A committed file that .gitignore matches is build output or bytecode added by mistake.
+        run: |
+          tracked=$(git ls-files -ci --exclude-standard)
+          if [ -n "$tracked" ]; then echo "::error::committed files that .gitignore matches (git rm --cached them):"; echo "$tracked"; exit 1; fi
       - name: Guard tests
         run: python3 -I scripts/test_parity_guard.py
       - name: Parity guard

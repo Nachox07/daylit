@@ -123,7 +123,9 @@ plain background so they look the same on every macOS version.
 
 `scripts/check.sh` runs the local checks on a Mac: the parity guard and its tests, `swift test`,
 `dotnet test`, and both builds with 0 warnings (a clean Mac compile, so a warning in a cached file is not
-missed). `--quick` skips the builds. It finds `dotnet` on the `PATH` or in `~/.dotnet`. On Windows, run the
+missed). It also fails when a file that `.gitignore` matches is committed (build output, Python bytecode),
+or when the checks themselves rewrite a committed file; the `parity` workflow repeats the first check on every
+pull request. `--quick` skips the builds. It finds `dotnet` on the `PATH` or in `~/.dotnet`. On Windows, run the
 two `dotnet` commands above.
 
 CI on the pull request adds what a Mac cannot check locally: the UI snapshot comparison (baselines come

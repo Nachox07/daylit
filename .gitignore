@@ -10,3 +10,4 @@ config.json
 
 # Python bytecode from scripts/
 __pycache__/
+*.py[co]
