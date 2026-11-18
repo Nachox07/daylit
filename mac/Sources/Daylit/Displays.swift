@@ -196,4 +196,5 @@ struct Mon: Identifiable {
     var haURL: String? = nil         // the Home Assistant address these were seen at (HACacheRule)
     var noControl: String? = nil     // why nothing can set this monitor right now, shown on its row
     var writeFailing = false         // the last automatic write was refused (logged once, retried each tick)
+    var applied: Int? = nil          // DDC: the level the monitor last took (ReadState.appliedAfter)
 }

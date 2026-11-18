@@ -136,6 +136,7 @@ sealed class Mon {
     public DateTime UserTouched;               // last slider / hotkey change; ticks leave the slider alone just after
     public ReadState Reads = ReadState.Unknown; // DDC only: does it report its level (Rules.cs)
     public bool WriteFailing;                  // the last automatic write was refused (logged once, retried each tick)
+    public int? Applied;                       // DDC: the level the monitor last took (ReadRules.AppliedAfter)
     public int? ContrastSet;                    // contrast written since the last display change, wake or reload (ContrastRule)
     /// A DDC monitor that has not reported its level yet can still be tried with the slider.
     public bool Untried => !D.Hdr && Reads == ReadState.Unknown && Cur == null;
@@ -143,7 +144,7 @@ sealed class Mon {
     // Slider and hotkey values: the newest one waiting, and whether a write is under way. One write at a time,
     // always the newest value, so the screen follows a drag as fast as DDC allows.
     readonly object writeLock = new();
-    int? want; bool writing;
+    int? want; bool writing; int started;   // started: writes taken by the worker, so a completion knows a newer one began
 
     public Mon(Display d, MonitorConfig? spec) { D = d; Spec = spec; }
     public string Key => D.Key;
@@ -162,20 +163,30 @@ sealed class Mon {
     public bool Write(int v) => D.Hdr ? Native.SetSdr(D, v) : Ddc.Set(D.Gdi, v);
     /// For sliders and hotkeys: HDR applies at once; DDC is slow, so a value that arrives during a write waits
     /// for it and only the newest waiting value is sent.
-    public void WriteSoon(int v) {
+    public void WriteSoon(int v, Action? reverted = null) {
         var d = D;
         if (d.Hdr) { Native.SetSdr(d, v); return; }
         var ui = SynchronizationContext.Current;   // the answer is recorded on the UI thread
         lock (writeLock) { want = v; if (writing) return; writing = true; }
         Task.Run(() => {
             while (true) {
-                int x;
-                lock (writeLock) { if (want is not int w) { writing = false; return; } x = w; want = null; }
+                int x, seq;
+                lock (writeLock) { if (want is not int w) { writing = false; return; } x = w; want = null; seq = ++started; }
                 bool ok = Ddc.Set(d.Gdi, x);
-                if (ui != null) ui.Post(_ => Record(ok), null); else Record(ok);
+                if (ui != null) ui.Post(_ => Record(ok, x, seq), null); else Record(ok, x, seq);
             }
         });
-        void Record(bool ok) {
+        // A monitor that never reports its level keeps the slider as its only record, so a refused write puts the
+        // slider back where the monitor really is. Not over a newer value still waiting, or a slider still held.
+        void Record(bool ok, int sent, int seq) {
+            bool newer; lock (writeLock) newer = want != null || started != seq;
+            if (Reads.RevertAfterUserWrite(ok, Applied) is int back && !newer && !Dragging) {
+                Cur = back;
+                UserTouched = default;   // the panel shows the model again at once, not 1.5 s after the last change
+                Log.Write($"display: {Label} did not take brightness {sent}%; the slider is back at {back}%");
+                reverted?.Invoke();
+            }
+            Applied = ReadRules.AppliedAfter(ok, sent, Applied);
             var after = Reads.AfterUserWrite(ok);
             if (after == Reads) return;
             Reads = after;

@@ -381,6 +381,15 @@ static class ReadRules {
     public static int? Current(this ReadState s, int? reading, int slider) =>
         reading ?? (s == ReadState.WriteOnly ? slider : null);
     public static bool Usable(this ReadState s) => s != ReadState.Silent;
+
+    /// The level the monitor last took, after a write of `sent` (from the slider, keys or automatic mode).
+    public static int? AppliedAfter(bool ok, int sent, int? applied) => ok ? sent : applied;
+    /// Where the slider goes after a write the user made was refused. A write-only monitor has no reading to
+    /// correct the slider, which is its only record of the level: it goes back to the level the monitor last took
+    /// (`applied`). null: leave the slider (a readable monitor's next reading corrects it; one that never took a
+    /// write becomes silent and its row says so).
+    public static int? RevertAfterUserWrite(this ReadState s, bool ok, int? applied) =>
+        !ok && s.AfterUserWrite(ok) == ReadState.WriteOnly ? applied : null;
 }
 
 /// "Sync monitors": every external monitor keeps the offset it had when sync was switched on, so

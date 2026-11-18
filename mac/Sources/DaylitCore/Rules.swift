@@ -409,6 +409,16 @@ public enum ReadState: Equatable {
     }
     /// Whether the slider and keys may act on it.
     public var usable: Bool { self != .silent }
+
+    /// The level the monitor last took, after a write of `sent` (from the slider, keys or automatic mode).
+    public static func appliedAfter(ok: Bool, sent: Int, applied: Int?) -> Int? { ok ? sent : applied }
+    /// Where the slider goes after a write the user made was refused. A write-only monitor has no reading to
+    /// correct the slider, which is its only record of the level: it goes back to the level the monitor last
+    /// took (`applied`). nil: leave the slider (a readable monitor's next reading corrects it; one that never
+    /// took a write becomes silent and its row says so).
+    public func revertAfterUserWrite(ok: Bool, applied: Int?) -> Int? {
+        !ok && afterUserWrite(ok: ok) == .writeOnly ? applied : nil
+    }
 }
 
 /// "Sync monitors": every external monitor keeps the offset it had when sync was switched on, so

@@ -1,7 +1,7 @@
 {
   "about": "Which macOS and Windows source files do the same job: a map for finding a file's twin, not proof that the two apps behave the same (tests/parity/ is that). scripts/parity-guard.py fails a change that touches one side of a group and none of the other, unless a waiver names the file: 'Parity: <file> — <why>' in a commit message or the pull request. Every .swift file under mac/Sources and every .cs file directly in windows/ must appear here: in a group, or in macOnly / windowsOnly with the reason. A file in several groups is matched when any file on the other side of any of its groups changed too.",
   "groups": [
-    { "name": "brightness rules, sun, Home Assistant template", "mac": ["mac/Sources/DaylitCore/Rules.swift", "mac/Sources/DaylitCore/Sun.swift", "mac/Sources/DaylitCore/HATemplate.swift"], "windows": ["windows/Rules.cs"] },
+    { "name": "brightness rules, sun, Home Assistant template", "mac": ["mac/Sources/DaylitCore/Rules.swift", "mac/Sources/DaylitCore/Sun.swift", "mac/Sources/DaylitCore/HATemplate.swift", "mac/Sources/DaylitCore/HACache.swift"], "windows": ["windows/Rules.cs"] },
     { "name": "config file: model, reading, saving, tuning", "mac": ["mac/Sources/DaylitCore/Config.swift", "mac/Sources/DaylitCore/ConfigEdit.swift", "mac/Sources/DaylitCore/Tuning.swift"], "windows": ["windows/Config.cs"] },
     { "name": "chart and 'how Daylit decides' (pure)", "mac": ["mac/Sources/DaylitCore/Chart.swift"], "windows": ["windows/Chart.cs"] },
     { "name": "light sensor (pure)", "mac": ["mac/Sources/DaylitCore/Light.swift"], "windows": ["windows/Light.cs"] },
