@@ -284,7 +284,10 @@ public func decide(current c0: Int, want: Int, remote: RemoteSet?, state s0: Hol
         // a rounding edge (99, 100, 99…) does not rewrite the monitor every few minutes. A hand-set level or a
         // "set" from Home Assistant is never held back: they are already on the monitor.
         if abs(level - c) == 1 && s.lastSet == c { level = c }
-        if c != level { step.write = level; step.level = level }
+        if c != level { step.write = level }
+        // The slider shows the level Daylit stands by, also when no write was needed: a reading 1 off what was
+        // written (monitor rounding) shows the written level, as on Windows, not the rounded one.
+        if level != c0 { step.level = level }
         applied = level; s.lastSet = level; s.lastTarget = want
     }
     // The badge shows only while the offset changes something (a daytime one rests at night).
