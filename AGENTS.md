@@ -183,16 +183,29 @@ computer right now, or no token stored yet) and which config entry matched which
 
 ### Done means
 
-The skill [`.agents/skills/change-daylit/SKILL.md`](.agents/skills/change-daylit/SKILL.md) is the
-step-by-step version. Humans: [CONTRIBUTING.md](CONTRIBUTING.md).
+Commands and the waiver format: [CONTRIBUTING.md](CONTRIBUTING.md) → *Checks: local and CI*. The order to
+work in: the skill [`.agents/skills/change-daylit/SKILL.md`](.agents/skills/change-daylit/SKILL.md).
 
-- `scripts/check.sh` passes: parity guard, both test suites, both builds with 0 warnings.
-- A behaviour change lands in both apps, in README → *How it works*, and as a case in `tests/parity/`
-  when the logic is in `DaylitCore` / the pure Windows files. Put new decisions there, not in
-  `Model.swift` / `App.cs`, so they can be tested on both sides.
-- `scripts/twins.json` says which file is whose twin. A change that is right on one side only carries a
-  line `Parity: <why>` in the pull request or a commit message; the CI guard fails without it.
-- docs/setup.md, AGENTS.md and the Settings windows match the new behaviour.
+- `scripts/check.sh` passes **and** the pull request's CI is green (CI adds the UI snapshots, the universal
+  Mac build and the Windows build on Windows).
+- A behaviour change lands in both apps, in README → *How it works*, in docs/setup.md when a setting
+  changes, and as a case in `tests/parity/`.
+- A change right on one side only carries a waiver naming the file and the reason
+  (`Parity: <file> — <why>`) in a commit message. `scripts/twins.json` tells you each file's twin. It is
+  a map to read, not proof: the shared cases are the proof.
+
+### Code layout and naming
+
+- **Pure decisions** (no AppKit, WPF, Win32, network or files) go in `mac/Sources/DaylitCore` and the
+  Windows files `Rules.cs`, `Config.cs`, `Suggest.cs`, `Update.cs`, `Push.cs`, `Light.cs`, `Chart.cs`. The
+  app files (`Model.swift` / `App.cs`, displays, keys, windows, Home Assistant calls) only gather inputs,
+  call those decisions and do the I/O. New logic in a controller is untestable on both sides: extract it.
+- Twins share names in each language's style: Swift `lowerCamelCase` functions and properties
+  (`Suggest.applyClearsOffset`), C# `PascalCase` methods, properties and types (`Suggest.ApplyClearsOffset`),
+  `camelCase` private fields with no underscore. Types are `UpperCamelCase` on both sides.
+- Comments say why, in plain sentences, at the top of each file and above a non-obvious rule. Match the
+  surrounding style (`.editorconfig`: 4 spaces in code, 2 in JSON/YAML; C# braces on the same line,
+  short one-line members kept on one line). Don't reformat code you are not changing.
 
 ### Pitfalls we have hit
 

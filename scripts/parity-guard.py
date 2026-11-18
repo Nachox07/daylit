@@ -3,19 +3,28 @@
 
 1. Every .swift file under mac/Sources and every .cs file directly in windows/ is listed in
    scripts/twins.json (in a group, or as Mac-only / Windows-only with a reason), and every listed file exists.
-2. A change to one side of a group comes with a change to the other side, unless the pull request body
-   (env PARITY_PR_BODY) or a commit message in the range has a line "Parity: <reason>".
+2. A change to one side of a group comes with a change to the other side, unless a waiver names that file:
+   a line in a commit message of the range (the usual place) or the pull request body (env PARITY_PR_BODY)
+       Parity: mac/Sources/Daylit/Token.swift — Mac-only, Windows has no keychain
+   Targets are paths, directories ending in "/", or globs, separated by commas or spaces; then " — " (or
+   " - ", " -- ") and the reason. HTML comments are ignored, so a template's example never counts.
+
+The twin map is a navigation aid, not proof of parity: a file in several groups is matched by a change to
+any of its twins (windows/App.cs with mac/Sources/Daylit/Keys.swift passes). The shared cases in
+tests/parity/ are what show that the apps behave the same.
 
   scripts/parity-guard.py --base <ref> [--head <ref>]   # files changed in base...head
   scripts/parity-guard.py --base <ref> --worktree       # ...plus uncommitted and untracked files
 Standard library only.
 """
-import argparse, json, os, re, subprocess, sys
+import argparse, fnmatch, json, os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TWINS = ROOT / "scripts" / "twins.json"
-PARITY_LINE = re.compile(r"^[ \t]*Parity:[ \t]*\S[^\n]{2,}$", re.MULTILINE)
+PARITY_LINE = re.compile(r"^[ \t]*Parity:[ \t]*(.*)$", re.MULTILINE)
+SEPARATOR = re.compile(r"\s+(?:—|–|--|-)\s+")
+PLACEHOLDERS = {"why", "reason", "todo", "tbd", "n/a", "na", "none", "-"}
 
 
 def git(*args):
@@ -83,13 +92,38 @@ def changed_files(base, head, worktree):
     return {f for f in files if f}
 
 
-def parity_reason(base, head):
-    body = os.environ.get("PARITY_PR_BODY", "")
-    m = PARITY_LINE.search(body)
-    if m:
-        return m.group(0).strip()
-    m = PARITY_LINE.search(git("log", "--format=%B", f"{base}..{head}"))
-    return m.group(0).strip() if m else None
+def strip_comments(text):
+    return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+
+
+def parse_waivers(text):
+    """(waivers, problems): each waiver is (targets, reason, line); a malformed Parity line is a problem."""
+    waivers, problems = [], []
+    for m in PARITY_LINE.finditer(strip_comments(text)):
+        line = m.group(0).strip()
+        parts = SEPARATOR.split(m.group(1).strip(), maxsplit=1)
+        if len(parts) != 2:
+            problems.append(f"'{line}': write 'Parity: <files> — <why>' (the files it excuses, then the reason)")
+            continue
+        targets = [t for t in re.split(r"[,\s]+", parts[0]) if t]
+        reason = parts[1].strip()
+        bad_targets = [t for t in targets if "/" not in t and "*" not in t or "<" in t or ">" in t]
+        letters = re.sub(r"[^A-Za-z]", "", reason)
+        if not targets or bad_targets:
+            problems.append(f"'{line}': name the files it excuses as paths, directories ('mac/Sources/Daylit/') or globs")
+        elif "<" in reason or ">" in reason or reason.lower().strip(" .") in PLACEHOLDERS or len(letters) < 6:
+            problems.append(f"'{line}': give the real reason the other app needs no change")
+        else:
+            waivers.append((targets, reason, line))
+    return waivers, problems
+
+
+def excused_by(path, waivers):
+    for targets, reason, line in waivers:
+        for t in targets:
+            if path == t or (t.endswith("/") and path.startswith(t)) or fnmatch.fnmatchcase(path, t):
+                return line
+    return None
 
 
 def main():
@@ -108,17 +142,22 @@ def main():
     for f in sorted(changed):
         others = counterparts.get(f, set()) | before.get(f, set())
         if others and not (others & changed):
-            one_sided.append(f"{f} changed, but none of its twins did: {', '.join(sorted(others))}")
+            one_sided.append((f, f"{f} changed, but none of its twins did: {', '.join(sorted(others))}"))
     if one_sided:
-        reason = parity_reason(a.base, a.head)
-        if reason:
-            print(f"parity: one-sided change accepted ({reason})")
-            for line in one_sided:
-                print(f"  {line}")
-        else:
-            problems += one_sided
-            problems.append("If the other app really needs no change, say why in the pull request or a commit "
-                            "message with a line like 'Parity: Mac-only, Windows has no keychain'.")
+        text = os.environ.get("PARITY_PR_BODY", "") + "\n" + git("log", "--format=%B", f"{a.base}..{a.head}")
+        waivers, waiver_problems = parse_waivers(text)
+        unexcused = []
+        for f, line in one_sided:
+            by = excused_by(f, waivers)
+            if by:
+                print(f"parity: one-sided change accepted: {f} ({by})")
+            else:
+                unexcused.append(line)
+        if unexcused:
+            problems += waiver_problems + unexcused
+            problems.append("If the other app really needs no change, add a line to a commit message (or the pull "
+                            "request) naming the file and why: 'Parity: mac/Sources/Daylit/Token.swift — Mac-only, "
+                            "Windows has no keychain'.")
 
     if problems:
         print("parity guard: FAILED")

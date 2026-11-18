@@ -1,9 +1,13 @@
 #!/bin/bash
-# Every check a change needs before it is pushed, in one command (macOS; the Windows app builds here too).
-#   scripts/check.sh            parity guard, both test suites, both builds (0 warnings)
-#   scripts/check.sh --quick    parity guard and both test suites, no builds
+# The local checks for a change, in one command (macOS; the Windows app builds and tests here too).
+#   scripts/check.sh            parity guard and its tests, both test suites, both builds with 0 warnings
+#   scripts/check.sh --quick    the same without the builds
 #   PARITY_BASE=<ref>           what the parity guard compares against (default origin/main)
-# CI runs the same steps (.github/workflows/build.yml); this is the local copy for people and agents.
+#   PARITY_PR_BODY=<text>       a pull request description to read waivers from (CI passes the real one;
+#                               locally, put waivers in a commit message instead)
+# Not covered here, only in CI on the pull request: the UI snapshot comparison (baselines are rendered on
+# CI's machines), the universal (arm64 + x86_64) Mac build and the Windows build on Windows. A change is
+# done when this passes AND the pull request's checks are green.
 set -u
 cd "$(dirname "$0")/.."
 quick=false
@@ -50,6 +54,7 @@ win_build() {
 }
 
 base=${PARITY_BASE:-origin/main}
+step "parity guard tests" python3 -I scripts/test_parity_guard.py
 step "parity guard" python3 -I scripts/parity-guard.py --base "$base" --worktree
 step "mac tests (swift test)" bash -c 'cd mac && swift test'
 if [ -n "$DOTNET" ]; then
