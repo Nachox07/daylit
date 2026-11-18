@@ -183,7 +183,7 @@ struct TokenView: View {
 
     static func show(_ model: Daylit) {
         StatusController.shared?.close()
-        if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        if let w = window { AppMenu.opened(w); w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let service = model.config.homeAssistant?.tokenName ?? "daylit-home-assistant"
         // The address written in the window when it opened: a token pasted here is approved for that one only. If
         // the config changes while the window is open, the new address still gets the Use / Not now question.

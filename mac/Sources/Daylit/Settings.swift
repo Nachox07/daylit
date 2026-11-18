@@ -733,7 +733,7 @@ struct SettingsView: View {
     static var window: NSWindow?
     static func show(_ model: Daylit) {
         StatusController.shared?.close()
-        if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        if let w = window { AppMenu.opened(w); w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = "Daylit Settings"; w.isReleasedWhenClosed = false
         w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden   // the pane's own title sits there

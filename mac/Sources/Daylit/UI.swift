@@ -472,7 +472,7 @@ struct ShortcutsView: View {
     static var window: NSWindow?
     static func show() {
         StatusController.shared?.close()
-        if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
+        if let w = window { AppMenu.opened(w); w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Daylit — Keyboard Shortcuts"; w.isReleasedWhenClosed = false
         w.contentViewController = NSHostingController(rootView: ShortcutsView(up: HotKeys.shared.up, down: HotKeys.shared.down, theme: HotKeys.shared.theme) { window?.close() })
