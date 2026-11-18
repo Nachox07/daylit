@@ -19,20 +19,20 @@ enum TokenGate {
         if let data = try? JSONEncoder().encode(d) { UserDefaults.standard.set(data, forKey: key) }
     }
 
-    /// The decision for this config; nothing remembered yet remembers it (first start, or an upgrade).
+    /// The decision for this config. Read only: an address is remembered only by `trust` / `trustURLEdit`.
     static func decide(_ ha: HAConfig?) -> TokenDestinationRule.Decision {
         lock.lock(); defer { lock.unlock() }
         let cur = destination(ha)
-        let d = TokenDestinationRule.decide(current: cur, remembered: remembered)
-        if d == .remember, let cur { remember(cur) }
-        return d
+        return TokenDestinationRule.decide(current: cur, remembered: remembered) {
+            cur.map { HAClient.tokenStored($0.tokenName) } ?? false   // presence only, never read
+        }
     }
 
     /// Whether the token may go to this config's address now.
-    static func allows(_ ha: HAConfig?) -> Bool { [.send, .remember].contains(decide(ha)) }
+    static func allows(_ ha: HAConfig?) -> Bool { TokenDestinationRule.allows(decide(ha)) }
 
     /// Approved on this Mac: Use in the panel, or a token pasted in the token window (the destination it showed
-    /// when it opened, not whatever the config holds when Save lands).
+    /// when it opened, written in the window, not whatever the config holds when Save lands).
     static func trust(_ d: TokenDestination?) {
         lock.lock(); defer { lock.unlock() }
         if let d { remember(d) }
@@ -86,7 +86,13 @@ enum HAClient {
     /// the Settings window's Test with a URL typed there.
     static func call(_ ha: HAConfig, _ path: String, _ body: [String: Any]?, timeout: Double = 6, approved: Bool = false) async -> Result<Data, Failure> {
         let name = ha.tokenName ?? "daylit-home-assistant"
-        guard approved || TokenGate.allows(ha) else { return .failure(.notApproved) }
+        if !approved {
+            switch TokenGate.decide(ha) {
+            case .send: break
+            case .noToken: return .failure(.noToken)   // nothing stored when checked: never read one that appears now
+            case .ask, .hold: return .failure(.notApproved)
+            }
+        }
         guard let token = token(name) else { return .failure(.noToken) }
         var base = ha.url ?? ""
         while base.hasSuffix("/") { base.removeLast() }

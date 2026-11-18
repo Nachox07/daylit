@@ -895,8 +895,8 @@ import DaylitCore
         case .homeAssistant:
             guard let ha = config.homeAssistant else { return nil }
             if let cur = TokenGate.destination(ha), TokenGate.decide(ha) == .ask {
-                // Changed underneath since the token was last used here: no call at all until Use. The sun stands in, as in an outage.
-                if tokenHeld != cur { tokenHeld = cur; Log.write(TokenDestinationRule.heldLine(current: cur)) }
+                // Changed underneath since the token was last used here, or never approved here: no call at all until Use. The sun stands in, as in an outage.
+                if tokenHeld != cur { tokenHeld = cur; Log.write(TokenDestinationRule.heldLine(current: cur, remembered: TokenGate.remembered)) }
                 let show = TokenDestinationRule.showQuestion(current: cur, dismissed: tokenDismissed,
                                                              dismissedAt: tokenDismissedAt?.timeIntervalSince1970, now: Date().timeIntervalSince1970)
                 let q = show ? TokenDestinationRule.question(current: cur, remembered: TokenGate.remembered) : nil
