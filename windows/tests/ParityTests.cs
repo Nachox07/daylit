@@ -118,11 +118,12 @@ public class ParityTests {
         if (fn == "offsetExpired") {
             return Rules.OffsetExpired(HoldIn(i["state"]), Num(i["now"]), Num(i["sun"]), UtcDay, place);
         }
-        if (fn != "decide") throw new UnknownFunction(fn);
+        if (fn is not ("decide" or "slider")) throw new UnknownFunction(fn);
         var hold = HoldIn(i["state"]);
         (double, double)? remote = i["remote"] is JsonObject r ? (Num(r["value"]), Num(r["changed"])) : null;
         var step = Rules.Decide(Int(i["current"]), Int(i["want"]), remote, hold, Bool(i["auto"]), Bool(i["here"]), Num(i["sun"]), Bool(i["touched"]),
                                 Bool(i["dragging"]), Num(i["now"]), UtcDay, place);
+        if (fn == "slider") return step.Current;   // what the slider shows after the tick
         return new JsonObject {
             ["write"] = step.Write, ["remote"] = step.Remote, ["applied"] = step.Applied, ["manual"] = step.Manual,
             ["state"] = HoldOut(step.State),

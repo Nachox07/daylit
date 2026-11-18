@@ -125,13 +125,14 @@ final class ParityTests: XCTestCase {
         if fn == "offsetExpired" {
             return offsetExpired(holdState(i["state"]), now: num(i["now"]), sun: num(i["sun"]), dayOf: utcDay, place: place)
         }
-        guard fn == "decide" else { throw UnknownFunction(fn: fn) }
+        guard fn == "decide" || fn == "slider" else { throw UnknownFunction(fn: fn) }
         let state = holdState(i["state"])
         let remote = (i["remote"] as? [String: Any]).map { RemoteSet(value: num($0["value"]), changed: num($0["changed"])) }
         let step = decide(current: int(i["current"]), want: int(i["want"]), remote: remote, state: state, here: bool(i["here"]),
                           auto: bool(i["auto"]), dragging: bool(i["dragging"]), sun: num(i["sun"]), touched: bool(i["touched"]),
                           now: num(i["now"]), dayOf: utcDay, place: place)
         func n<T>(_ v: T?) -> Any { v.map { $0 as Any } ?? NSNull() }
+        if fn == "slider" { return step.level ?? int(i["current"]) }   // what the slider shows after the tick
         return ["write": n(step.write), "remote": n(step.remote), "applied": step.applied, "manual": step.manual,
                 "state": holdJSON(step.state)] as [String: Any]
     }
