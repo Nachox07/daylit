@@ -106,7 +106,7 @@ static class Cli {
             // the numbers in use, defaults included
             tuning = TuningField.All.ToDictionary(f => f.Id, f => TuningField.SetValues(cfg.Tuning).GetValueOrDefault(f.Id, f.Default))
                 .Append(new KeyValuePair<string, double>("theme.room", cfg.Tuned.Room ? 1 : 0)).ToDictionary(),
-            homeAssistant = cfg.Effective == Source.HomeAssistant ? new { url = cfg.HomeAssistant?.Url, tokenName = cfg.TokenName, tokenStored, push = cfg.HomeAssistant?.Push == true } : null,
+            homeAssistant = cfg.Effective == Source.HomeAssistant ? new { url = cfg.HomeAssistant?.Url, tokenName = cfg.TokenName, tokenStored, push = PushRule.IsOn(cfg.HomeAssistant?.Push) } : null,
         };
         return (JsonSerializer.Serialize(result, Out), problems.Count == 0 ? 0 : 1);
     }

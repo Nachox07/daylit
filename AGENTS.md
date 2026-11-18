@@ -109,7 +109,7 @@ Per monitor: `match`, optional `label`, local levels `day` / `blindDown` / `nigh
 optional fixed `contrast` (0–100, DDC monitors only, set at start and after a display change), and with
 Home Assistant a `homeAssistant` block naming three `input_number` entities (a fourth, `nightLights`, is optional), an optional `sensor`
 to publish and an optional `set` helper (change it in HA to set the monitor now, even when idle or Automatic is off). HA-wide entities (`autoSwitch`, `sun`, `cover`, `lights`, and `light`: a daylight sensor such as solar panel power, which needs `location`) are all optional.
-`homeAssistant.push` (experimental, default off) makes Home Assistant tell Daylit when one of those entities changes ([docs/setup.md → Experimental](docs/setup.md#experimental); also Settings → Home Assistant → *Instant updates*); leave it off unless the user asks.
+`homeAssistant.push` (on unless `false`) makes Home Assistant tell Daylit when one of those entities changes ([docs/setup.md → Push updates](docs/setup.md#push-updates-from-home-assistant); also Settings → Home Assistant → *Instant updates*); leave it on unless the user asks, or their proxy does not pass WebSockets.
 
 `checkUpdates` (default on) is the daily check for a newer Daylit release (one request to GitHub's public
 releases list, nothing about the user; [docs/setup.md → Updates](docs/setup.md#updates)); `false` turns it

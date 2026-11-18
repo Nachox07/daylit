@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push): the WebSocket only says
+// Push updates from Home Assistant (config homeAssistant.push, on unless false): the WebSocket only says
 // *when* to tick. The tick still reads everything through the REST template. The app side is
 // mac/Sources/Daylit/PushClient.swift; windows/Push.cs is the twin of this file.
 import Foundation
@@ -161,10 +161,15 @@ extension PushRule {
         return healthy ? max(healthyPollSeconds, normal) : normal
     }
 
+    /// homeAssistant.push: on unless the file says false (no key means on).
+    public static func isOn(_ push: Bool?) -> Bool { push != false }
+    /// What the Settings window writes for its Instant updates switch: nothing when on (the default), unless the
+    /// file already said true; false when off, so it stays off.
+    public static func saved(on: Bool, loaded: Bool?) -> Bool? { on ? (loaded == true ? true : nil) : false }
     /// Whether the socket should be open: push on, Home Assistant the source, Automatic on, not paused on
     /// battery, and a monitor to drive.
     public static func wanted(push: Bool?, source: Source, paused: Bool, auto: Bool, hasMonitors: Bool) -> Bool {
-        push == true && source == .homeAssistant && !paused && auto && hasMonitors
+        isOn(push) && source == .homeAssistant && !paused && auto && hasMonitors
     }
 }
 

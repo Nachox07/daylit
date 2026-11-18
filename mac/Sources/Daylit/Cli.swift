@@ -123,7 +123,7 @@ import DaylitCore
                 notes.append("homeAssistant.url is http:// to a host outside the local network: the token travels unencrypted; use https://")
             }
             result["notes"] = notes
-            result["homeAssistant"] = ["url": (ha.url ?? NSNull()) as Any, "tokenName": name, "tokenStored": stored, "push": ha.push == true]
+            result["homeAssistant"] = ["url": (ha.url ?? NSNull()) as Any, "tokenName": name, "tokenStored": stored, "push": PushRule.isOn(ha.push)]
         } else {
             if cfg.homeAssistant?.push == true {
                 notes.append("homeAssistant.push is on but the source is \(src): push updates only run with Home Assistant")

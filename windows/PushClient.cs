@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push). A WebSocket subscribed to the
+// Push updates from Home Assistant (config homeAssistant.push, on unless false). A WebSocket subscribed to the
 // entities the tick reads; a change only asks for a tick (PushRule in Push.cs decides when). The receive loop runs
 // on the thread pool and hands each message to the UI thread; everything else here runs on the UI thread. The token
 // is sent once in the auth message and never logged or put in a URL. Twin of mac/Sources/Daylit/PushClient.swift.

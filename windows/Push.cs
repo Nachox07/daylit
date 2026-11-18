@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push): the WebSocket only says *when*
+// Push updates from Home Assistant (config homeAssistant.push, on unless false): the WebSocket only says *when*
 // to tick; the tick still reads everything through the REST template. Twin of mac/Sources/DaylitCore/Push.swift.
 // No WPF or Win32 here: the test project compiles this file. The socket itself is PushClient.cs.
 using System.Text.Json;
@@ -146,7 +146,12 @@ static class PushRule {
     /// Whether the socket should be open: push on, Home Assistant the source, Automatic on, not paused on battery,
     /// and a monitor to drive.
     public static bool Wanted(bool? push, Source source, bool paused, bool auto, bool hasMonitors) =>
-        push == true && source == Source.HomeAssistant && !paused && auto && hasMonitors;
+        IsOn(push) && source == Source.HomeAssistant && !paused && auto && hasMonitors;
+    /// homeAssistant.push: on unless the file says false (no key means on).
+    public static bool IsOn(bool? push) => push != false;
+    /// What the Settings window writes for its Instant updates switch: nothing when on (the default), unless the file
+    /// already said true; false when off, so it stays off.
+    public static bool? Saved(bool on, bool? loaded) => on ? (loaded == true ? true : null) : false;
 
     /// The log lines (Log.Write adds the time). None of them can carry the token.
     public static string ConnectedLine(int count) => $"push: connected ({count} entities)";

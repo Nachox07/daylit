@@ -340,19 +340,15 @@ sense (night above day, a dark edge above its light edge) are refused with the k
 
 An idle computer, or one paused on battery, leaves the appearance alone.
 
-## Experimental
+## Push updates from Home Assistant
 
-These work, but have not run long enough to be on by default.
-
-### Push updates from Home Assistant
-
-Turn it on in Settings → Home Assistant → Instant updates (shown only when the source is Home
-Assistant; Save applies it at once), or set `push: true` in the config file:
+On by default when the source is Home Assistant. To turn it off, switch off Settings → Home Assistant →
+Instant updates (Save applies it at once), or set `push: false` in the config file:
 
 ```json
 "homeAssistant": {
   "url": "http://homeassistant.local:8123",
-  "push": true
+  "push": false
 }
 ```
 
@@ -375,7 +371,7 @@ Assistant; Save applies it at once), or set `push: true` in the config file:
 - **Reconnecting.** After a drop it tries again after 2, 5 and 15 seconds, then every minute. It also
   reconnects after sleep and when the network changes, and it sends a ping every minute (every 2
   minutes on battery): no answer within 10 seconds counts as a drop, and so does no reply to the login
-  within 10 seconds of connecting.
+  within 10 seconds of connecting, or no answer to the subscription within 10 seconds of logging in.
 - **A rejected token** stops it until you save a new token (gear menu / tray menu → *Home Assistant
   token…*) or the config changes; the panel says so.
 - **The log** shows `push: connected (N entities)`, `push: lost (<reason>), retrying in Ns` (once, then
@@ -384,14 +380,14 @@ Assistant; Save applies it at once), or set `push: true` in the config file:
   `push: no token stored, waiting for one` and `push: off`. The token is never logged.
 - **Behind a reverse proxy,** the proxy must pass WebSockets on `/api/websocket` (Home Assistant's own
   app needs that too).
-- `--check-config` shows `"push": true` in its `homeAssistant` block.
+- `--check-config` shows `"push": true` (or `false` when turned off) in its `homeAssistant` block.
 
 - **Measuring it.** On battery, compare an hour with `push` on and an hour with it off: Activity
   Monitor's *Energy Impact* for Daylit, or `top -pid <Daylit pid> -stats pid,power` in Terminal (Windows:
   Task Manager's *Power usage* column). To time a change, switch a light or blind in Home Assistant and
   compare the time with the next `auto:` line in the log.
 
-To stop it, turn the switch off, or remove the key or set it to `false`.
+To stop it, turn the switch off or set the key to `false`. Without the key, or with `true`, it is on.
 
 ## Updates
 

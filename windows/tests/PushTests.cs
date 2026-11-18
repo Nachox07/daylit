@@ -344,6 +344,22 @@ public class PushTimingTests {
     }
 
     [Fact]
+    public void PushIsOnUnlessTheFileSaysFalse() {
+        Assert.True(PushRule.IsOn(null));
+        Assert.True(PushRule.IsOn(true));
+        Assert.False(PushRule.IsOn(false));
+    }
+
+    [Fact]
+    public void SettingsWritesNothingForOnAndFalseForOff() {
+        Assert.Null(PushRule.Saved(true, null));
+        Assert.Null(PushRule.Saved(true, false));     // turned back on: back to the default
+        Assert.Equal(true, PushRule.Saved(true, true));   // an explicit true in the file stays
+        Assert.Equal(false, PushRule.Saved(false, null));
+        Assert.Equal(false, PushRule.Saved(false, true));
+    }
+
+    [Fact]
     public void NoAuthReplyWithinTenSecondsOfConnectingIsLost() {
         Assert.Null(PushRule.SetupLost(9.9, false, false));
         Assert.Equal("no auth reply", PushRule.SetupLost(10, false, false));
@@ -390,7 +406,7 @@ public class PushTimingTests {
     [Fact]
     public void TheSocketIsOpenOnlyWhenEverythingAllowsIt() {
         Assert.True(PushRule.Wanted(true, Source.HomeAssistant, false, true, true));
-        Assert.False(PushRule.Wanted(null, Source.HomeAssistant, false, true, true));
+        Assert.True(PushRule.Wanted(null, Source.HomeAssistant, false, true, true));   // no key: on
         Assert.False(PushRule.Wanted(false, Source.HomeAssistant, false, true, true));
         Assert.False(PushRule.Wanted(true, Source.Sun, false, true, true));
         Assert.False(PushRule.Wanted(true, Source.HomeAssistant, true, true, true));
@@ -417,7 +433,7 @@ public class PushSettingsEditTests {
     }
 
     [Fact]
-    public void TurningPushOffRemovesTheKey() => Assert.Null(Ha(Edit(null), WithPush(""", "push": true"""))["push"]);
+    public void ANullEditRemovesTheKeyWhichMeansOn() => Assert.Null(Ha(Edit(null), WithPush(""", "push": true"""))["push"]);
 
     [Fact]
     public void AnExplicitFalseStaysFalse() => Assert.False((bool)Ha(Edit(false), WithPush(""", "push": false"""))["push"]!);

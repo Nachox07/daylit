@@ -81,7 +81,7 @@ sealed partial class Controller {
     // network at sign-in or after wake does not jump the monitors to the fallback levels.
     DateTime? haDownSince;
     DateTime? haLoggedAt;   // when the current outage was last written to the log (HaErrorRule.ShouldLog)
-    /// Push updates from Home Assistant (experimental): says when to tick. Null in snapshots.
+    /// Push updates from Home Assistant (on unless homeAssistant.push is false): says when to tick. Null in snapshots.
     PushClient? push;
     DateTime lastTick = DateTime.MinValue;   // UTC, when the last tick started (push: the daylight sensor's limit)
 

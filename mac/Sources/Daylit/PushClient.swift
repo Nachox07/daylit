@@ -1,4 +1,4 @@
-// Push updates from Home Assistant (experimental, config homeAssistant.push). A WebSocket subscribed to the
+// Push updates from Home Assistant (config homeAssistant.push, on unless false). A WebSocket subscribed to the
 // entities the tick reads; a change only asks for a tick (DaylitCore.PushRule decides when). The token is
 // read from the keychain, sent once in the auth message, and never logged or put in a URL.
 import Foundation
