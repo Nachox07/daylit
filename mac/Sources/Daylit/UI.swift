@@ -325,15 +325,22 @@ struct GlideSlider: View {
 
     var body: some View {
         Slider(value: Binding(get: { shown ?? level }, set: { glide?.cancel(); shown = $0; set($0) }), in: 0...100,
-               onEditingChanged: { held = $0; if $0 { glide?.cancel() }; editing($0) })
+               onEditingChanged: { down in
+                   held = down
+                   glide?.cancel()
+                   if !down { shown = nil }   // let go: show the level as it stands now
+                   editing(down)
+               })
             .onChange(of: level) { old, new in move(from: shown ?? old, to: new) }
             .onDisappear { glide?.cancel() }
     }
 
     private func move(from: Double, to: Double) {
+        // In the hand: the thumb stays where the hand put it, whatever arrives from outside.
+        if held { return }
         glide?.cancel()
-        // In the hand, or after the hand's own change (the level arrives rounded): follow, never glide.
-        guard !held, Glide.motion != nil, abs(to - from) >= 1 else { shown = to; return }
+        // After the hand's own change (the level arrives rounded), or with Reduce Motion: no glide.
+        guard Glide.motion != nil, abs(to - from) >= 1 else { shown = to; return }
         glide = Task { @MainActor in
             let start = Date()
             while !Task.isCancelled {

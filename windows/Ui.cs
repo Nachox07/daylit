@@ -467,8 +467,8 @@ static class Glide {
         var target = (double)s.GetValue(TargetProperty);
         s.SetValue(TargetProperty, v);
         if (s.Value == v && !(bool)s.GetValue(RunningProperty)) return;
-        if ((bool)s.GetValue(RunningProperty) && target == v) return;   // already on its way there
         if (!animate || double.IsNaN(target)) { Stop(s); Copy(s, v); return; }
+        if ((bool)s.GetValue(RunningProperty) && target == v) return;   // already on its way there
         var a = new DoubleAnimation(s.Value, v, Duration) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
         a.Completed += (_, _) => s.SetValue(RunningProperty, false);
         s.SetValue(RunningProperty, true);
