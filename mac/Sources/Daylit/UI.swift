@@ -230,11 +230,12 @@ struct Panel: View {
                     .help("Manual only: automatic mode leaves the built-in screen to macOS")
                 Spacer()
                 Text("\(Int(b.level))%").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: b.level)).animation(Glide.motion, value: b.level)
             }
             HStack(spacing: 8) {
                 Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
-                Slider(value: Binding(get: { m.builtIn?.level ?? 0 }, set: { m.setBuiltIn($0.rounded()) }),
-                       in: 0...100, onEditingChanged: { m.draggingBuiltIn = $0 })
+                GlideSlider(level: m.builtIn?.level ?? 0, set: { m.setBuiltIn($0.rounded()) },
+                            editing: { m.draggingBuiltIn = $0 })
                     .controlSize(.small)
                     .accessibilityLabel("\(b.name) brightness")
                 Image(systemName: "sun.max.fill").font(.system(size: 13)).foregroundStyle(.secondary).accessibilityHidden(true)
@@ -282,12 +283,12 @@ struct Panel: View {
                 Spacer()
                 if m.sync && m.mons.count > 2 { memberButton(i, linked: linked) }
                 Text(usable && !unknown ? "\(Int(mon.level))%" : "–").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: mon.level)).animation(Glide.motion, value: mon.level)
             }
             HStack(spacing: 8) {
                 Image(systemName: "sun.min.fill").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
-                Slider(value: Binding(get: { m.mons.indices.contains(i) ? m.mons[i].level : 0 },
-                                      set: { m.userSet(i, $0.rounded()) }),
-                       in: 0...100, onEditingChanged: { m.dragChanged(i, $0) })
+                GlideSlider(level: m.mons.indices.contains(i) ? m.mons[i].level : 0,
+                            set: { m.userSet(i, $0.rounded()) }, editing: { m.dragChanged(i, $0) })
                     .controlSize(.small)
                     .help(keysHint)
                     .accessibilityLabel("\(mon.label) brightness")
@@ -302,6 +303,53 @@ struct Panel: View {
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(linked ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1))
+    }
+}
+
+/// How a level set from outside the slider (keys, hotkeys, automatic) moves on screen: the panel and the indicator
+/// glide the same way. Nil with Reduce Motion on: the level jumps.
+@MainActor enum Glide {
+    static let seconds = 0.18
+    static var motion: Animation? { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: seconds) }
+}
+
+/// A panel slider. A level changed from outside glides there like the indicator's bar (a new change mid-way retargets
+/// it); the hand moves it at once. The system slider does not animate its value, so the shown value is stepped here.
+struct GlideSlider: View {
+    let level: Double
+    let set: (Double) -> Void
+    let editing: (Bool) -> Void
+    @State private var shown: Double?
+    @State private var held = false
+    @State private var glide: Task<Void, Never>?
+
+    var body: some View {
+        Slider(value: Binding(get: { shown ?? level }, set: { glide?.cancel(); shown = $0; set($0) }), in: 0...100,
+               onEditingChanged: { down in
+                   held = down
+                   glide?.cancel()
+                   if !down { shown = nil }   // let go: show the level as it stands now
+                   editing(down)
+               })
+            .onChange(of: level) { old, new in move(from: shown ?? old, to: new) }
+            .onDisappear { glide?.cancel() }
+    }
+
+    private func move(from: Double, to: Double) {
+        // In the hand: the thumb stays where the hand put it, whatever arrives from outside.
+        if held { return }
+        glide?.cancel()
+        // After the hand's own change (the level arrives rounded), or with Reduce Motion: no glide.
+        guard Glide.motion != nil, abs(to - from) >= 1 else { shown = to; return }
+        glide = Task { @MainActor in
+            let start = Date()
+            while !Task.isCancelled {
+                let t = min(1, Date().timeIntervalSince(start) / Glide.seconds)
+                shown = from + (to - from) * (1 - (1 - t) * (1 - t))   // ease out, as the indicator
+                if t >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
     }
 }
 
@@ -358,7 +406,7 @@ struct HUDLive: View {
     @ObservedObject var state: HUDState
     var body: some View {
         HUDView(label: state.label, value: state.value)
-            .animation(state.animate ? .easeOut(duration: 0.18) : nil, value: state.value)
+            .animation(state.animate ? .easeOut(duration: Glide.seconds) : nil, value: state.value)
     }
 }
 

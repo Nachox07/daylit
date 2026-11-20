@@ -328,10 +328,11 @@ sealed class Flyout : Window {
             System.Windows.Automation.AutomationProperties.SetName(s, $"{m.Label} brightness");   // screen readers and agents
             s.ToolTipOpening += (_, _) => s.ToolTip = KeysHint;
             s.ToolTip = KeysHint;
-            s.GotMouseCapture += (_, _) => m.Dragging = true;
+            s.GotMouseCapture += (_, _) => { Glide.Stop(s); m.Dragging = true; };
             s.LostMouseCapture += (_, _) => m.Dragging = false;
             s.ValueChanged += (_, e) => {
-                if (syncing) return;
+                if (syncing || Glide.Moving) return;
+                Glide.Stop(s);   // the hand (mouse or arrow keys) wins over a glide
                 int v = (int)Math.Round(e.NewValue);
                 pct.Text = v + "%";
                 app.UserSet(m, v);
@@ -364,9 +365,9 @@ sealed class Flyout : Window {
                           : m.Reads == ReadState.WriteOnly ? "no readback" : "";
                 if (m.Cur is int c) {
                     bool held = s.IsMouseCaptureWithin || (DateTime.UtcNow - m.UserTouched).TotalSeconds < 1.5;
-                    if (!held) s.Value = Math.Clamp(c, 0, 100);
+                    if (!held) Glide.To(s, Math.Clamp(c, 0, 100), animate: IsVisible && SystemParameters.ClientAreaAnimation);
                     pct.Text = (held ? (int)Math.Round(s.Value) : c) + "%";
-                } else { pct.Text = "–"; if (m.Untried && !s.IsMouseCaptureWithin) s.Value = 50; }
+                } else { pct.Text = "–"; if (m.Untried && !s.IsMouseCaptureWithin) Glide.To(s, 50, animate: false); }
             }
             StyleLink();
             bool automatic = app.Source != Source.Off;
@@ -446,6 +447,50 @@ sealed class Flyout : Window {
 /// The brightness indicator shown by the hotkeys, centred near the bottom of that monitor. Like Windows' own: it
 /// fades in, the bar glides to each new level (a held key retargets the glide mid-way) and it fades out a moment
 /// after the last press. With animations off in Windows (Settings → Accessibility → Visual effects) the bar jumps.
+/// How a panel slider moves to a level set from outside it (keys, hotkeys, automatic): it glides like the indicator's
+/// bar, and a new level mid-way retargets the glide. Its first level, a hidden panel or animations off: it jumps.
+/// The glide runs on an attached value that copies itself into the slider, so the slider's own value is never held
+/// by an animation and the hand can always take it.
+static class Glide {
+    public static readonly TimeSpan Duration = TimeSpan.FromMilliseconds(180);
+    static readonly DependencyProperty ShownProperty = DependencyProperty.RegisterAttached("Shown", typeof(double), typeof(Glide),
+        new PropertyMetadata(0.0, (d, e) => Copy((Slider)d, (double)e.NewValue)));
+    static readonly DependencyProperty TargetProperty = DependencyProperty.RegisterAttached("Target", typeof(double), typeof(Glide),
+        new PropertyMetadata(double.NaN));
+    static readonly DependencyProperty RunningProperty = DependencyProperty.RegisterAttached("Running", typeof(bool), typeof(Glide),
+        new PropertyMetadata(false));
+
+    /// True while a glide writes the slider: its ValueChanged is not the user's.
+    public static bool Moving { get; private set; }
+
+    public static void To(Slider s, double v, bool animate) {
+        var target = (double)s.GetValue(TargetProperty);
+        s.SetValue(TargetProperty, v);
+        if (s.Value == v && !(bool)s.GetValue(RunningProperty)) return;
+        if (!animate || double.IsNaN(target)) { Stop(s); Copy(s, v); return; }
+        if ((bool)s.GetValue(RunningProperty) && target == v) return;   // already on its way there
+        var a = new DoubleAnimation(s.Value, v, Duration) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
+        a.Completed += (_, _) => s.SetValue(RunningProperty, false);
+        s.SetValue(RunningProperty, true);
+        s.BeginAnimation(ShownProperty, a);
+    }
+
+    /// Ends a glide where it is, without a jump.
+    public static void Stop(Slider s) {
+        if (!(bool)s.GetValue(RunningProperty) && !s.HasAnimatedProperties) return;
+        s.SetValue(RunningProperty, false);
+        var now = s.Value;
+        s.SetValue(ShownProperty, now);
+        s.BeginAnimation(ShownProperty, null);
+        Copy(s, now);
+    }
+
+    static void Copy(Slider s, double v) {
+        Moving = true;
+        try { s.Value = v; } finally { Moving = false; }
+    }
+}
+
 sealed class Osd : Window {
     /// The level the bar shows right now, animated towards the real one.
     static readonly DependencyProperty ShownProperty = DependencyProperty.Register(nameof(Shown), typeof(double), typeof(Osd),
@@ -515,7 +560,7 @@ sealed class Osd : Window {
         label.Text = name; pct.Text = v + "%";
         if (animate) {
             // No From: a key held down starts each glide where the last one is, so it never jumps back.
-            BeginAnimation(ShownProperty, new DoubleAnimation(v, TimeSpan.FromMilliseconds(180)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
+            BeginAnimation(ShownProperty, new DoubleAnimation(v, Glide.Duration) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
         } else {
             BeginAnimation(ShownProperty, null);
             Shown = v;
